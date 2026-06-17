@@ -9,7 +9,6 @@
 
 受信と公開は**同一ポート**に同居（HTTP は `/mcp`、WebSocket upgrade は `/ws`）。
 
-> 親文書: `../docs/visual-feedback-mcp-bridge-handoff.md`（§3.1 / §3.2 / §4.2 / §4.4 / §4.5）。
 > 拡張側の WS push は無効化も可能で、その場合は従来どおり `chrome.downloads` に保存される。
 
 ## 何をするか
@@ -30,7 +29,7 @@ MVP は `chrome.downloads` の制約で、どのページのキャプチャも 1
 受け取り、今のプロジェクトのものだけに絞れる。
 
 ```
-get_latest_visual_feedback({ urlContains: "isca.jp" })   # その URL を含む最新だけ
+get_latest_visual_feedback({ urlContains: "example.com" })   # その URL を含む最新だけ
 list_visual_feedback({ titleContains: "ダッシュボード" })
 ```
 

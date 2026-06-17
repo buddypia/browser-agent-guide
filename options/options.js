@@ -268,7 +268,7 @@ function exportSettings() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'ai-advisor-settings.json';
+  a.download = 'browser-agent-guide-settings.json';
   a.click();
   URL.revokeObjectURL(url);
 }

@@ -1,7 +1,6 @@
 # 視覚フィードバック MVP（Phase 0）の使い方と検証手順
 
-> 親文書: `docs/visual-feedback-mcp-bridge-handoff.md`（§5 Phase 0 / §8）。
-> この文書は Phase 0（データ／MCP なし）の実装をどう動かし、handoff の仮説 (A)(B) を
+> この文書は Phase 0（データ／MCP なし）の実装をどう動かし、Phase 0 の前提を
 > どう目視確認するかをまとめる。
 
 ## 何が入ったか（Phase 0）
