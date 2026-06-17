@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<!--
+  memo-connector-ui-proposal.html
+  Browser Agent Guide Page Agent — お描き × AIメモ の UI 提案
+  目的: (1) AIメモがコンテンツと一緒にスクロール追従する  (2) お描き⇄AIメモを引き出し線で結ぶ
+        (3) 色 + 番号 + 線の三重対応で「どの指示がどこを指すか」をAIビジョンが認識しやすくする
+  単一ファイル / 依存なし / オフライン動作。色はすべてセマンティックトークン経由。
+-->
+<html lang="ja" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>お描き × AIメモ — スクロール追従と引き出し線のUI提案</title>
+<style>
+/* ============================ tokens ============================ */
+:root{
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px; --sp-7:48px;
+  --radius-sm:8px; --radius-md:12px; --radius-lg:18px; --radius-pill:999px;
+  --font-sans: system-ui,-apple-system,'Segoe UI',Roboto,'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;
+  --font-mono:'SF Mono','Cascadia Code',ui-monospace,monospace;
+
+  --bg-page:#f4f1ec; --bg-surface:#ffffff; --bg-elev:#fbfaf7; --bg-sunken:#efece6;
+  --text-primary:#23201b; --text-secondary:#5c564d; --text-muted:#8d8579;
+  --border:#e3ddd2; --border-strong:#cfc7b8;
+  --accent:#b5642a; --accent-soft:#f3e3d4; --on-accent:#ffffff;
+  --good:#3f7d4e; --good-soft:#e2efe3;
+  --shadow-sm:0 1px 2px rgba(40,33,22,.06),0 1px 3px rgba(40,33,22,.08);
+  --shadow-md:0 4px 14px rgba(40,33,22,.10),0 2px 4px rgba(40,33,22,.06);
+  --shadow-lg:0 18px 48px rgba(40,33,22,.18);
+
+  /* ペア配色: 図形・番号・引き出し線・メモを束ねる識別色 */
+  --pair-1:#c2410c; --pair-1-soft:#fbe4d6;
+  --pair-2:#1d6fb8; --pair-2-soft:#d8e9f6;
+  --pair-3:#7a3aa8; --pair-3-soft:#ece0f6;
+}
+[data-theme="dark"]{
+  --bg-page:#16140f; --bg-surface:#211e18; --bg-elev:#28241d; --bg-sunken:#100e0a;
+  --text-primary:#f0ebe1; --text-secondary:#bdb5a6; --text-muted:#8a8375;
+  --border:#39342b; --border-strong:#4a4439;
+  --accent:#e0894f; --accent-soft:#3a2c1f; --on-accent:#1a140d;
+  --good:#7bbf86; --good-soft:#22301f;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4); --shadow-md:0 6px 18px rgba(0,0,0,.45);
+  --shadow-lg:0 22px 54px rgba(0,0,0,.6);
+  --pair-1:#f2733c; --pair-1-soft:#3a241a;
+  --pair-2:#56a8e6; --pair-2-soft:#16283a;
+  --pair-3:#b783e0; --pair-3-soft:#2a1d38;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:var(--font-sans);background:var(--bg-page);color:var(--text-primary);line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,p{margin:0}
+.container{max-width:1180px;margin:0 auto;padding:0 var(--sp-5)}
+
+/* ============================ page header ============================ */
+.page-header{padding:var(--sp-7) 0 var(--sp-5);position:relative}
+.eyebrow{font:600 12px/1.4 var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:var(--sp-3)}
+.page-header h1{font-size:30px;font-weight:680;letter-spacing:-.01em;line-height:1.18;max-width:22ch}
+.page-header .lede{margin-top:var(--sp-3);color:var(--text-secondary);font-size:16px;max-width:62ch}
+.topbtn{position:absolute;top:var(--sp-6);right:var(--sp-5);display:flex;gap:var(--sp-2)}
+
+/* ============================ buttons / controls ============================ */
+.btn{font:600 13px var(--font-sans);border:1px solid var(--border-strong);background:var(--bg-surface);color:var(--text-primary);
+  padding:7px 13px;border-radius:var(--radius-pill);cursor:pointer;transition:background var(--dur,.15s),border-color .15s,transform .1s}
+.btn:hover{background:var(--bg-elev)}
+.btn:active{transform:translateY(1px)}
+.seg{display:inline-flex;background:var(--bg-sunken);border:1px solid var(--border);border-radius:var(--radius-pill);padding:3px}
+.seg button{font:600 12.5px var(--font-sans);border:0;background:transparent;color:var(--text-secondary);padding:6px 13px;border-radius:var(--radius-pill);cursor:pointer;white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--bg-surface);color:var(--text-primary);box-shadow:var(--shadow-sm)}
+.toolbar{display:flex;flex-wrap:wrap;gap:var(--sp-4);align-items:center;margin:var(--sp-5) 0 var(--sp-4)}
+.toolbar .field{display:flex;flex-direction:column;gap:5px}
+.toolbar .field > span{font:600 11px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)}
+.hint{margin-left:auto;font-size:12.5px;color:var(--text-muted);display:flex;align-items:center;gap:6px}
+.hint .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pulse 1.6s var(--ease,ease) infinite}
+@keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
+
+/* ============================ browser frame ============================ */
+.frame{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);overflow:hidden}
+.chrome{display:flex;align-items:center;gap:var(--sp-3);padding:10px var(--sp-4);background:var(--bg-elev);border-bottom:1px solid var(--border)}
+.lights{display:flex;gap:7px}
+.lights i{width:11px;height:11px;border-radius:50%;background:var(--border-strong)}
+.urlbar{flex:1;background:var(--bg-sunken);border:1px solid var(--border);border-radius:var(--radius-pill);padding:5px 14px;font:500 12.5px var(--font-mono);color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ext-chip{display:inline-flex;align-items:center;gap:6px;font:700 11.5px var(--font-sans);color:var(--on-accent);background:var(--accent);padding:5px 11px;border-radius:var(--radius-pill)}
+
+/* ============================ scroll viewport ============================ */
+.viewport{position:relative;height:560px;overflow:auto;background:var(--bg-surface);scroll-behavior:smooth}
+.viewport::-webkit-scrollbar{width:12px}
+.viewport::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:8px;border:3px solid var(--bg-surface)}
+.canvas{position:relative;width:760px;min-width:760px;height:1360px;margin:0 auto}
+
+/* --- mock page content (お描きの対象になるWebページ) --- */
+.page{position:absolute;inset:0;padding:var(--sp-6) var(--sp-6);transition:filter .3s var(--ease,ease),opacity .3s}
+.page .mast{display:flex;justify-content:space-between;align-items:center;color:var(--text-muted);font-weight:700;font-size:13px;margin-bottom:var(--sp-6)}
+.page .h-hero{font-size:30px;font-weight:760;letter-spacing:-.01em;line-height:1.25;max-width:15ch}
+.page .sub{color:var(--text-secondary);margin-top:var(--sp-3);max-width:40ch}
+.page .cta{display:inline-block;margin-top:var(--sp-5);background:var(--text-primary);color:var(--bg-surface);font-weight:700;font-size:15px;padding:12px 22px;border-radius:var(--radius-md)}
+.page .para{color:var(--text-secondary);margin-top:var(--sp-6);max-width:52ch;font-size:14.5px}
+.page .pcard{margin-top:var(--sp-5);width:300px;border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--sp-5);background:var(--bg-elev)}
+.page .pcard .plan{font-weight:700;color:var(--text-muted);font-size:13px}
+.page .pcard .free{font-size:34px;font-weight:800;margin-top:6px}
+.page .pcard .paid{font-size:18px;font-weight:700;color:var(--accent);margin-top:var(--sp-3)}
+.page .pcard ul{margin:var(--sp-3) 0 0;padding-left:18px;color:var(--text-secondary);font-size:13px}
+.page .h-sec{font-size:22px;font-weight:720;margin-top:var(--sp-7)}
+.page .faq{border-top:1px solid var(--border);padding:var(--sp-4) 0;color:var(--text-secondary);font-size:14px;max-width:52ch}
+.page .foot{margin-top:var(--sp-6);color:var(--text-muted);font-size:12px;border-top:1px solid var(--border);padding-top:var(--sp-4)}
+
+/* --- AIビジョン表示: 送信スクショで指示の対応だけを際立たせる --- */
+.canvas.vision .page{filter:grayscale(.85) contrast(.92);opacity:.5}
+.canvas.vision .layer{filter:drop-shadow(0 0 1px var(--bg-surface))}
+.canvas.vision .memo{box-shadow:0 0 0 2px var(--bg-surface),var(--shadow-md)}
+.vision-tag{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:6;display:none;
+  background:var(--text-primary);color:var(--bg-surface);font:600 12px var(--font-sans);padding:7px 14px;border-radius:var(--radius-pill);box-shadow:var(--shadow-md);white-space:nowrap}
+.canvas.vision .vision-tag{display:block}
+
+/* --- お描き + 引き出し線レイヤ (SVG) --- */
+.layer{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3;overflow:visible}
+.draw-shape{fill:none;stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round;
+  transition:opacity .2s,stroke-width .2s;filter:drop-shadow(0 1px 1px rgba(0,0,0,.15))}
+.connector{stroke-width:2.4;stroke-dasharray:2 7;stroke-linecap:round;opacity:.92;transition:opacity .2s,stroke-width .2s}
+.pair-1 .draw-shape,.pair-1 .connector{stroke:var(--pair-1)}
+.pair-2 .draw-shape,.pair-2 .connector{stroke:var(--pair-2)}
+.pair-3 .draw-shape,.pair-3 .connector{stroke:var(--pair-3)}
+/* hoverで対象ペアを強調・他を減光 */
+.canvas.focusing .pair:not(.is-active){opacity:.28}
+.canvas.focusing .memo:not(.is-active){opacity:.32}
+.pair.is-active .draw-shape{stroke-width:5}
+.pair.is-active .connector{stroke-width:3.4;stroke-dasharray:none;opacity:1}
+
+/* --- 番号バッジ (図形の角) --- */
+.badge{position:absolute;z-index:4;width:24px;height:24px;border-radius:50%;color:#fff;font:800 13px/24px var(--font-sans);text-align:center;
+  box-shadow:var(--shadow-sm);transform:translate(-50%,-50%);transition:transform .15s}
+.badge.b1{background:var(--pair-1)} .badge.b2{background:var(--pair-2)} .badge.b3{background:var(--pair-3)}
+.pair-row.is-active .badge{transform:translate(-50%,-50%) scale(1.18)}
+
+/* --- AIメモカード (既存 .bag-memo に対応) --- */
+.memo{position:absolute;z-index:5;width:228px;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:var(--radius-md);
+  box-shadow:var(--shadow-md);overflow:hidden;transition:opacity .2s,box-shadow .2s,transform .12s;cursor:default}
+.memo.is-active{box-shadow:var(--shadow-lg)}
+.memo .m-head{display:flex;align-items:center;gap:7px;padding:8px 10px;border-bottom:1px solid var(--border);background:var(--bg-elev)}
+.memo .m-num{width:18px;height:18px;border-radius:50%;color:#fff;font:800 11px/18px var(--font-sans);text-align:center;flex:none}
+.memo.p1 .m-num{background:var(--pair-1)} .memo.p2 .m-num{background:var(--pair-2)} .memo.p3 .m-num{background:var(--pair-3)}
+.memo .m-tag{font:700 11.5px var(--font-sans);color:var(--text-secondary);letter-spacing:.02em}
+.memo .m-collapse{margin-left:auto;border:0;background:transparent;color:var(--text-muted);font-size:16px;line-height:1;cursor:pointer;padding:2px 4px;border-radius:6px}
+.memo .m-collapse:hover{background:var(--bg-sunken)}
+.memo .m-text{width:100%;border:0;resize:none;background:transparent;color:var(--text-primary);font:500 13px/1.5 var(--font-sans);padding:9px 11px;display:block}
+.memo .m-text:focus{outline:none;background:var(--accent-soft)}
+.memo .m-foot{display:flex;align-items:center;gap:8px;padding:7px 10px;border-top:1px solid var(--border);background:var(--bg-elev)}
+.memo .m-toggle{display:flex;align-items:center;gap:6px;font:600 11.5px var(--font-sans);color:var(--text-secondary);cursor:pointer}
+.memo .m-toggle input{accent-color:var(--good);width:14px;height:14px}
+.memo .m-del{margin-left:auto;border:0;background:transparent;cursor:pointer;font-size:13px;opacity:.6;padding:3px 5px;border-radius:6px}
+.memo .m-del:hover{opacity:1;background:var(--pair-1-soft)}
+.memo.off{opacity:.6}
+.memo.off .m-foot{background:repeating-linear-gradient(135deg,var(--bg-elev),var(--bg-elev) 6px,var(--bg-sunken) 6px,var(--bg-sunken) 12px)}
+/* 畳んだバッジ */
+.memo.collapsed{width:auto}
+.memo.collapsed .m-text,.memo.collapsed .m-foot{display:none}
+.memo.collapsed .m-head{border-bottom:0}
+
+/* ============================ rationale below ============================ */
+.section{margin-top:var(--sp-7)}
+.section-title{font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:var(--sp-4)}
+.grid{display:grid;gap:var(--sp-4)}
+.cols-3{grid-template-columns:repeat(3,1fr)}
+.cols-2{grid-template-columns:1fr 1fr}
+.card{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--sp-5);box-shadow:var(--shadow-sm)}
+.card h3{font-size:15.5px;font-weight:700;display:flex;align-items:center;gap:9px;margin-bottom:var(--sp-3)}
+.card h3 .ic{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);flex:none}
+.card p{font-size:13.5px;color:var(--text-secondary)}
+.card code{font:600 12px var(--font-mono);background:var(--bg-sunken);color:var(--text-primary);padding:1px 6px;border-radius:5px}
+
+/* comparison */
+.cmp{width:100%;border-collapse:separate;border-spacing:0;font-size:13.5px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden}
+.cmp th,.cmp td{padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top}
+.cmp thead th{background:var(--bg-elev);font-weight:700;font-size:12.5px}
+.cmp tbody th{font-weight:600;color:var(--text-secondary);width:130px}
+.cmp tr:last-child td,.cmp tr:last-child th{border-bottom:0}
+.cmp .rec{background:var(--good-soft)}
+.tag-rec{display:inline-block;font:700 10.5px var(--font-mono);letter-spacing:.05em;color:var(--good);border:1px solid var(--good);border-radius:var(--radius-pill);padding:1px 7px;margin-left:6px;vertical-align:middle}
+.pro{color:var(--good)} .con{color:var(--accent)}
+
+.callout{display:flex;gap:var(--sp-4);background:var(--accent-soft);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:var(--radius-md);padding:var(--sp-4) var(--sp-5)}
+.callout .ic{font-size:20px;flex:none}
+.callout p{font-size:13.5px;color:var(--text-primary)}
+.callout b{color:var(--accent)}
+
+.page-footer{margin:var(--sp-7) 0 var(--sp-6);color:var(--text-muted);font-size:12.5px;border-top:1px solid var(--border);padding-top:var(--sp-4)}
+
+@media(max-width:820px){
+  .cols-3,.cols-2{grid-template-columns:1fr}
+  .page-header h1{font-size:24px}
+}
+</style>
+</head>
+<body>
+<header class="page-header container">
+  <div class="topbtn">
+    <button class="btn" id="themeBtn" aria-label="テーマ切替">◐ テーマ</button>
+  </div>
+  <p class="eyebrow">Browser Agent Guide Page Agent · Chrome 拡張</p>
+  <h1>お描き × AIメモ：スクロール追従と引き出し線のUI</h1>
+  <p class="lede">お描きした図形のとなりにAIメモを残し、両者を<b>引き出し線</b>で結ぶ。コンテンツと<b>一緒にスクロール追従</b>し、<b>色・番号・線の三重の対応づけ</b>で「どの指示がどこを指すか」をAIビジョンが一目で読み取れる状態にします。</p>
+</header>
+
+<div class="container">
+  <!-- ツールバー -->
+  <div class="toolbar">
+    <div class="field">
+      <span>メモの配置</span>
+      <div class="seg" id="modeSeg" role="group" aria-label="メモの配置">
+        <button data-mode="gutter" aria-pressed="true">右ガター（推奨）</button>
+        <button data-mode="beside" aria-pressed="false">図形のとなり</button>
+      </div>
+    </div>
+    <div class="field">
+      <span>表示</span>
+      <div class="seg" id="visionSeg" role="group" aria-label="表示モード">
+        <button data-vision="off" aria-pressed="true">通常</button>
+        <button data-vision="on" aria-pressed="false">AIビジョン表示</button>
+      </div>
+    </div>
+    <p class="hint"><span class="dot"></span>枠の中を↓スクロール／メモにホバーで対応を確認</p>
+  </div>
+
+  <!-- ブラウザフレーム + スクロールビューポート -->
+  <div class="frame">
+    <div class="chrome">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <div class="urlbar">https://example.com/pricing</div>
+      <span class="ext-chip">✎ Browser Agent Guide お描き</span>
+    </div>
+    <div class="viewport" id="viewport">
+      <div class="canvas" id="canvas">
+        <div class="vision-tag">これがAIに送られる画面 — 線と番号で「指示」と「対象」が対応づく</div>
+
+        <!-- 対象となるモックWebページ -->
+        <div class="page">
+          <div class="mast"><span>◇ Planly</span><span>ログイン</span></div>
+          <h2 class="h-hero" id="t-hero">毎日の予定を、ぜんぶ一つの画面にまとめます。</h2>
+          <p class="sub">忙しいあなたのための、新しいスケジュール管理。</p>
+          <a class="cta" id="t-cta">今すぐ無料で始めてみる</a>
+          <p class="para">Planly は、カレンダー・タスク・メモを横断して、その日にやることだけを自動で並べ替えます。通知は必要なものだけ。あとは静かに整えておきます。</p>
+          <div class="pcard">
+            <div class="plan">PRO プラン</div>
+            <div class="free">¥0 <span style="font-size:14px;color:var(--text-muted);font-weight:600">/ 14日間</span></div>
+            <div class="paid" id="t-price">以降 ¥1,200 / 月</div>
+            <ul><li>無制限のプロジェクト</li><li>AIによる自動並べ替え</li><li>チーム共有</li></ul>
+          </div>
+          <h3 class="h-sec">よくある質問</h3>
+          <div class="faq">無料期間中に解約できますか？ — はい、いつでも解約できます。</div>
+          <div class="faq">機種変更してもデータは残りますか？ — クラウド同期されます。</div>
+          <div class="faq">チームの人数に上限はありますか？ — PROなら無制限です。</div>
+          <div class="foot">© 2026 Planly Inc. — このページは提案用のモックです。</div>
+        </div>
+
+        <!-- お描き + 引き出し線 (座標はJSが描画) -->
+        <svg class="layer" id="layer" aria-label="お描きとAIメモを結ぶ引き出し線" role="img"></svg>
+        <!-- 番号バッジ・メモカードはJSが生成 -->
+      </div>
+    </div>
+  </div>
+  <p style="font-size:12px;color:var(--text-muted);margin-top:10px">↑ スクロールしても、お描き・番号・引き出し線・AIメモが<b>対象要素にアンカーされたまま一緒に動きます</b>（注釈レイヤをスクロール文脈の内側に置くため、毎フレーム再計算しなくても追従します）。</p>
+
+  <!-- 設計判断 -->
+  <div class="section">
+    <div class="section-title">なぜこのUIか — 3つの設計判断</div>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3><span class="ic">⚓</span>コンテンツにアンカー</h3>
+        <p>メモは画面（viewport）ではなく<b>対象要素</b>に紐づけます。スクロール・リサイズ・レイアウト変化でも図形のとなりに留まり、再訪時も復元。座標は要素bboxに対する<code>0–1</code>の相対比で保持します。</p>
+      </div>
+      <div class="card">
+        <h3><span class="ic">↻</span>引き出し線で束ねる</h3>
+        <p>図形の最寄り辺 → メモの最寄り辺を<b>点線コネクタ</b>で接続。重なり回避でメモをずらしても、線が「この指示はこの対象」を視覚的に保証します。色はペアごとに固定。</p>
+      </div>
+      <div class="card">
+        <h3><span class="ic">👁</span>AIビジョンに効く三重対応</h3>
+        <p><b>色 + 番号 + 線</b>を冗長に重ねることで、スクショをAIに渡したとき指示と対象の対応が崩れにくい。<b>AIビジョン表示</b>に切り替えると、送信画面で対応だけが際立つ様子を確認できます。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- メモ配置の比較 -->
+  <div class="section">
+    <div class="section-title">メモの配置 — 2案の比較</div>
+    <table class="cmp">
+      <thead><tr><th></th><th>右ガター整列 <span class="tag-rec">推奨</span></th><th>図形のとなりに浮かべる</th></tr></thead>
+      <tbody>
+        <tr><th>レイアウト</th>
+          <td class="rec">メモを右端のレールに縦整列。引き出し線で各図形へ。</td>
+          <td>図形の直右（収まらなければ左/下へ反転）。現行実装の方式。</td></tr>
+        <tr><th>長所</th>
+          <td class="rec"><span class="pro">✓ メモ同士が重ならず一覧性が高い<br>✓ 本文を隠しにくい<br>✓ 番号順に並び読み下しやすい</span></td>
+          <td><span class="pro">✓ 線が短く対応が直感的<br>✓ 余白の少ない密なページでも置ける</span></td></tr>
+        <tr><th>短所</th>
+          <td class="rec"><span class="con">△ 線が長くなりがち<br>△ 右に余白が要る</span></td>
+          <td><span class="con">△ メモ同士・本文と重なりやすい<br>△ 密集時にずれて対応が読みにくい</span></td></tr>
+        <tr><th>使い分け</th>
+          <td class="rec">既定。ページ右に余白がある一般的なレイアウト向け。</td>
+          <td>右に余白がない時の自動フォールバック。</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size:12.5px;color:var(--text-muted);margin-top:10px">上のツールバーの「メモの配置」で両方を切り替えて比較できます。実装では<b>右ガターを既定</b>とし、ガターに収まらない場合のみ「図形のとなり」へ自動で退避する折衷を推奨します。</p>
+  </div>
+
+  <!-- 実装メモ -->
+  <div class="section">
+    <div class="section-title">既存コードとの対応 / 実装メモ</div>
+    <div class="grid cols-2">
+      <div class="card">
+        <h3><span class="ic">🔌</span>いまある資産</h3>
+        <p><code>content-script.js</code> には既に <code>bag-memo-connector</code>（図形→メモの線）と <code>setupDrawingReposition()</code>（scroll/resizeでrAF追従）、<code>positionMemo()</code>（右→左→下の重なり回避）が実装済み。本提案はこの上に<b>右ガター整列・ペア配色・番号バッジ・ホバー連動・AIビジョン表示</b>を足す差分です。</p>
+      </div>
+      <div class="card">
+        <h3><span class="ic">🧩</span>追加する要素</h3>
+        <p>① ペアごとの識別色（図形/線/番号/メモ枠で共有）<br>② 図形角の<b>番号バッジ</b>と、メモヘッダの同番号チップ<br>③ メモ⇄図形の<b>ホバー相互ハイライト</b>（他は減光）<br>④ <code>AIに渡す</code>トグルOFFは線・番号も淡色化<br>⑤ AIへ渡すスクショ直前に番号・線を一段濃くする「ビジョン強調」</p>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:var(--sp-4)">
+      <span class="ic">💡</span>
+      <p><b>AIビジョンへの効き方：</b>図形だけだと「丸で囲った＝何かして欲しい」までしか伝わりません。<b>線＋番号でメモ本文（指示）と図形（対象）を明示的に結ぶ</b>と、スクショ1枚で「番号①の指示は、線でつながったこの見出しに対するもの」とモデルが対応づけられます。テキスト文脈（<code>forAI</code> ON のメモ）と画像の番号が一致するため、視覚と言語の手掛かりが二重化します。</p>
+    </div>
+  </div>
+
+  <footer class="page-footer">Browser Agent Guide Page Agent · お描き×AIメモ UI提案 — 2026-06-17 · 単一HTML / 依存なし · プロトタイプ（操作可能）</footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var canvas  = document.getElementById('canvas');
+  var layer   = document.getElementById('layer');
+  var viewport= document.getElementById('viewport');
+  var SVGNS   = 'http://www.w3.org/2000/svg';
+  var MODE    = 'gutter';
+
+  // お描き定義: target=アンカーする実DOM要素。座標は決め打ちせず毎回 target から実測する
+  // (= 提案の核心「対象要素にアンカー」。レイアウトが変わってもズレない)。pad は図形の余白px。
+  var PAIRS = [
+    { id:1, target:'#t-hero',  type:'ellipse', pad:{x:14,y:9},
+      title:'見出し', text:'見出しが長い。「予定をひとことで」のように価値が一語で伝わる短さにしたい。' },
+    { id:2, target:'#t-cta',   type:'rect',    pad:{x:9,y:7},
+      title:'CTAボタン', text:'文言を「無料で試す」に。色はブランドの緑へ。最初に視線が来る位置にしたい。' },
+    { id:3, target:'#t-price', type:'arrow',   pad:{x:8,y:5},
+      title:'有料金額', text:'「以降 ¥1,200」の近くに、何が増えるかを3点だけ添えて。離脱の主因になっている。' }
+  ];
+
+  var nodes = []; // {pair, type, target, group, shape, conn, badge, memo, ta, off, collapsed}
+
+  function el(tag, cls){ var n=document.createElementNS(SVGNS,tag); if(cls) n.setAttribute('class',cls); return n; }
+
+  // ---- お描き図形・メモ・線のDOMを生成(座標は layout が実測して設定) ----
+  function buildShapes(){
+    PAIRS.forEach(function(p){
+      var g = el('g', 'pair pair-'+p.id);
+      g.dataset.pair = p.id;
+      var shape;
+      if(p.type==='rect'){ shape = el('rect','draw-shape'); shape.setAttribute('rx', 10); }
+      else if(p.type==='ellipse'){ shape = el('ellipse','draw-shape'); }
+      else { shape = el('polyline','draw-shape'); }
+      g.appendChild(shape);
+      // 引き出し線(後でlayoutが座標を設定)
+      var conn = el('line','connector');
+      g.appendChild(conn);
+      layer.appendChild(g);
+
+      // 番号バッジ(HTML)
+      var badge = document.createElement('div');
+      badge.className = 'badge b'+p.id;
+      badge.textContent = p.id;
+      canvas.appendChild(badge);
+
+      // AIメモカード(HTML) — 既存 .bag-memo の構成に対応
+      var memo = document.createElement('div');
+      memo.className = 'memo p'+p.id;
+      memo.dataset.pair = p.id;
+      memo.innerHTML =
+        '<div class="m-head"><span class="m-num">'+p.id+'</span>'+
+          '<span class="m-tag">AIメモ</span>'+
+          '<button class="m-collapse" title="畳む / 展開" aria-label="畳む">–</button></div>'+
+        '<textarea class="m-text" rows="3">'+p.text+'</textarea>'+
+        '<div class="m-foot"><label class="m-toggle"><input type="checkbox" checked><span>AIに渡す</span></label>'+
+          '<button class="m-del" title="削除" aria-label="削除">🗑</button></div>';
+      canvas.appendChild(memo);
+
+      var rec = { pair:p, type:p.type, target:document.querySelector(p.target),
+                  group:g, shape:shape, conn:conn, badge:badge, memo:memo,
+                  ta:memo.querySelector('.m-text'), collapsed:false, off:false };
+      nodes.push(rec);
+      wireMemo(rec);
+    });
+  }
+
+  // ---- メモ・図形の相互ハイライト & 操作 ----
+  function setActive(id, on){
+    canvas.classList.toggle('focusing', on);
+    nodes.forEach(function(n){
+      var a = on && n.pair.id===id;
+      n.group.classList.toggle('is-active', a);
+      n.memo.classList.toggle('is-active', a);
+      // バッジは別DOMなので個別に拡大(中央寄せ transform を維持)
+      n.badge.style.transform = 'translate(-50%,-50%)' + (a ? ' scale(1.18)' : '');
+    });
+  }
+  function wireMemo(rec){
+    var hoverOn  = function(){ setActive(rec.pair.id, true); };
+    var hoverOff = function(){ setActive(rec.pair.id, false); };
+    rec.memo.addEventListener('mouseenter', hoverOn);
+    rec.memo.addEventListener('mouseleave', hoverOff);
+    rec.ta.addEventListener('focus', hoverOn);
+    rec.ta.addEventListener('blur', hoverOff);
+    // 畳む
+    rec.memo.querySelector('.m-collapse').addEventListener('click', function(){
+      rec.collapsed = !rec.collapsed;
+      rec.memo.classList.toggle('collapsed', rec.collapsed);
+      this.textContent = rec.collapsed ? '+' : '–';
+      layout();
+    });
+    // AIに渡す
+    rec.memo.querySelector('.m-toggle input').addEventListener('change', function(){
+      rec.off = !this.checked;
+      rec.memo.classList.toggle('off', rec.off);
+      rec.group.style.opacity = rec.off ? '.32' : '';
+      rec.badge.style.opacity = rec.off ? '.4' : '';
+    });
+    // 削除(プロトタイプ: 非表示)
+    rec.memo.querySelector('.m-del').addEventListener('click', function(){
+      rec.memo.style.display='none'; rec.group.style.display='none'; rec.badge.style.display='none';
+    });
+  }
+
+  function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+
+  // 対象要素の現在位置をキャンバス相対座標で得る(スクロールしても両者が一緒に動くのでズレない)。
+  function rectIn(node){
+    var cr = canvas.getBoundingClientRect(), er = node.getBoundingClientRect();
+    return { x: er.left - cr.left, y: er.top - cr.top, w: er.width, h: er.height };
+  }
+  // 矢印を1本の polyline(線 → 先端 → 2本のかえし)で表現。
+  function arrowPts(f, t){
+    var ang = Math.atan2(t.y-f.y, t.x-f.x), L=13, sp=0.5;
+    var p1x=t.x-L*Math.cos(ang-sp), p1y=t.y-L*Math.sin(ang-sp);
+    var p2x=t.x-L*Math.cos(ang+sp), p2y=t.y-L*Math.sin(ang+sp);
+    return f.x+','+f.y+' '+t.x+','+t.y+' '+p1x+','+p1y+' '+t.x+','+t.y+' '+p2x+','+p2y;
+  }
+
+  // ---- レイアウト: 図形ジオメトリ + メモ位置 + 番号バッジ + 引き出し線を実測から再計算 ----
+  function layout(){
+    var CW = canvas.clientWidth;
+    var gutterX = CW - 228 - 18; // 右ガターのメモ左端
+    var packed = []; // 重なり回避用
+
+    nodes.forEach(function(n){
+      if(n.memo.style.display==='none' || !n.target) return;
+      var r = rectIn(n.target), pad = n.pair.pad;
+      var box = { x:r.x-pad.x, y:r.y-pad.y, w:r.w+pad.x*2, h:r.h+pad.y*2 };
+      var cx = box.x + box.w/2, cy = box.y + box.h/2;
+      var arrowFrom = null;
+
+      // --- お描き図形のジオメトリを対象に合わせて更新 ---
+      if(n.type==='ellipse'){
+        n.shape.setAttribute('cx', cx); n.shape.setAttribute('cy', cy);
+        n.shape.setAttribute('rx', box.w/2 + 6); n.shape.setAttribute('ry', box.h/2 + 4);
+      } else if(n.type==='rect'){
+        n.shape.setAttribute('x', box.x); n.shape.setAttribute('y', box.y);
+        n.shape.setAttribute('width', box.w); n.shape.setAttribute('height', box.h);
+      } else { // arrow: 右上から対象の右辺へ向けて差す
+        var to = { x:box.x+box.w+4, y:cy }, from = { x:box.x+box.w+118, y:box.y-22 };
+        arrowFrom = from;
+        n.shape.setAttribute('points', arrowPts(from, to));
+      }
+
+      // 番号バッジ: 図形(box)の左上角
+      n.badge.style.left = box.x + 'px';
+      n.badge.style.top  = box.y + 'px';
+
+      var mw = n.memo.offsetWidth, mh = n.memo.offsetHeight;
+      var left, top, side = 'right';
+
+      if(MODE==='gutter'){
+        left = gutterX; top = cy - mh/2;
+      } else {
+        left = box.x + box.w + 16;
+        if(left + mw > CW - 8){ left = box.x - 16 - mw; side='left'; } // 右に収まらねば左
+        if(left < 8){ left = Math.min(box.x, CW-mw-8); side='bottom'; }
+        top = (side==='bottom') ? (box.y + box.h + 14) : (cy - mh/2);
+      }
+      // 縦の重なり回避(順送り)
+      top = Math.max(top, 8);
+      for(var i=0;i<packed.length;i++){
+        var q = packed[i];
+        if(left < q.r && (left+mw) > q.l && top < q.b+10 && (top+mh) > q.t-10){ top = q.b + 12; }
+      }
+      top = Math.min(top, canvas.clientHeight - mh - 8);
+      packed.push({ l:left, r:left+mw, t:top, b:top+mh });
+      n.memo.style.left = left+'px';
+      n.memo.style.top  = top+'px';
+
+      // 引き出し線: 図形側の起点 → メモの最寄り辺
+      var memoMidY = top + mh/2, sx, sy, mx, my;
+      if(arrowFrom){ sx = arrowFrom.x; sy = arrowFrom.y; }
+      else if(side==='left'){ sx = box.x; sy = clamp(memoMidY, box.y, box.y+box.h); }
+      else if(side==='bottom'){ sx = cx; sy = box.y+box.h; }
+      else { sx = box.x+box.w; sy = clamp(memoMidY, box.y, box.y+box.h); }
+
+      if(side==='left'){ mx = left+mw; }
+      else if(side==='bottom'){ mx = clamp(cx, left, left+mw); }
+      else { mx = left; }
+      my = (side==='bottom') ? top : clamp(cy, top, top+mh);
+
+      n.conn.setAttribute('x1', sx); n.conn.setAttribute('y1', sy);
+      n.conn.setAttribute('x2', mx); n.conn.setAttribute('y2', my);
+    });
+  }
+
+  // ---- コントロール ----
+  function seg(id, attr, cb){
+    var box = document.getElementById(id);
+    box.addEventListener('click', function(e){
+      var b = e.target.closest('button'); if(!b) return;
+      [].forEach.call(box.querySelectorAll('button'), function(x){ x.setAttribute('aria-pressed', x===b ? 'true':'false'); });
+      cb(b.dataset[attr]);
+    });
+  }
+  seg('modeSeg','mode', function(v){ MODE=v; layout(); });
+  seg('visionSeg','vision', function(v){ canvas.classList.toggle('vision', v==='on'); });
+  document.getElementById('themeBtn').addEventListener('click', function(){
+    var h=document.documentElement;
+    h.setAttribute('data-theme', h.getAttribute('data-theme')==='dark' ? 'light':'dark');
+  });
+
+  // ---- init ----
+  buildShapes();
+  // フォント確定後にレイアウト
+  layout();
+  window.addEventListener('resize', layout);
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(layout);
+  setTimeout(layout, 60);
+})();
+</script>
+</body>
+</html>

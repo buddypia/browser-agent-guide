@@ -1,0 +1,140 @@
+# Browser Agent Guide 視覚フィードバック デーモン（Phase 1 / 受信側 + 消費側）
+
+ブラウザのお描き注釈スクリーンショットを 1 プロセスで受け取り・公開する常駐デーモン。
+
+- **受信（WebSocket / `/ws`）**: 拡張の「お描きを画像でAIへ」が push した PNG+注釈を、
+  トークン認証のうえ inbox に書き出す（原子的書き込み・0600・slug 採番はサーバ側）。
+- **公開（MCP / Streamable HTTP / `/mcp`）**: AI コーディング CLI が `get_latest_visual_feedback`
+  を呼ぶと **image(PNG) + ファイルパスの両方**が返り、モデルが注釈画像を vision で直接解釈できる。
+
+受信と公開は**同一ポート**に同居（HTTP は `/mcp`、WebSocket upgrade は `/ws`）。
+
+> 親文書: `../docs/visual-feedback-mcp-bridge-handoff.md`（§3.1 / §3.2 / §4.2 / §4.4 / §4.5）。
+> 拡張側の WS push は無効化も可能で、その場合は従来どおり `chrome.downloads` に保存される。
+
+## 何をするか
+
+- 拡張からの WebSocket push を受けて inbox に書き出す（トークン認証）。
+- inbox(`<slug>/shot.png` + `annotation.json` + `memo.md`)を新しい順にスキャン。
+- 3 つの MCP ツールを公開:
+  - `list_visual_feedback` — 一覧（id・取得元 url/title 付き）
+  - `get_latest_visual_feedback` — 最新を image+パスで返す（主用途）
+  - `get_visual_feedback` — id 指定で取得
+- image を読めない CLI 向けに、常に `file_path` テキストを併走させる（fallback 内蔵）。
+
+### 複数プロジェクトの絞り込み（urlContains / titleContains）
+
+MVP は `chrome.downloads` の制約で、どのページのキャプチャも 1 つの `~/Downloads/ai-inbox` に積まれる。
+そのため `get_latest_visual_feedback` をそのまま呼ぶと「直前に別プロジェクトで撮ったもの」が返りうる。
+`list_visual_feedback` / `get_latest_visual_feedback` は `urlContains` / `titleContains`（部分一致・大小無視）を
+受け取り、今のプロジェクトのものだけに絞れる。
+
+```
+get_latest_visual_feedback({ urlContains: "isca.jp" })   # その URL を含む最新だけ
+list_visual_feedback({ titleContains: "ダッシュボード" })
+```
+
+条件に一致しない場合は image を返さず案内テキストを返す（誤って別プロジェクトの画像を掴ませない）。
+CLI への運用ヒント: 作業中ページの URL 断片を `urlContains` に渡すよう AGENTS.md / CLAUDE.md に書いておくとよい。
+
+> 動作確認: `node scripts/probe.mjs ~/Downloads/ai-inbox --url <部分一致>`
+
+## 起動
+
+```bash
+cd daemon
+npm install
+# 既定: inbox=~/Downloads/ai-inbox（拡張 MVP の保存先と一致）, port=8765
+npm start
+# 明示指定:
+node src/index.js --inbox ~/Downloads/ai-inbox --port 8765
+# プロジェクト直下の .ai-inbox を見る場合:
+node src/index.js --inbox ./.ai-inbox
+```
+
+確認:
+
+```bash
+curl -s http://127.0.0.1:8765/healthz   # {"ok":true,"inboxDir":"..."}
+```
+
+環境変数でも設定可: `BAG_VF_INBOX`, `BAG_VF_PORT`, `BAG_VF_HOST`。
+
+## 3 CLI への MCP 登録（同じデーモン、キー名だけ違う）
+
+⚠️ **HTTP URL のキー名が CLI ごとに違う**（handoff §4.4 の罠）。同じ `http://127.0.0.1:8765/mcp` を指す。
+
+### Claude Code
+
+```bash
+claude mcp add --transport http visual_feedback http://127.0.0.1:8765/mcp
+```
+
+または `.mcp.json` / settings に:
+
+```json
+{
+  "mcpServers": {
+    "visual_feedback": { "type": "http", "url": "http://127.0.0.1:8765/mcp" }
+  }
+}
+```
+
+### Codex CLI — `~/.codex/config.toml`
+
+```toml
+[mcp_servers.visual_feedback]
+url = "http://127.0.0.1:8765/mcp"
+```
+
+### Antigravity — MCP 設定（`serverUrl` キー）
+
+```json
+{
+  "mcpServers": {
+    "visual_feedback": { "serverUrl": "http://127.0.0.1:8765/mcp" }
+  }
+}
+```
+
+> Antigravity の MCP image vision は未検証（handoff §2.2）。image を消費しない場合は返り値の
+> `file_path` を IDE に貼って画像を開く。
+
+## 拡張からの WebSocket push を有効にする（任意）
+
+既定では拡張は `chrome.downloads` に保存する。デーモンへ直接送る（ダウンロード通知の山を避ける）には:
+
+1. デーモンを起動し、stderr に出る `token: …` をコピー（保存先は `~/.bag-vf/token`）。
+2. 拡張の設定（オプションページ）→「視覚フィードバック デーモン」:
+   - 「デーモンへ送る」を ON
+   - WebSocket URL = `ws://127.0.0.1:8765/ws`
+   - トークン = 上でコピーした値
+   - 「接続テスト」で `接続OK` を確認
+3. 以降「お描きを画像でAIへ」は WS で push され、デーモンが inbox に書き出す
+   （失敗時は自動で `chrome.downloads` にフォールバック）。
+
+## 使い方（検証）
+
+1. ブラウザ拡張でお描き → 「お描きを画像でAIへ」（WS 有効なら push、無効なら `~/Downloads/ai-inbox/<slug>/`）。
+2. デーモンを起動（既定でその inbox を見る／受ける）。
+3. CLI に MCP を登録して、こう頼む:
+   「ブラウザで指示した視覚フィードバックを見て直して」
+   → CLI が `get_latest_visual_feedback` を呼び、返った image を vision 解釈する。
+   - **(検証済)** Claude Code / Codex が MCP image を実際に vision として読む（handoff §2.2）。
+
+## テスト
+
+```bash
+npm test                      # inbox 単体 + MCP(Streamable HTTP) 統合 + WS 受信 統合
+node scripts/e2e-smoke.mjs    # 実バイナリで「WS push → 書き込み → MCP 取得」を通しで確認
+node scripts/probe.mjs ~/Downloads/ai-inbox [--url <部分一致>]   # 手元 inbox の MCP 出力を確認
+```
+
+## セキュリティ
+
+- loopback バインドのみ。**WebSocket は秘密トークンで認証**（クエリ `?token=`、定数時間比較、
+  不一致は 401 拒否）。⚠️ loopback は隔離ではない（CVE-2025-52882: localhost WS は悪性 Web ページが
+  接続しうる）ため、トークンで拡張だけを許可する。トークンは `~/.bag-vf/token`（0600）。
+- 書き込みは inbox 配下のみ。slug はサーバ側採番でクライアントのパスは信用しない（traversal 防止）。
+- MCP は inbox の絶対パスを返すため、共有マシンでは inbox の場所に注意。
+- まだ未対応（Phase 2 候補）: 複数 inbox root の whitelist、Antigravity の image vision 実測、再接続/常駐化。

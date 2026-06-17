@@ -1,0 +1,80 @@
+# 視覚フィードバック MVP（Phase 0）の使い方と検証手順
+
+> 親文書: `docs/visual-feedback-mcp-bridge-handoff.md`（§5 Phase 0 / §8）。
+> この文書は Phase 0（データ／MCP なし）の実装をどう動かし、handoff の仮説 (A)(B) を
+> どう目視確認するかをまとめる。
+
+## 何が入ったか（Phase 0）
+
+ブラウザのお描き注釈を **スクリーンショットへ焼き込み（burn-in）**、画像ファイルとして
+`Downloads/ai-inbox/<timestamp>/` に保存する。デーモンも MCP も無し。AI には保存された
+`shot.png` を **vision（画像）として** 渡す。
+
+- `manifest.json`: `offscreen` / `downloads` 権限を追加
+- `lib/visual-feedback/compositor.js`: 純粋な合成モジュール（Canvas 2D 直描き / 2000px ガード / DPR 整合）
+- `offscreen/offscreen.{html,js}`: OffscreenCanvas で実際に焼き込む
+- `content/content-script.js`: `PREPARE_CAPTURE`（自前UIを隠して図形をビューポートpxに解決）/ `FINISH_CAPTURE`
+- `background/service-worker.js`: 撮影 → 合成 → `chrome.downloads` 保存のオーケストレーション
+- サイドパネル: 「お描きを画像でAIへ」CTA。独立機能ではなくお描きの一部なので、**注釈パネル
+  「このページの補足」のフッターに、お描きが1件以上ある時だけ**表示する（件数バッジ付き）
+
+## 出力物（1回の保存）
+
+```
+Downloads/ai-inbox/<ISO-slug>/
+  shot.png         # 注釈を焼き込んだ合成本（vision 1次）
+  raw.png          # 注釈なしの元スクショ（位置ずれ比較・将来のデーモン用）
+  annotation.json  # 座標(frac)/selector/testid/intent/bbox（テキスト fallback）
+  memo.md          # 人間可読 + 各CLIでの画像の渡し方 + describeShapes
+```
+
+## 操作手順
+
+1. `chrome://extensions` で「パッケージ化されていない拡張機能を読み込む」→ このリポジトリのルートを選択。
+   （JS注入を使う場合は拡張詳細で「Allow User Scripts」も有効化。視覚フィードバックだけなら不要。）
+2. 対象ページを開き、拡張アイコンでサイドパネルを開く。
+3. 「お描き」で対象を円/四角/矢印/ペンで囲み、隣のメモに指示を書く（複数可）。
+4. お描きが保存されると、注釈パネル「このページの補足」の下に **「お描きを画像でAIへ」** が出る。
+   それを押すと `Downloads/ai-inbox/<...>/` に4ファイルが保存される。
+
+## 検証（handoff の仮説）
+
+保存された `shot.png` のパスを AI コーディング CLI に **画像** として渡す:
+
+- Claude Code: 会話に `shot.png` のパスを貼る / ドラッグ / Ctrl+V
+- Codex CLI: `codex --image ./shot.png "この赤枠の指示に従って直して"`
+- Antigravity(IDE): 画像をエディタにドラッグ / 貼り付け
+
+確認ポイント:
+
+- **(A) 合成 PNG が実際に vision に入るか**: モデルが画像の内容（赤枠・矢印・メモ）を読めるか。
+- **(B) DPR 座標整合**: 焼き込んだ図形が、狙った UI 要素の上に正しく乗っているか。
+  HiDPI（dpr 2〜3）でずれないか。`raw.png` と `shot.png` を重ねて位置を比べると分かりやすい。
+
+## Phase 1（消費側 MCP）— 手で渡さず CLI に自動取得させる
+
+`../daemon/` に **常駐デーモン**を実装済み。これを起動して CLI に MCP 登録すると、
+`shot.png` のパスを手で貼らずとも、CLI が `get_latest_visual_feedback` を呼んで
+最新のお描き注釈を **image+パス**で取得する（既定 inbox は MVP の保存先 `~/Downloads/ai-inbox`）。
+
+```bash
+cd daemon && npm install && npm start   # http://127.0.0.1:8765/mcp
+```
+
+CLI 登録方法と検証は `daemon/README.md` を参照。WebSocket 常時 push（拡張→デーモン）と
+トークン認証は次の増分。
+
+## 自動テスト
+
+- `npm run test:vf` — compositor の回帰（2000px 境界 / DPR 変換 / 決定的な描画呼び出し列 / foreignObject 不使用）
+- `npx playwright test test/visual-feedback/canvas.spec.mjs` — 実ブラウザの Canvas で
+  taint せず有効な PNG を焼き込めることを実測（SecurityError 罠の回避を保証）
+
+## 既知の制限（Phase 0）
+
+- 各注釈は「図形」+「角の丸数字①」+「すぐ隣のメモ吹き出し（先頭に同じ①）」を引き出し線で結んで描く。
+  キーは丸数字に統一し、色見本の四角は使わない（AI が「①の指示＝この図形」と取り違えないため）。
+- `captureVisibleTab` は **可視領域のみ**。スクロール外/未解決の注釈は図形を描けず、左上のリストに「画面外」として出る。
+- cross-origin iframe / WebGL は黒く写る（ブラウザ仕様、回避不可）。
+- `chrome://` や拡張ページなど注入できないページでは保存できない（その旨エラー表示）。
+- フォルダ監視は無い。AI には人が `shot.png` を渡す（Phase 1 の MCP で自動化）。

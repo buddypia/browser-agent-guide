@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<!--
+  Browser Agent Guide デバッグ・プレイグラウンド (html-artifacts 生成)
+  ─────────────────────────────────────────────────────────────────────────────
+  目的: Browser Agent Guide Page Agent 拡張の「動詞レジストリ」と「注釈(補足/目印/合図/お描き)」
+        を、Playwright や拡張サイドパネルから操作・検証するための対象ページ。
+  自己完結・依存なし・オフライン動作。CSS/JS はすべてインライン。
+  注意: 自前のフックは data-testid / data-pg-* を使用し、拡張の data-bag-* は使わない。
+        (拡張が付与する data-bag-* をインスペクターが監視して効きを可視化する)
+-->
+<html lang="ja" data-theme="interactive-warm" data-target="web-app" data-viewport="desktop" data-layout="sidebar" data-density="comfortable">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Browser Agent Guide デバッグ・プレイグラウンド</title>
+  <style>
+    /* ====================== core/reset.css ====================== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+    body { min-height: 100vh; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    img, svg, video, canvas { display: block; max-width: 100%; }
+    input, button, textarea, select { font: inherit; color: inherit; }
+    p, h1, h2, h3, h4, h5, h6 { overflow-wrap: break-word; }
+    a { color: inherit; }
+    ul, ol { list-style-position: inside; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+    }
+    @media print { .no-print { display: none !important; } body { background: #fff; color: #000; } }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    :focus:not(:focus-visible) { outline: none; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    .hidden { display: none !important; }
+
+    /* ====================== core/tokens.css ====================== */
+    :root {
+      --sp-unit: 4px;
+      --sp-1: var(--sp-unit); --sp-2: calc(var(--sp-unit)*2);
+      --sp-3: calc(var(--sp-unit)*3); --sp-4: calc(var(--sp-unit)*4);
+      --sp-5: calc(var(--sp-unit)*6); --sp-6: calc(var(--sp-unit)*8);
+      --sp-7: calc(var(--sp-unit)*12); --sp-8: calc(var(--sp-unit)*16);
+      --radius-xs: 4px; --radius-sm: 8px; --radius-md: 12px; --radius-lg: 20px; --radius-pill: 999px;
+      --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+      --font-serif: Georgia, 'Times New Roman', serif;
+      --type-display: 500 48px/1.1 var(--font-sans);
+      --type-h1: 500 32px/1.2 var(--font-sans);
+      --type-h2: 500 24px/1.3 var(--font-sans);
+      --type-h3: 600 18px/1.4 var(--font-sans);
+      --type-body: 430 16px/1.55 var(--font-sans);
+      --type-small: 430 14px/1.5 var(--font-sans);
+      --type-caption: 500 12px/1.4 var(--font-sans);
+      --container-max: 1200px;
+      --ease: cubic-bezier(0.4, 0, 0.2, 1);
+      --dur-fast: 0.15s; --dur-mid: 0.25s; --dur-slow: 0.4s;
+      --cat-1: var(--accent); --cat-2: var(--color-info, #5C7CA3); --cat-3: var(--color-success, #788C5D);
+      --cat-4: var(--color-warning, #C78E3F); --cat-5: var(--color-danger, #B04A4A);
+    }
+    [data-density="compact"] { --sp-unit: 3.25px; --type-body: 430 15px/1.5 var(--font-sans); --type-small: 430 13px/1.45 var(--font-sans); }
+    [data-density="spacious"] { --sp-unit: 4.75px; }
+    body { font: var(--type-body); color: var(--text-primary); background: var(--bg-page); }
+
+    /* ====================== core/themes.css (interactive-warm + dark-focus) ====================== */
+    :root,
+    [data-theme="interactive-warm"] {
+      --color-primary:#5B8DEF; --color-primary-hover:#4A7DE0;
+      --color-bg:#FAFAF8; --color-surface:#FFFFFF; --color-surface-raised:#F5F5F2;
+      --color-text:#2D2D2D; --color-text-secondary:#5A5A5A; --color-text-muted:#8A8A8A;
+      --color-border:#D4D4D0; --color-border-subtle:#E8E8E4;
+      --color-success:#4CAF50; --color-warning:#F9A825; --color-danger:#E53935; --color-info:#5B8DEF;
+      --shadow-sm:0 1px 2px rgba(0,0,0,.05); --shadow-md:0 4px 12px rgba(0,0,0,.1); --shadow-lg:0 8px 24px rgba(0,0,0,.12);
+      --shadow-interactive:0 2px 8px rgba(91,141,239,.2); --shadow-interactive-hover:0 4px 16px rgba(91,141,239,.3);
+      --bg-page:var(--color-bg); --bg-surface:var(--color-surface); --bg-muted:var(--color-surface-raised); --bg-card:var(--color-surface);
+      --text-primary:var(--color-text); --text-secondary:var(--color-text-secondary); --text-muted:var(--color-text-muted);
+      --border-default:var(--color-border); --border-subtle:var(--color-border-subtle);
+      --accent:var(--color-primary); --on-accent:#FFFFFF; --code-bg:#F5F5F2;
+      --radius-sm:10px; --radius-md:16px; --radius-lg:24px; --type-h1:700 30px/1.2 var(--font-sans); --type-h2:650 22px/1.3 var(--font-sans);
+    }
+    [data-theme="dark-focus"] {
+      --color-primary:#64B5F6; --color-bg:#1A1A2E; --color-surface:#232340;
+      --color-surface-raised:#2C2C4A; --color-text:#E0E0E0;
+      --color-text-secondary:#A0A0B8; --color-text-muted:#6E6E8A;
+      --color-border:#3A3A5C; --color-border-subtle:#2E2E4E;
+      --color-success:#81C784; --color-warning:#FFB74D; --color-danger:#EF5350; --color-info:#64B5F6;
+      --shadow-sm:inset 0 1px 2px rgba(0,0,0,.3); --shadow-md:inset 0 2px 6px rgba(0,0,0,.4);
+      --shadow-lg:0 0 24px rgba(100,181,246,.06); --shadow-glow:0 0 12px rgba(100,181,246,.15);
+      --shadow-interactive:0 0 12px rgba(100,181,246,.25); --shadow-interactive-hover:0 0 18px rgba(100,181,246,.4);
+      --bg-page:var(--color-bg); --bg-surface:var(--color-surface); --bg-muted:var(--color-surface-raised); --bg-card:var(--color-surface);
+      --text-primary:var(--color-text); --text-secondary:var(--color-text-secondary); --text-muted:var(--color-text-muted);
+      --border-default:var(--color-border); --border-subtle:var(--color-border-subtle);
+      --accent:var(--color-primary); --on-accent:#11203A; --code-bg:#16162A;
+      --radius-md:8px; --radius-lg:14px; --type-h1:600 30px/1.2 var(--font-sans); --type-caption:500 12px/1.4 var(--font-mono);
+    }
+
+    /* ====================== core/elements.css (抜粋: 使用分) ====================== */
+    .container { width: 100%; max-width: var(--container-max); margin-inline: auto; padding-inline: var(--sp-5); }
+    .cluster { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
+    .grid { display: grid; gap: var(--sp-4); }
+    .grid-auto { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .layout-sidebar { display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); gap: var(--sp-6); align-items: start; }
+    .layout-side { position: sticky; top: var(--sp-5); display: grid; gap: var(--sp-5); }
+    .layout-main > * + * { margin-top: var(--sp-6); }
+    @media (max-width: 900px) { .layout-sidebar { grid-template-columns: 1fr; } .layout-side { position: static; } }
+    .page-header { padding-block: var(--sp-7) var(--sp-5); border-bottom: 1px solid var(--border-subtle); position: relative; }
+    .page-footer { padding-block: var(--sp-6); margin-top: var(--sp-8); border-top: 1px solid var(--border-subtle); color: var(--text-muted); font: var(--type-small); }
+    section { padding-block: var(--sp-6); }
+    .header-compact { padding-block: var(--sp-5); display: flex; align-items: baseline; gap: var(--sp-4); flex-wrap: wrap; }
+    .header-compact h1 { font: var(--type-h2); }
+    .header-compact .lede { font: var(--type-small); color: var(--text-muted); max-width: none; }
+    h1 { font: var(--type-h1); color: var(--text-primary); }
+    h2 { font: var(--type-h2); color: var(--text-primary); }
+    h3 { font: var(--type-h3); color: var(--text-primary); }
+    .eyebrow { font: var(--type-caption); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-family: var(--font-mono); }
+    .lede { font: var(--type-body); font-size: 18px; color: var(--text-secondary); max-width: 64ch; }
+    .muted { color: var(--text-muted); }
+    .small { font: var(--type-small); }
+    .card { background: var(--bg-card); border-radius: var(--radius-md); padding: var(--sp-5); }
+    .card-outlined { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--sp-5); }
+    .card-elevated { background: var(--bg-surface); border-radius: var(--radius-md); padding: var(--sp-5); box-shadow: var(--shadow-md); }
+    .card-accent { background: var(--bg-surface); border-left: 3px solid var(--accent); border-radius: var(--radius-sm); padding: var(--sp-4) var(--sp-5); }
+    .btn { display: inline-flex; align-items: center; gap: var(--sp-2); background: var(--accent); color: var(--on-accent); border: none; border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-4); font: var(--type-small); font-weight: 600; cursor: pointer; transition: filter var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); min-height: 36px; }
+    .btn:hover { filter: brightness(1.05); box-shadow: var(--shadow-md); }
+    .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-default); }
+    .btn-ghost:hover { background: var(--bg-muted); filter: none; }
+    .btn-sm { padding: var(--sp-1) var(--sp-3); min-height: 28px; font: var(--type-caption); }
+    .btn-danger { background: var(--color-danger); color: #fff; }
+    .badge { display: inline-flex; align-items: center; gap: var(--sp-1); padding: 2px var(--sp-2); border-radius: var(--radius-pill); font: var(--type-caption); font-weight: 600; background: var(--bg-muted); color: var(--text-secondary); }
+    .badge-success { background: color-mix(in srgb, var(--color-success) 18%, transparent); color: var(--color-success); }
+    .badge-warning { background: color-mix(in srgb, var(--color-warning) 18%, transparent); color: var(--color-warning); }
+    .badge-danger { background: color-mix(in srgb, var(--color-danger) 18%, transparent); color: var(--color-danger); }
+    .badge-info { background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info); }
+    .badge-accent { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+    .chip { display: inline-flex; padding: 2px var(--sp-2); border: 1px solid var(--border-default); border-radius: var(--radius-pill); font: var(--type-caption); font-family: var(--font-mono); color: var(--text-secondary); }
+    .callout { display: flex; gap: var(--sp-3); background: var(--bg-muted); border-left: 3px solid var(--accent); border-radius: var(--radius-sm); padding: var(--sp-4) var(--sp-5); }
+    .callout-title { font-weight: 600; color: var(--text-primary); }
+    code { font-family: var(--font-mono); font-size: .9em; background: var(--code-bg); padding: 2px 6px; border-radius: var(--radius-xs); }
+    kbd { font-family: var(--font-mono); font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-default); border-bottom-width: 2px; border-radius: var(--radius-xs); padding: 1px 6px; }
+    hr { border: none; border-top: 1px solid var(--border-subtle); margin-block: var(--sp-6); }
+
+    /* ====================== playground 固有 ====================== */
+    .pg-toggle { position: absolute; top: var(--sp-5); right: var(--sp-5); }
+    .section-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--sp-5) var(--sp-5) var(--sp-6); box-shadow: var(--shadow-sm); }
+    .section-card > h2 { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-2); }
+    .section-card > .section-lede { color: var(--text-secondary); font: var(--type-small); margin-bottom: var(--sp-4); }
+    .section-num { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font: var(--type-caption); font-weight: 700; }
+
+    /* インスペクター(サイドバー) */
+    .inspector { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--sp-5); box-shadow: var(--shadow-md); }
+    .inspector h2 { font: var(--type-h3); margin-bottom: var(--sp-3); }
+    .insp-status { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3); border-radius: var(--radius-sm); background: var(--bg-muted); margin-bottom: var(--sp-4); }
+    .insp-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--color-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-danger) 22%, transparent); transition: background var(--dur-mid) var(--ease), box-shadow var(--dur-mid) var(--ease); }
+    .insp-status.is-on .insp-dot { background: var(--color-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 22%, transparent); }
+    .insp-stats { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-2) var(--sp-3); align-items: center; margin-bottom: var(--sp-4); }
+    .insp-stats dt { font: var(--type-small); color: var(--text-secondary); }
+    .insp-stats dd { font-family: var(--font-mono); font-weight: 700; font-size: 16px; color: var(--text-primary); text-align: right; }
+    .insp-stats dd.hot { color: var(--accent); }
+    .pg-log { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-muted); }
+    .pg-log:empty::after { content: 'イベント待機中…'; display: block; padding: var(--sp-3); color: var(--text-muted); font: var(--type-caption); }
+    .pg-log li { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border-subtle); font: var(--type-caption); }
+    .pg-log li:last-child { border-bottom: none; }
+    .pg-log time { font-family: var(--font-mono); color: var(--text-muted); }
+    .pg-log .ev { color: var(--text-primary); }
+    .pg-log li[data-kind="danger"] .ev { color: var(--color-danger); font-weight: 600; }
+    .pg-log li[data-kind="async"] .ev { color: var(--color-info); }
+    .pg-log li[data-kind="nav"] .ev { color: var(--accent); }
+
+    /* フォーム */
+    .form-grid { display: grid; gap: var(--sp-4); }
+    .field { display: grid; gap: var(--sp-1); }
+    .field > span.label { font: var(--type-small); font-weight: 600; color: var(--text-secondary); }
+    .field input[type="text"], .field input[type="email"], .field input[type="password"], .field input[type="number"], .field select, .field textarea {
+      width: 100%; background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+      padding: var(--sp-2) var(--sp-3); color: var(--text-primary); transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+    }
+    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); outline: none; }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
+    @media (max-width: 560px) { .field-row { grid-template-columns: 1fr; } }
+    .choice { display: flex; align-items: center; gap: var(--sp-2); font: var(--type-small); }
+    .choice-group { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
+    fieldset { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--sp-3) var(--sp-4); }
+    legend { font: var(--type-small); font-weight: 600; color: var(--text-secondary); padding-inline: var(--sp-2); }
+
+    /* ターゲット・ギャラリー */
+    .target-grid { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+    .fake-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; font-weight: 600; }
+    .role-btn { display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-muted); cursor: pointer; font: var(--type-small); font-weight: 600; }
+    .role-btn:hover { border-color: var(--accent); }
+    [contenteditable] { display: block; min-height: 44px; padding: var(--sp-3); border: 1px dashed var(--border-default); border-radius: var(--radius-sm); background: var(--bg-muted); }
+    [contenteditable]:focus { border-color: var(--accent); border-style: solid; outline: none; }
+    [role="tablist"] { display: flex; gap: var(--sp-1); border-bottom: 2px solid var(--border-subtle); margin-bottom: var(--sp-4); }
+    [role="tab"] { appearance: none; background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; padding: var(--sp-3) var(--sp-4); cursor: pointer; color: var(--text-secondary); font-weight: 600; }
+    [role="tab"][aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+    [role="tabpanel"] { padding: var(--sp-2); }
+    details { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--sp-3) var(--sp-4); }
+    summary { cursor: pointer; font-weight: 600; }
+    .dynamic-list { list-style: none; margin: var(--sp-3) 0 0; padding: 0; display: grid; gap: var(--sp-2); }
+    .dynamic-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); background: var(--bg-muted); border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); }
+    .dynamic-list li code { font-size: 11px; }
+    .async-result { margin-top: var(--sp-4); padding: var(--sp-4); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--color-info) 12%, var(--bg-surface)); border: 1px solid color-mix(in srgb, var(--color-info) 35%, transparent); }
+    .danger-zone { border: 1px solid color-mix(in srgb, var(--color-danger) 45%, transparent); border-radius: var(--radius-md); padding: var(--sp-5); background: color-mix(in srgb, var(--color-danger) 6%, var(--bg-surface)); }
+    .danger-zone h2 { color: var(--color-danger); }
+    .readout { font-family: var(--font-mono); font-weight: 700; }
+    .draw-canvas { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--sp-4); }
+    .invoice-box { border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--sp-4); background: var(--bg-surface); }
+    .invoice-box .row { display: flex; justify-content: space-between; padding: var(--sp-1) 0; border-bottom: 1px dashed var(--border-subtle); font: var(--type-small); }
+    .invoice-box .row:last-child { border-bottom: none; font-weight: 700; }
+    .anchor-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); margin-top: var(--sp-3); }
+    .anchor-card { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--sp-3); }
+    .anchor-card .sig { font: var(--type-caption); color: var(--text-muted); margin-top: var(--sp-2); word-break: break-all; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+  </style>
+</head>
+<body>
+  <header class="page-header header-compact container">
+    <p class="eyebrow">Browser Agent Guide · debug fixture</p>
+    <h1>デバッグ・プレイグラウンド</h1>
+    <p class="lede">拡張の動詞と注釈を試すための対象ページ</p>
+    <button class="btn-ghost btn-sm no-print pg-toggle" id="theme-toggle" type="button" aria-label="テーマを切り替え">◐ テーマ</button>
+  </header>
+
+  <main class="container layout-sidebar">
+    <!-- ============ サイドバー: 拡張インスペクター ============ -->
+    <aside class="layout-side">
+      <div class="inspector" aria-label="拡張機能インスペクター">
+        <h2>🔍 拡張インスペクター</h2>
+        <div class="insp-status" id="insp-status" role="status" aria-live="polite">
+          <span class="insp-dot" aria-hidden="true"></span>
+          <span id="insp-status-text">拡張: 未検出</span>
+        </div>
+        <dl class="insp-stats" aria-label="拡張が付与したマーカーの数">
+          <dt>affordance (<code>data-bag-id</code>)</dt>
+          <dd id="stat-affordance" data-testid="stat-affordance">0</dd>
+          <dt>目印 (<code>anno-marked</code>)</dt>
+          <dd id="stat-marked" data-testid="stat-marked">0</dd>
+          <dt>注釈ピン (<code>data-bag-anno</code>)</dt>
+          <dd id="stat-anno" data-testid="stat-anno">0</dd>
+          <dt>注入要素 (<code>data-bag-injected</code>)</dt>
+          <dd id="stat-injected" data-testid="stat-injected">0</dd>
+        </dl>
+        <p class="small muted" style="margin-bottom:var(--sp-3)">サイドパネルの「手がかりを表示」やチャット操作で <code>data-bag-id</code> が付与されると上の数が動きます。</p>
+        <h3 style="margin-bottom:var(--sp-2)">イベントログ</h3>
+        <ul class="pg-log" id="event-log" data-testid="event-log" role="log" aria-live="polite" aria-label="ページ操作イベントログ"></ul>
+        <div class="toolbar" style="margin-top:var(--sp-3)">
+          <button class="btn-ghost btn-sm" id="log-clear" type="button" data-testid="log-clear">ログを消去</button>
+          <span class="chip" id="hash-readout" data-testid="hash-readout">#/(なし)</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ メイン: 操作対象 ============ -->
+    <div class="layout-main">
+
+      <section class="callout no-print" aria-label="このページの使い方">
+        <div>
+          <p class="callout-title">このページの使い方</p>
+          <p class="small">拡張サイドパネルのチャットに「<code>ログインフォームに入力して送信</code>」「<code>注文確定ボタンを赤い枠で囲んで</code>」などと指示するか、Playwright から各要素を操作してください。
+          要素は <code>data-testid</code> / <code>name</code> / <code>aria-label</code> / 安定 <code>id</code> など複数のシグナルを持ち、堅牢アンカーの検証に使えます。</p>
+        </div>
+      </section>
+
+      <!-- 1. ログインフォーム -->
+      <section class="section-card" aria-label="ログインフォーム">
+        <h2><span class="section-num">1</span>ログインフォーム</h2>
+        <p class="section-lede">動詞 <code>fillAffordance</code> / <code>fillInput</code> / <code>selectOption</code> / <code>submitForm</code> / <code>focusElement</code> の対象。</p>
+        <form id="login-form" data-testid="login-form" class="form-grid" novalidate>
+          <div class="field-row">
+            <label class="field">
+              <span class="label">ユーザー名</span>
+              <input type="text" id="login-username" name="username" data-testid="login-username" aria-label="ユーザー名" placeholder="例: yamada_taro" autocomplete="username">
+            </label>
+            <label class="field">
+              <span class="label">メールアドレス</span>
+              <input type="email" name="email" data-testid="login-email" aria-label="メールアドレス" placeholder="you@example.com" autocomplete="email">
+            </label>
+          </div>
+          <label class="field">
+            <span class="label">パスワード</span>
+            <input type="password" name="password" data-testid="login-password" aria-label="パスワード" placeholder="••••••••" autocomplete="current-password">
+          </label>
+          <div class="field-row">
+            <label class="field">
+              <span class="label">プラン</span>
+              <select id="plan-select" name="plan" data-testid="plan-select" aria-label="プラン">
+                <option value="">選択してください</option>
+                <option value="free">フリー</option>
+                <option value="pro">プロ</option>
+                <option value="team">チーム</option>
+                <option value="enterprise">エンタープライズ</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="label">人数</span>
+              <input type="number" name="seats" data-testid="seats" aria-label="人数" min="1" max="999" value="1">
+            </label>
+          </div>
+          <fieldset>
+            <legend>請求サイクル</legend>
+            <div class="choice-group">
+              <label class="choice"><input type="radio" name="billing" value="monthly" checked> 月額</label>
+              <label class="choice"><input type="radio" name="billing" value="yearly"> 年額</label>
+              <label class="choice"><input type="radio" name="billing" value="quote"> 見積</label>
+            </div>
+          </fieldset>
+          <label class="field">
+            <span class="label">備考</span>
+            <textarea name="note" data-testid="login-note" aria-label="備考" rows="3" placeholder="自由記述（AIへの補足のテストにも）"></textarea>
+          </label>
+          <label class="choice"><input type="checkbox" id="remember" name="remember" data-testid="remember"> ログイン状態を保持する</label>
+          <div class="cluster">
+            <button type="submit" class="btn" data-testid="login-submit">ログイン</button>
+            <button type="reset" class="btn-ghost" data-testid="login-reset" style="border-radius:var(--radius-sm);padding:var(--sp-2) var(--sp-4)">リセット</button>
+            <output id="login-result" data-testid="login-result" class="small muted readout" aria-live="polite">未送信</output>
+          </div>
+        </form>
+      </section>
+
+      <!-- 2. 操作可能な要素のギャラリー -->
+      <section class="section-card" aria-label="操作可能な要素のギャラリー">
+        <h2><span class="section-num">2</span>操作可能な要素のギャラリー</h2>
+        <p class="section-lede"><code>annotatePage</code> / <code>listAffordances</code> がどの要素を拾うかの検証。<code>button</code> / <code>a[href]</code> / <code>role=*</code> / <code>contenteditable</code> / <code>summary</code> / <code>onclick</code> を網羅。</p>
+        <div class="target-grid">
+          <button class="btn" type="button" data-testid="gallery-button" data-pg-log="ボタン(button)">通常ボタン</button>
+          <a href="#section-spa" class="role-btn" data-testid="gallery-link">アンカーリンク (a[href])</a>
+          <span role="button" tabindex="0" class="role-btn" data-testid="gallery-rolebutton" data-pg-log="role=button">role=button</span>
+          <span role="link" tabindex="0" class="fake-link" data-testid="gallery-rolelink" data-pg-log="role=link">role=link</span>
+          <span role="checkbox" tabindex="0" aria-checked="false" class="role-btn" data-testid="gallery-rolecheckbox" data-pg-toggle-aria>role=checkbox</span>
+          <span role="menuitem" tabindex="0" class="role-btn" data-testid="gallery-menuitem" data-pg-log="role=menuitem">role=menuitem</span>
+          <span class="role-btn" onclick="window.PG&&PG.log('onclick 要素')" data-testid="gallery-onclick">onclick 属性のみ</span>
+        </div>
+        <div class="grid" style="margin-top:var(--sp-4)">
+          <label class="field">
+            <span class="label">contenteditable な領域</span>
+            <div contenteditable="true" data-testid="gallery-contenteditable" aria-label="自由編集エリア">ここはクリックして自由に編集できます（fillAffordance のテスト）。</div>
+          </label>
+          <details data-testid="gallery-details">
+            <summary>詳細を開く（summary 要素）</summary>
+            <p class="small muted" style="margin-top:var(--sp-2)">summary は INTERACTIVE_SELECTOR に含まれます。開閉が affordance 数に影響するか確認できます。</p>
+          </details>
+        </div>
+      </section>
+
+      <!-- 3. 非同期コンテンツ -->
+      <section class="section-card" aria-label="非同期コンテンツ">
+        <h2><span class="section-num">3</span>非同期コンテンツ</h2>
+        <p class="section-lede">動詞 <code>waitForElement</code> の対象。ボタンを押すと <strong>1.5秒後</strong>に <code>#async-result</code>（<code>[data-testid="async-result"]</code>）が出現します。</p>
+        <div class="cluster">
+          <button class="btn" type="button" id="async-load" data-testid="async-load">レポートを生成（1.5秒）</button>
+          <button class="btn-ghost btn-sm" type="button" id="async-clear" data-testid="async-clear">結果を消去</button>
+          <span class="badge" id="async-state" data-testid="async-state">idle</span>
+        </div>
+        <div id="async-slot" aria-live="polite"></div>
+      </section>
+
+      <!-- 4. 動的に増減する要素 -->
+      <section class="section-card" aria-label="動的に増減する要素">
+        <h2><span class="section-num">4</span>動的に増減する要素</h2>
+        <p class="section-lede">MutationObserver による注釈の再解決テスト。要素は不安定な自動ID（<code>item-<時刻></code>）を持つため、目印は <strong>テキスト/位置アンカー</strong>で再解決されます。</p>
+        <div class="toolbar">
+          <button class="btn btn-sm" type="button" id="add-item" data-testid="add-item">末尾に追加</button>
+          <button class="btn-ghost btn-sm" type="button" id="prepend-item" data-testid="prepend-item">先頭に追加</button>
+          <button class="btn-ghost btn-sm" type="button" id="remove-random" data-testid="remove-random">ランダム削除</button>
+          <span class="chip" id="item-count" data-testid="item-count">3 件</span>
+        </div>
+        <ul class="dynamic-list" id="dynamic-list" data-testid="dynamic-list"></ul>
+      </section>
+
+      <!-- 5. アンカー堅牢性テスト -->
+      <section class="section-card" aria-label="アンカー堅牢性テスト">
+        <h2><span class="section-num">5</span>アンカー堅牢性テスト</h2>
+        <p class="section-lede">見た目は同じ「保存」ボタンが3つ。持っているシグナルが異なります。目印や補足を付けて、ページ再読込後に同じボタンへ復元されるか試してください。</p>
+        <div class="anchor-row">
+          <div class="anchor-card">
+            <button class="btn btn-sm" type="button" data-testid="save-stable">保存</button>
+            <p class="sig">✅ <code>data-testid="save-stable"</code></p>
+          </div>
+          <div class="anchor-card">
+            <button class="btn btn-sm" type="button" name="save-named">保存</button>
+            <p class="sig">✅ <code>name="save-named"</code></p>
+          </div>
+          <div class="anchor-card">
+            <button class="btn btn-sm" type="button" id="btn-93271-x4f" aria-label="設定を保存（自動ID）">保存</button>
+            <p class="sig">⚠️ 自動ID <code>btn-93271-x4f</code>（不安定）＋ <code>aria-label</code> のみ</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6. 破壊的操作 -->
+      <section class="danger-zone" aria-label="破壊的操作（要注意）">
+        <h2><span class="section-num" style="background:color-mix(in srgb,var(--color-danger) 18%,transparent);color:var(--color-danger)">6</span>破壊的操作（要注意）</h2>
+        <p class="section-lede">AI は実行前に <code>reply</code> で明示すべき、不可逆な操作の例。確認ダイアログ後にイベントログへ記録されます。</p>
+        <div class="toolbar">
+          <button class="btn btn-danger" type="button" data-testid="confirm-order" data-pg-danger="注文を確定">注文を確定する</button>
+          <button class="btn btn-danger" type="button" data-testid="delete-account" data-pg-danger="アカウント削除">アカウントを削除する</button>
+          <button class="btn btn-danger" type="button" data-testid="wipe-data" data-pg-danger="全データ削除">全データを削除する</button>
+        </div>
+        <p class="small" style="margin-top:var(--sp-3)">最後に実行した破壊的操作: <output id="last-destructive" data-testid="last-destructive" class="readout" style="color:var(--color-danger)">なし</output></p>
+      </section>
+
+      <!-- 7. SPA風タブ(ハッシュ遷移) -->
+      <section class="section-card" id="section-spa" aria-label="SPA風タブ">
+        <h2><span class="section-num">7</span>SPA風タブ（ハッシュ遷移）</h2>
+        <p class="section-lede">タブ切替で <code>location.hash</code> が変化します。<code>navigateTo</code> / <code>goBack</code> と、コンテンツスクリプトの URL 変化検知（SPA遷移）の検証に。</p>
+        <div role="tablist" aria-label="ビュー切替">
+          <button role="tab" id="tab-home" aria-selected="true" aria-controls="panel-home" data-hash="#/home" data-testid="tab-home">ホーム</button>
+          <button role="tab" id="tab-orders" aria-selected="false" aria-controls="panel-orders" data-hash="#/orders" data-testid="tab-orders">注文</button>
+          <button role="tab" id="tab-settings" aria-selected="false" aria-controls="panel-settings" data-hash="#/settings" data-testid="tab-settings">設定</button>
+        </div>
+        <div role="tabpanel" id="panel-home" aria-labelledby="tab-home" data-testid="panel-home">
+          <h3>ホーム</h3>
+          <p class="small muted">ようこそ。これはハッシュ <code>#/home</code> に対応するパネルです。</p>
+        </div>
+        <div role="tabpanel" id="panel-orders" aria-labelledby="tab-orders" data-testid="panel-orders" hidden>
+          <h3>注文</h3>
+          <p class="small muted">ハッシュ <code>#/orders</code>。注文一覧をここに表示する想定です。</p>
+        </div>
+        <div role="tabpanel" id="panel-settings" aria-labelledby="tab-settings" data-testid="panel-settings" hidden>
+          <h3>設定</h3>
+          <p class="small muted">ハッシュ <code>#/settings</code>。設定項目をここに表示する想定です。</p>
+        </div>
+      </section>
+
+      <!-- 8. お描き対象 -->
+      <section class="section-card" aria-label="お描き対象">
+        <h2><span class="section-num">8</span>お描き対象</h2>
+        <p class="section-lede">ツールバーの「お描き」で円・四角・矢印・ペンを描く対象。図形は要素の矩形に対する比率で保存され、スクロール/再訪でも追従します。</p>
+        <div class="draw-canvas">
+          <div class="invoice-box" data-testid="invoice-box" aria-label="請求書プレビュー">
+            <strong>請求書プレビュー</strong>
+            <div class="row"><span>小計</span><span>¥12,000</span></div>
+            <div class="row"><span>消費税</span><span>¥1,200</span></div>
+            <div class="row"><span>合計</span><span>¥13,200</span></div>
+          </div>
+          <div class="card-accent" data-testid="draw-target-note">
+            <p class="callout-title">注意ボックス</p>
+            <p class="small muted">ここを矢印で指して「この金額を確認」のようなお描き＋コメントを付けられます。</p>
+          </div>
+          <div class="card-elevated" data-testid="draw-target-cta" style="display:grid;place-items:center;text-align:center">
+            <button class="btn" type="button" data-testid="cta-checkout">購入手続きへ</button>
+            <p class="small muted" style="margin-top:var(--sp-2)">CTAを円で囲むテスト用</p>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="page-footer container">
+    Browser Agent Guide デバッグ・プレイグラウンド · html-artifacts 生成 · 自己完結 / オフライン動作 ·
+    フックは <code>data-testid</code> / <code>data-pg-*</code>、拡張のマーカーは <code>data-bag-*</code>。
+  </footer>
+
+  <script>
+    /* =========================================================================
+       Playground 駆動スクリプト（拡張・Playwright どちらからでも観測できる素のJS）
+       ========================================================================= */
+    (function () {
+      'use strict';
+      var logEl = document.getElementById('event-log');
+      var pad = function (n) { return String(n).padStart(2, '0'); };
+
+      // --- イベントログ（時刻は new Date() を使い、Playwright が中身を読める） ---
+      function logEvent(message, kind) {
+        var d = new Date();
+        var li = document.createElement('li');
+        li.setAttribute('data-kind', kind || 'info');
+        li.setAttribute('data-testid', 'log-row');
+        var t = document.createElement('time');
+        t.textContent = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+        var span = document.createElement('span');
+        span.className = 'ev';
+        span.textContent = message;
+        li.append(t, span);
+        logEl.appendChild(li);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+      // 外部（onclick 属性など）からも呼べるように公開
+      window.PG = { log: logEvent };
+
+      document.getElementById('log-clear').addEventListener('click', function () {
+        logEl.replaceChildren();
+        logEvent('ログを消去しました');
+      });
+
+      // --- 汎用: data-pg-log を持つ要素のクリックをログ ---
+      document.addEventListener('click', function (e) {
+        var el = e.target.closest('[data-pg-log]');
+        if (el) logEvent('クリック: ' + el.getAttribute('data-pg-log'));
+        var aria = e.target.closest('[data-pg-toggle-aria]');
+        if (aria) {
+          var on = aria.getAttribute('aria-checked') === 'true';
+          aria.setAttribute('aria-checked', String(!on));
+          logEvent('role=checkbox を ' + (!on ? 'ON' : 'OFF') + ' に切替');
+        }
+      });
+
+      // --- 1. ログインフォーム ---
+      var form = document.getElementById('login-form');
+      var loginResult = document.getElementById('login-result');
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var data = new FormData(form);
+        var user = data.get('username') || '(空)';
+        loginResult.textContent = '送信OK: ' + user;
+        loginResult.classList.remove('muted');
+        logEvent('フォーム送信: username=' + user);
+      });
+      form.addEventListener('reset', function () {
+        loginResult.textContent = '未送信';
+        loginResult.classList.add('muted');
+        logEvent('フォームをリセット');
+      });
+
+      // --- 3. 非同期コンテンツ（waitForElement 用） ---
+      var asyncSlot = document.getElementById('async-slot');
+      var asyncState = document.getElementById('async-state');
+      var asyncTimer = null;
+      document.getElementById('async-load').addEventListener('click', function () {
+        if (asyncTimer) return;
+        clearAsync();
+        asyncState.textContent = 'loading…';
+        asyncState.className = 'badge badge-warning';
+        logEvent('非同期ロード開始（1.5秒）', 'async');
+        asyncTimer = setTimeout(function () {
+          asyncTimer = null;
+          var box = document.createElement('div');
+          box.className = 'async-result';
+          box.id = 'async-result';
+          box.setAttribute('data-testid', 'async-result');
+          box.setAttribute('role', 'status');
+          box.innerHTML = '<strong>レポート生成完了</strong><p class="small muted" style="margin-top:4px">この要素は遅延出現しました。waitForElement(<code>#async-result</code>) の解決対象です。</p>';
+          asyncSlot.appendChild(box);
+          asyncState.textContent = 'loaded';
+          asyncState.className = 'badge badge-success';
+          logEvent('非同期要素 #async-result が出現', 'async');
+        }, 1500);
+      });
+      function clearAsync() {
+        var ex = document.getElementById('async-result');
+        if (ex) ex.remove();
+      }
+      document.getElementById('async-clear').addEventListener('click', function () {
+        clearAsync();
+        asyncState.textContent = 'idle';
+        asyncState.className = 'badge';
+        logEvent('非同期結果を消去', 'async');
+      });
+
+      // --- 4. 動的リスト ---
+      var list = document.getElementById('dynamic-list');
+      var itemCount = document.getElementById('item-count');
+      var seq = 0;
+      function makeItem(label) {
+        seq += 1;
+        var li = document.createElement('li');
+        // 不安定な自動ID（堅牢アンカーのテスト用）
+        li.id = 'item-' + Date.now() + '-' + seq;
+        li.setAttribute('data-testid', 'dyn-item');
+        var name = document.createElement('span');
+        name.textContent = label || ('動的項目 #' + seq);
+        var code = document.createElement('code');
+        code.textContent = li.id;
+        li.append(name, code);
+        return li;
+      }
+      function refreshCount() { itemCount.textContent = list.children.length + ' 件'; }
+      document.getElementById('add-item').addEventListener('click', function () {
+        list.appendChild(makeItem());
+        refreshCount();
+        logEvent('項目を末尾に追加（計 ' + list.children.length + '）');
+      });
+      document.getElementById('prepend-item').addEventListener('click', function () {
+        list.insertBefore(makeItem(), list.firstChild);
+        refreshCount();
+        logEvent('項目を先頭に追加（計 ' + list.children.length + '）');
+      });
+      document.getElementById('remove-random').addEventListener('click', function () {
+        if (!list.children.length) { logEvent('削除する項目がありません'); return; }
+        var i = Math.floor((Date.now() % 997) / 997 * list.children.length);
+        var target = list.children[Math.min(i, list.children.length - 1)];
+        var id = target.id;
+        target.remove();
+        refreshCount();
+        logEvent('項目を削除: ' + id);
+      });
+      // 初期3件
+      for (var k = 0; k < 3; k++) list.appendChild(makeItem('初期項目 #' + (k + 1)));
+      refreshCount();
+
+      // --- 6. 破壊的操作 ---
+      var lastDestructive = document.getElementById('last-destructive');
+      document.addEventListener('click', function (e) {
+        var el = e.target.closest('[data-pg-danger]');
+        if (!el) return;
+        var label = el.getAttribute('data-pg-danger');
+        var ok = window.confirm('【破壊的操作】「' + label + '」を実行します。よろしいですか？');
+        if (ok) {
+          lastDestructive.textContent = label + ' を実行';
+          logEvent('破壊的操作を実行: ' + label, 'danger');
+        } else {
+          logEvent('破壊的操作をキャンセル: ' + label, 'danger');
+        }
+      });
+
+      // --- 7. SPA風タブ（hash 遷移） ---
+      var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+      var hashReadout = document.getElementById('hash-readout');
+      function selectTab(hash, pushHash) {
+        var matched = null;
+        tabs.forEach(function (tab) {
+          var on = tab.getAttribute('data-hash') === hash;
+          if (on) matched = tab;
+          tab.setAttribute('aria-selected', String(on));
+          var panel = document.getElementById(tab.getAttribute('aria-controls'));
+          if (panel) panel.hidden = !on;
+        });
+        if (matched) {
+          hashReadout.textContent = hash;
+          if (pushHash && location.hash !== hash) location.hash = hash;
+        }
+      }
+      tabs.forEach(function (tab) {
+        tab.addEventListener('click', function () {
+          var hash = tab.getAttribute('data-hash');
+          selectTab(hash, true);
+          logEvent('タブ遷移: ' + hash, 'nav');
+        });
+      });
+      window.addEventListener('hashchange', function () {
+        var h = location.hash || '#/home';
+        selectTab(h, false);
+        hashReadout.textContent = h;
+      });
+      // 初期ハッシュ反映
+      (function () {
+        var h = location.hash && /^#\/(home|orders|settings)$/.test(location.hash) ? location.hash : '#/home';
+        selectTab(h, false);
+        hashReadout.textContent = location.hash || '#/(なし)';
+      })();
+
+      // --- テーマ切替 ---
+      var root = document.documentElement;
+      document.getElementById('theme-toggle').addEventListener('click', function () {
+        var cur = root.getAttribute('data-theme');
+        root.setAttribute('data-theme', cur === 'dark-focus' ? 'interactive-warm' : 'dark-focus');
+        logEvent('テーマ切替: ' + root.getAttribute('data-theme'));
+      });
+
+      // =======================================================================
+      // 拡張インスペクター: 拡張は分離ワールドで動くため window 変数は見えないが、
+      // DOM は共有される。拡張が付与する data-bag-* 属性を監視して効きを可視化する。
+      // =======================================================================
+      var statusEl = document.getElementById('insp-status');
+      var statusText = document.getElementById('insp-status-text');
+      var prev = { affordance: 0, marked: 0, anno: 0, injected: 0 };
+      function setStat(id, key, val) {
+        var dd = document.getElementById(id);
+        dd.textContent = val;
+        // 値が変化したスキャンの間だけハイライト（変わらなければ消す）
+        if (val !== prev[key]) dd.classList.add('hot'); else dd.classList.remove('hot');
+        prev[key] = val;
+      }
+      function scanExtension() {
+        var affordance = document.querySelectorAll('[data-bag-id]').length;
+        var marked = document.querySelectorAll('[data-bag-anno-marked]').length;
+        var anno = document.querySelectorAll('[data-bag-anno]').length;
+        var injected = document.querySelectorAll('[data-bag-injected]').length;
+        var detected = affordance + marked + anno + injected > 0
+          || !!document.getElementById('bag-toast-host')
+          || !!document.getElementById('bag-floating-host');
+        statusEl.classList.toggle('is-on', detected);
+        statusText.textContent = detected ? '拡張: 検出済み（動作中）' : '拡張: 未検出';
+        setStat('stat-affordance', 'affordance', affordance);
+        setStat('stat-marked', 'marked', marked);
+        setStat('stat-anno', 'anno', anno);
+        setStat('stat-injected', 'injected', injected);
+      }
+      // ポーリングで拡張のマーカーを監視する。
+      // ※ MutationObserver で document 全体を監視すると、scanExtension 自身の
+      //    DOM 更新（カウンタの textContent 書換）が childList 変化として再発火し、
+      //    マイクロタスクが無限ループしてメインスレッドを専有する。よって不使用。
+      setInterval(scanExtension, 600);
+      scanExtension();
+
+      logEvent('プレイグラウンド初期化完了');
+    })();
+  </script>
+</body>
+</html>

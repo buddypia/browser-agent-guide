@@ -1,0 +1,775 @@
+/* 仕込んだUI(ボタン/パネル/トースト)のスタイル。ページ既存CSSと衝突しにくいよう接頭辞を統一。 */
+
+:root {
+  --bag-surface: #f8faf8;
+  --bag-surface-muted: #eef3f1;
+  --bag-text: #16211f;
+  --bag-muted: #5d6965;
+  --bag-border: #d7dfdc;
+  --bag-accent: #0f766e;
+  --bag-accent-hover: #0b625c;
+  --bag-accent-soft: #dff5f1;
+}
+
+.bag-floating-host {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483600;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+  pointer-events: none;
+}
+.bag-floating-host > * {
+  pointer-events: auto;
+}
+
+.bag-injected-btn {
+  font: 600 13px/1.2 system-ui, -apple-system, sans-serif;
+  color: #fff;
+  background: var(--bag-accent);
+  border: 1px solid var(--bag-accent);
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.18);
+  transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+.bag-injected-btn:hover {
+  background: var(--bag-accent-hover);
+  border-color: var(--bag-accent-hover);
+  transform: translateY(-1px);
+}
+
+.bag-injected-panel {
+  width: 280px;
+  background: var(--bag-surface);
+  color: var(--bag-text);
+  border: 1px solid var(--bag-border);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  font: 13px/1.5 system-ui, -apple-system, sans-serif;
+}
+.bag-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bag-surface-muted);
+  font-weight: 600;
+}
+.bag-panel-close {
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  cursor: pointer;
+  color: var(--bag-muted);
+  line-height: 1;
+}
+.bag-panel-body {
+  padding: 10px 12px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.bag-toast-host {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  pointer-events: none;
+}
+.bag-toast {
+  font: 13px/1.4 system-ui, -apple-system, sans-serif;
+  color: #fff;
+  background: #111827;
+  padding: 10px 16px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.bag-toast--in {
+  opacity: 1;
+  transform: translateY(0);
+}
+.bag-toast--success { background: var(--bag-accent); }
+.bag-toast--warn { background: #d97706; }
+.bag-toast--error { background: #dc2626; }
+
+/* ===== ユーザー注釈システム ===== */
+
+/* 目印(marker)を付けた要素の枠線。属性を外すだけで解除できる。 */
+[data-bag-anno-outline] {
+  outline: 2px dashed var(--bag-accent) !important;
+  outline-offset: 2px !important;
+}
+
+/* コメントの吹き出しピン */
+.bag-note-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0 2px;
+  font-size: 12px;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: help;
+  position: relative;
+  border-radius: 6px;
+  color: var(--bag-accent);
+  background: var(--bag-accent-soft);
+  box-shadow: 0 0 0 1px rgba(15, 118, 110, 0.22);
+  font-weight: 700;
+}
+.bag-note-pin.bag-floating {
+  width: auto;
+  height: auto;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--bag-surface);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+.bag-note-tip {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 260px;
+  padding: 8px 10px;
+  font: 12px/1.45 system-ui, -apple-system, sans-serif;
+  color: #fff;
+  background: #111827;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  white-space: pre-wrap;
+  z-index: 2147483646;
+  pointer-events: none;
+}
+.bag-note-pin:hover .bag-note-tip {
+  display: block;
+}
+
+/* 注釈モードのハイライト枠 */
+html.bag-picking,
+html.bag-picking * {
+  cursor: crosshair !important;
+}
+.bag-pick-overlay {
+  position: fixed;
+  z-index: 2147483640;
+  display: none;
+  background: rgba(15, 118, 110, 0.16);
+  border: 2px solid var(--bag-accent);
+  border-radius: 4px;
+  pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.04);
+}
+.bag-pick-hint {
+  position: fixed;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  padding: 10px 16px;
+  font: 600 13px/1.3 system-ui, -apple-system, sans-serif;
+  color: #fff;
+  background: var(--bag-accent);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.24);
+  pointer-events: none;
+}
+
+/* 注釈オーサリング(簡易フォーム) */
+.bag-author {
+  position: fixed;
+  z-index: 2147483647;
+  width: 320px;
+  background: var(--bag-surface);
+  color: var(--bag-text);
+  border: 1px solid var(--bag-border);
+  border-radius: 8px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.25);
+  padding: 14px;
+  font: 13px/1.5 system-ui, -apple-system, sans-serif;
+}
+.bag-author-head {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+.bag-author-target {
+  font-size: 12px;
+  color: var(--bag-muted);
+  margin-bottom: 10px;
+  word-break: break-all;
+}
+.bag-author-target .muted {
+  color: #7b8783;
+}
+.bag-author-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.bag-author-row > span {
+  font-size: 12px;
+  font-weight: 600;
+  color: #34423f;
+}
+.bag-author-row select,
+.bag-author-row input,
+.bag-author-row textarea {
+  font: 13px/1.4 system-ui, -apple-system, sans-serif;
+  color: var(--bag-text);
+  background: #ffffff;
+  border: 1px solid var(--bag-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+.bag-author-row select:focus,
+.bag-author-row input:focus,
+.bag-author-row textarea:focus {
+  outline: none;
+  border-color: var(--bag-accent);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.16);
+}
+.bag-author-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.bag-author-actions button {
+  font: 600 13px/1.2 system-ui, -apple-system, sans-serif;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  border: 1px solid var(--bag-border);
+  background: #ffffff;
+  color: #34423f;
+}
+.bag-author-actions button.primary {
+  background: var(--bag-accent);
+  border-color: var(--bag-accent);
+  color: #fff;
+}
+.bag-author-actions button.primary:hover {
+  background: var(--bag-accent-hover);
+  border-color: var(--bag-accent-hover);
+}
+
+/* ===== お描き(drawing)システム ===== */
+
+/* 描画中のカーソル(オーバーレイ上) */
+html.bag-drawing .bag-draw-overlay {
+  cursor: crosshair;
+}
+
+/* オーサリング用オーバーレイ(描画中に画面全体を覆い pointer を捕捉する) */
+.bag-draw-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 2147483641;
+  pointer-events: auto;
+  touch-action: none;
+  background: rgba(15, 23, 42, 0.02);
+}
+
+/* 確定済みお描きを描く永続レイヤ(クリックを透過) */
+.bag-draw-layer {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 2147483600;
+  pointer-events: none;
+  overflow: visible;
+}
+.bag-draw-layer .bag-draw-g {
+  pointer-events: none;
+}
+
+/* お描きのコメントピン / AIメモのホスト */
+.bag-draw-pin-host {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483601;
+  pointer-events: none;
+}
+.bag-draw-pin {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--bag-surface);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(15, 118, 110, 0.28);
+  pointer-events: auto;
+}
+.bag-draw-pin .bag-note-tip {
+  display: none;
+}
+.bag-draw-pin:hover .bag-note-tip,
+.bag-draw-pin:focus-visible .bag-note-tip {
+  display: block;
+}
+
+/* お描き図形 → AIメモ を結ぶ引き出し線(コネクタ)。色=お描きの色(ペア識別) */
+.bag-memo-connector {
+  stroke: var(--bag-pair, var(--bag-accent));
+  stroke-width: 1.4;
+  stroke-dasharray: 3 3;
+  opacity: 0.85;
+  pointer-events: none;
+  transition: opacity 0.15s ease, stroke-width 0.15s ease;
+}
+
+/* 図形の隣に生成されるAIメモ(ページ上で編集する本体) */
+.bag-memo {
+  position: fixed;
+  width: 240px;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+  background: var(--bag-surface);
+  color: var(--bag-text);
+  border: 1px solid var(--bag-pair, var(--bag-accent));
+  border-radius: 10px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
+  padding: 8px 9px 9px;
+  font: 13px/1.45 system-ui, -apple-system, sans-serif;
+  pointer-events: auto;
+  transition: opacity 0.15s ease, box-shadow 0.15s ease;
+}
+.bag-memo--off {
+  border-color: var(--bag-border);
+  opacity: 0.82;
+}
+.bag-memo-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  margin-bottom: 5px;
+}
+/* 図形側の番号バッジと対応するメモ側の番号チップ(色=お描きの色) */
+.bag-memo-num {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: 800 11px/1 system-ui, -apple-system, sans-serif;
+  color: #fff;
+  background: var(--bag-pair, var(--bag-accent));
+  border-radius: 50%;
+}
+.bag-memo-tag {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--bag-accent);
+  background: var(--bag-accent-soft);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.bag-memo-collapse {
+  border: none;
+  background: transparent;
+  color: var(--bag-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  margin-left: auto;
+}
+.bag-memo-collapse:hover {
+  color: var(--bag-text);
+}
+.bag-memo-text {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 40px;
+  max-height: 160px;
+  resize: vertical;
+  font: 13px/1.4 system-ui, -apple-system, sans-serif;
+  color: var(--bag-text);
+  background: #ffffff;
+  border: 1px solid var(--bag-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.bag-memo-text:focus {
+  outline: none;
+  border-color: var(--bag-accent);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.16);
+}
+.bag-memo-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 7px;
+}
+.bag-memo-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--bag-accent);
+  cursor: pointer;
+  user-select: none;
+}
+.bag-memo--off .bag-memo-toggle {
+  color: var(--bag-muted);
+}
+.bag-memo-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--bag-accent);
+  cursor: pointer;
+}
+.bag-memo-del {
+  border: 1px solid var(--bag-border);
+  background: #ffffff;
+  color: var(--bag-muted);
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 7px;
+  cursor: pointer;
+}
+.bag-memo-del:hover {
+  border-color: #dc2626;
+  color: #dc2626;
+}
+
+/* 密集時に畳んだメモのバッジ(クリック/ホバーで展開)。色=お描きの色・文字=通し番号 */
+.bag-memo-badge {
+  position: fixed;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: 800 12px/1 system-ui, -apple-system, sans-serif;
+  color: #fff;
+  background: var(--bag-pair, var(--bag-accent));
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.bag-memo-badge:hover {
+  filter: brightness(0.92);
+}
+
+/* 図形のとなりに置く通し番号バッジ(色=お描きの色)。
+   人にもAIビジョンにも「この番号のAIメモはこの図形を指す」を対応づけさせる識別子。 */
+.bag-anno-num {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  font: 800 12px/1 system-ui, -apple-system, sans-serif;
+  color: #fff;
+  background: var(--bag-pair, var(--bag-accent));
+  border: 2px solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  z-index: 2147483602;
+  transition: transform 0.12s ease, opacity 0.15s ease;
+}
+
+/* ホバー連動: 対象ペア(図形/線/番号/メモ)を強調し、それ以外を減光する */
+.bag-draw-g--active > * {
+  stroke-width: 5;
+}
+.bag-draw-g--dim {
+  opacity: 0.3;
+}
+.bag-memo-connector--active {
+  stroke-width: 2.6;
+  stroke-dasharray: none;
+  opacity: 1;
+}
+.bag-memo-connector--dim {
+  opacity: 0.22;
+}
+.bag-anno-num--active {
+  transform: translate(-50%, -50%) scale(1.18);
+}
+.bag-anno-num--dim {
+  opacity: 0.3;
+}
+.bag-memo--active {
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.34);
+}
+.bag-memo--dim {
+  opacity: 0.4;
+}
+
+/* forAI OFF(AIに渡さない)時は図形・線・番号も淡色化して文脈外と分かるようにする */
+.bag-draw-g--off {
+  opacity: 0.4;
+}
+.bag-memo-connector--off {
+  opacity: 0.28;
+}
+.bag-anno-num--off {
+  opacity: 0.45;
+}
+
+/* ===== お描きワークフロー(番号付きお描きを「操作手順」として説明する) ===== */
+/* 手順 i→i+1 を結ぶ順序コネクタ(番号バッジ同士を結ぶ点線+矢印) */
+.bag-wf-connector {
+  stroke: var(--bag-accent);
+  stroke-width: 2;
+  stroke-dasharray: 6 5;
+  opacity: 0.6;
+  pointer-events: none;
+  transition: opacity 0.15s ease, stroke-width 0.15s ease;
+}
+.bag-wf-connector--done {
+  stroke-dasharray: none;
+  stroke-width: 2.6;
+  opacity: 1;
+}
+.bag-wf-arrowhead {
+  fill: var(--bag-accent);
+}
+/* 左下のワークフロー操作パネル(順序表示トグル + 順送り再生) */
+.bag-wf-panel {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  z-index: 2147483602;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+  padding: 10px 12px;
+  background: var(--bag-surface);
+  color: var(--bag-text);
+  border: 1px solid var(--bag-border);
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
+  font: 12px/1.4 system-ui, -apple-system, sans-serif;
+  pointer-events: auto;
+}
+.bag-wf-panel[hidden] {
+  display: none;
+}
+.bag-wf-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bag-wf-title {
+  font-weight: 800;
+}
+.bag-wf-count {
+  margin-left: auto;
+  color: var(--bag-accent);
+  background: var(--bag-accent-soft);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-weight: 700;
+}
+.bag-wf-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--bag-muted);
+}
+.bag-wf-toggle input {
+  accent-color: var(--bag-accent);
+}
+.bag-wf-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bag-wf-controls[hidden] {
+  display: none;
+}
+.bag-wf-btn {
+  border: 1px solid var(--bag-border);
+  background: var(--bag-surface);
+  color: var(--bag-text);
+  border-radius: 8px;
+  width: 30px;
+  height: 28px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.bag-wf-btn:hover {
+  border-color: var(--bag-accent);
+  color: var(--bag-accent);
+}
+.bag-wf-step {
+  margin-left: auto;
+  color: var(--bag-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 描画ツールバー */
+.bag-draw-toolbar {
+  position: fixed;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 24px);
+  padding: 8px 12px;
+  background: var(--bag-surface);
+  border: 1px solid var(--bag-border);
+  border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.26);
+  font: 600 12px/1.2 system-ui, -apple-system, sans-serif;
+  color: var(--bag-text);
+}
+.bag-draw-toolbar,
+.bag-draw-toolbar * {
+  cursor: default;
+  box-sizing: border-box;
+}
+.bag-draw-tools,
+.bag-draw-colors,
+.bag-draw-ops {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bag-draw-tools {
+  padding-right: 10px;
+  border-right: 1px solid var(--bag-border);
+}
+.bag-draw-colors {
+  padding-right: 10px;
+  border-right: 1px solid var(--bag-border);
+}
+.bag-draw-tool {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 44px;
+  padding: 6px 8px;
+  border: 1px solid var(--bag-border);
+  border-radius: 8px;
+  background: #fff;
+  color: #34423f;
+  cursor: pointer;
+  font: 600 11px/1.1 system-ui, -apple-system, sans-serif;
+}
+.bag-draw-tool .bag-draw-glyph {
+  font-size: 16px;
+  line-height: 1;
+}
+.bag-draw-tool:hover {
+  border-color: var(--bag-accent);
+}
+.bag-draw-tool.is-active {
+  background: var(--bag-accent-soft);
+  border-color: var(--bag-accent);
+  color: var(--bag-accent);
+}
+.bag-draw-color {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: var(--bag-sw, #ef4444);
+  box-shadow: 0 0 0 1px var(--bag-border);
+  cursor: pointer;
+}
+.bag-draw-color.is-active {
+  box-shadow: 0 0 0 2px var(--bag-accent);
+  transform: scale(1.12);
+}
+.bag-draw-op {
+  padding: 8px 12px;
+  border: 1px solid var(--bag-border);
+  border-radius: 8px;
+  background: #fff;
+  color: #34423f;
+  cursor: pointer;
+  font: 600 12px/1.1 system-ui, -apple-system, sans-serif;
+}
+.bag-draw-op:hover:not(:disabled) {
+  border-color: var(--bag-accent);
+}
+.bag-draw-op:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.bag-draw-op.primary {
+  background: var(--bag-accent);
+  border-color: var(--bag-accent);
+  color: #fff;
+}
+.bag-draw-op.primary:hover:not(:disabled) {
+  background: var(--bag-accent-hover);
+  border-color: var(--bag-accent-hover);
+}
+.bag-draw-hint {
+  flex-basis: 100%;
+  text-align: center;
+  font: 500 11px/1.3 system-ui, -apple-system, sans-serif;
+  color: var(--bag-muted);
+}
+
+/* capture 直前に自前UI(お描き・メモ・ツールバー・バナー)を隠す。
+   service worker が captureVisibleTab する間だけ付与され、合成器が figure を
+   Canvas 2D で描き直すため二重描画を避ける(handoff §4.1)。 */
+.bag-capturing [data-bag-ui] {
+  visibility: hidden !important;
+}

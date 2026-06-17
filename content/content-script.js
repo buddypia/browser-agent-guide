@@ -1,0 +1,3056 @@
+// コンテンツスクリプト: 対象ページ内で動く「動詞レジストリ」と実行器。
+// AIが選んだ動詞を決定的に実行し、安定したaffordance IDを付与してAI協調を可能にする。
+// ※ 通常のスクリプト(モジュール非対応)。グローバルを汚さないようIIFEで包む。
+
+(() => {
+  if (window.__AI_ADVISOR_INSTALLED__) return; // 二重注入防止
+  window.__AI_ADVISOR_INSTALLED__ = true;
+
+  // 仕込んだボタン等のクリック履歴(AIが後で読み取る手がかり)
+  const signalLog = [];
+  // 同一ページ読込内でのレシピ二重適用を防ぐための署名
+  let appliedRecipeSig = null;
+
+  const ATTR = {
+    id: 'data-bag-id',
+    role: 'data-bag-role',
+    intent: 'data-bag-intent',
+    intentSrc: 'data-bag-intent-src',
+    injected: 'data-bag-injected',
+    anno: 'data-bag-anno',
+    ui: 'data-bag-ui',
+    annoMarked: 'data-bag-anno-marked',
+    annoOutline: 'data-bag-anno-outline',
+  };
+
+  const CHAT_BLOCKED_VERBS = new Set(['defineMarker', 'setStyle', 'removeElement']);
+  const RECIPE_BLOCKED_VERBS = new Set(['defineMarker', 'setStyle', 'removeElement']);
+  const MAX_INJECTED_TEXT_CHARS = 50000;
+
+  // ---- 要素解決ヘルパー(優先: aiId > selector > injectedId) ----
+  function getEl(args = {}) {
+    if (args.aiId) {
+      const el = document.querySelector(`[${ATTR.id}="${cssEscape(args.aiId)}"]`);
+      if (el) return el;
+    }
+    if (args.id) {
+      const el =
+        document.getElementById(args.id) ||
+        document.querySelector(`[${ATTR.injected}="${cssEscape(args.id)}"]`);
+      if (el) return el;
+    }
+    if (args.selector) {
+      const el = document.querySelector(args.selector);
+      if (el) return el;
+    }
+    return null;
+  }
+
+  function requireEl(args, label = '対象要素') {
+    const el = getEl(args);
+    if (!el) throw new Error(`${label}が見つかりません: ${JSON.stringify(args)}`);
+    return el;
+  }
+
+  function cssEscape(s) {
+    return String(s).replace(/"/g, '\\"');
+  }
+
+  // ---- affordance(操作可能要素)の決定的な注釈付け ----
+  const INTERACTIVE_SELECTOR = [
+    'a[href]',
+    'button',
+    'input:not([type="hidden"])',
+    'select',
+    'textarea',
+    '[role="button"]',
+    '[role="link"]',
+    '[role="checkbox"]',
+    '[role="tab"]',
+    '[role="menuitem"]',
+    '[contenteditable="true"]',
+    '[contenteditable=""]',
+    'summary',
+    '[onclick]',
+  ].join(',');
+
+  const REFERENCE_TARGET_SELECTOR = [
+    'h1',
+    'h2',
+    'h3',
+    'h4',
+    'h5',
+    'h6',
+    '[role="heading"]',
+    'main[aria-label]',
+    '[role="main"][aria-label]',
+    'section[aria-label]',
+    'section[aria-labelledby]',
+    '[role="region"][aria-label]',
+  ].join(',');
+
+  function roleOf(el) {
+    const explicit = el.getAttribute('role');
+    if (explicit) return explicit;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'input') return 'input-' + (el.getAttribute('type') || 'text');
+    return tag;
+  }
+
+  function labelOf(el) {
+    const aria = el.getAttribute('aria-label');
+    if (aria) return aria.trim();
+    const text = (el.innerText || el.textContent || '').trim();
+    if (text) return text.replace(/\s+/g, ' ');
+    return (
+      el.getAttribute('placeholder') ||
+      el.getAttribute('name') ||
+      el.getAttribute('title') ||
+      el.value ||
+      ''
+    ).trim();
+  }
+
+  function referenceLabelOf(el) {
+    const labelledBy = el.getAttribute('aria-labelledby');
+    if (labelledBy) {
+      const label = labelledBy
+        .split(/\s+/)
+        .map((id) => document.getElementById(id)?.textContent || '')
+        .join(' ')
+        .trim();
+      if (label) return label.replace(/\s+/g, ' ');
+    }
+    return labelOf(el);
+  }
+
+  function isVisible(el) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return false;
+    const style = getComputedStyle(el);
+    return style.visibility !== 'hidden' && style.display !== 'none';
+  }
+
+  function isOwnUi(el) {
+    return Boolean(el?.closest?.(`[${ATTR.ui}],[${ATTR.injected}],[${ATTR.anno}]`));
+  }
+
+  // ページを走査し、role+連番で安定したaiIdを割り当てる。順序は文書順で決定的。
+  // ※ ユーザーが付けた「目印(marker)」を持つ要素は、その人間可読な名前を優先して保持する
+  //   (連番IDは要素の増減でズレるため、決定的な参照は marker を使うのが望ましい)。
+  function annotatePage() {
+    const counters = {};
+    const list = [];
+    const els = document.querySelectorAll(INTERACTIVE_SELECTOR);
+    els.forEach((el) => {
+      if (!isVisible(el)) return;
+      if (isOwnUi(el)) return; // 拡張自身のUI(お描きツールバー/AIメモ等)はaffordanceに含めない
+      const role = roleOf(el);
+      // 目印付き要素は人間が付けた決定的な名前を維持する。
+      if (el.hasAttribute(ATTR.annoMarked)) {
+        list.push({
+          aiId: el.getAttribute(ATTR.id) || `${role}#marked`,
+          role: el.getAttribute(ATTR.role) || role,
+          label: labelOf(el),
+          intent: el.getAttribute(ATTR.intent) || '',
+          value: 'value' in el ? String(el.value || '') : '',
+        });
+        return;
+      }
+      counters[role] = (counters[role] || 0) + 1;
+      const aiId = `${role}#${counters[role]}`;
+      el.setAttribute(ATTR.id, aiId);
+      list.push({
+        aiId,
+        role,
+        label: labelOf(el),
+        value: 'value' in el ? String(el.value || '') : '',
+      });
+    });
+    return list;
+  }
+
+  function collectAffordances() {
+    return annotatePage();
+  }
+
+  function referenceRoleOf(el) {
+    const explicit = el.getAttribute('role');
+    if (explicit) return explicit;
+    const tag = el.tagName.toLowerCase();
+    if (/^h[1-6]$/.test(tag)) return 'heading';
+    return tag;
+  }
+
+  function targetIdBase(el, label) {
+    const role = referenceRoleOf(el);
+    const level =
+      el.getAttribute('aria-level') ||
+      (/^H[1-6]$/.test(el.tagName) ? el.tagName.slice(1) : '');
+    const kind = role === 'heading' ? 'heading' : role || el.tagName.toLowerCase();
+    const slug = slugForId(label) || hashText(label || el.tagName.toLowerCase());
+    return `${kind}${level ? level : ''}:${slug}`;
+  }
+
+  function groupIdBase(label) {
+    return `group:${slugForId(label) || hashText(label || 'group')}`;
+  }
+
+  function slugForId(text) {
+    return String(text || '')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/['’‘`]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48);
+  }
+
+  function hashText(text) {
+    let hash = 0;
+    const s = String(text || '');
+    for (let i = 0; i < s.length; i += 1) {
+      hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+    }
+    return `text-${hash.toString(36)}`;
+  }
+
+  function uniqueId(base, seen) {
+    let id = base;
+    let n = 2;
+    while (seen.has(id)) {
+      id = `${base}-${n}`;
+      n += 1;
+    }
+    seen.add(id);
+    return id;
+  }
+
+  function collectReferenceTargets() {
+    const seen = new Set();
+    const list = [];
+    const seenEls = new Set();
+    collectHeadingGroups(seen, seenEls, list);
+    const els = document.querySelectorAll(REFERENCE_TARGET_SELECTOR);
+    els.forEach((el) => {
+      if (!isVisible(el) || isOwnUi(el) || el.matches(INTERACTIVE_SELECTOR)) return;
+      if (seenEls.has(el)) return;
+      const label = referenceLabelOf(el).replace(/\s+/g, ' ').trim();
+      if (!label) return;
+      const existing = el.getAttribute(ATTR.id);
+      const aiId = existing || uniqueId(targetIdBase(el, label), seen);
+      seen.add(aiId);
+      el.setAttribute(ATTR.id, aiId);
+      if (!el.hasAttribute(ATTR.role)) el.setAttribute(ATTR.role, referenceRoleOf(el));
+      list.push({
+        aiId,
+        role: el.getAttribute(ATTR.role) || referenceRoleOf(el),
+        label,
+        tag: el.tagName.toLowerCase(),
+        level: el.getAttribute('aria-level') || (/^H[1-6]$/.test(el.tagName) ? el.tagName.slice(1) : ''),
+      });
+    });
+    return list;
+  }
+
+  function collectHeadingGroups(seen, seenEls, list) {
+    const headings = document.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"]');
+    headings.forEach((heading) => {
+      if (!isVisible(heading) || isOwnUi(heading)) return;
+      const label = referenceLabelOf(heading).replace(/\s+/g, ' ').trim();
+      if (!label) return;
+      const group = findHeadingGroup(heading, label);
+      if (!group || seenEls.has(group) || !isVisible(group) || isOwnUi(group)) return;
+      const aiId = group.getAttribute(ATTR.id) || uniqueId(groupIdBase(label), seen);
+      seen.add(aiId);
+      seenEls.add(group);
+      group.setAttribute(ATTR.id, aiId);
+      group.setAttribute(ATTR.role, 'group');
+      list.push({
+        aiId,
+        role: 'group',
+        label: `${label} group`,
+        tag: group.tagName.toLowerCase(),
+        level: '',
+      });
+    });
+  }
+
+  function findHeadingGroup(heading, label) {
+    const tokens = slugForId(label).split('-').filter((t) => t.length > 2);
+    let fallback = null;
+    let cur = heading.parentElement;
+    for (let depth = 0; cur && cur !== document.body && cur !== document.documentElement && depth < 5; depth += 1) {
+      if (!fallback && cur.children.length > 1) fallback = cur;
+      const key = `${cur.id || ''} ${cur.className || ''}`.toLowerCase();
+      if (tokens.some((token) => key.includes(token))) return cur;
+      cur = cur.parentElement;
+    }
+    return fallback;
+  }
+
+  // ---- ページ内トースト ----
+  function toast(message, level = 'info') {
+    let host = document.getElementById('bag-toast-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'bag-toast-host';
+      host.className = 'bag-toast-host';
+      document.documentElement.appendChild(host);
+    }
+    const el = document.createElement('div');
+    el.className = `bag-toast bag-toast--${level}`;
+    el.textContent = message;
+    host.appendChild(el);
+    setTimeout(() => el.classList.add('bag-toast--in'), 10);
+    setTimeout(() => {
+      el.classList.remove('bag-toast--in');
+      setTimeout(() => el.remove(), 300);
+    }, 3200);
+  }
+
+  // ---- 動詞レジストリ(関数名はすべて動詞) ----
+  // 各動詞: { description, args:{名前:説明}, run:async(args)=>戻り値 }
+  const AI_VERBS = {
+    annotatePage: {
+      description: 'ページを走査し、操作可能要素に安定したaiIdを付与して一覧を返す。',
+      args: {},
+      run: async () => ({ count: annotatePage().length }),
+    },
+    listAffordances: {
+      description: '現在の操作可能要素(aiId/役割/ラベル)の一覧を返す。',
+      args: {},
+      run: async () => ({ affordances: collectAffordances() }),
+    },
+    readText: {
+      description: '要素のテキストを読み取る。',
+      args: { aiId: '対象のaiId(任意)', selector: 'CSSセレクタ(任意)' },
+      run: async (a) => ({ text: (requireEl(a).innerText || '').trim() }),
+    },
+    extractData: {
+      description: '複数フィールドのテキストをまとめて抽出する。',
+      args: { fields: '{名前: CSSセレクタ} の辞書' },
+      run: async (a) => {
+        const out = {};
+        for (const [name, sel] of Object.entries(a.fields || {})) {
+          const el = document.querySelector(sel);
+          out[name] = el ? (el.innerText || '').trim() : null;
+        }
+        return { data: out };
+      },
+    },
+    readSignals: {
+      description: '仕込んだボタン等がクリックされた履歴(手がかり)を返す。',
+      args: {},
+      run: async () => ({ signals: signalLog.slice() }),
+    },
+    clickAffordance: {
+      description: 'aiIdで指定した要素をクリックする(推奨)。',
+      args: { aiId: '対象のaiId' },
+      run: async (a) => {
+        const el = requireEl(a, 'クリック対象');
+        el.click();
+        return { clicked: a.aiId || a.selector };
+      },
+    },
+    clickElement: {
+      description: 'CSSセレクタで指定した要素をクリックする。',
+      args: { selector: 'CSSセレクタ' },
+      run: async (a) => {
+        requireEl(a, 'クリック対象').click();
+        return { clicked: a.selector };
+      },
+    },
+    fillAffordance: {
+      description: 'aiIdの入力欄に値を入れinput/changeを発火する(推奨)。',
+      args: { aiId: '対象のaiId', value: '入力値' },
+      run: async (a) => fillValue(requireEl(a, '入力欄'), a.value),
+    },
+    fillInput: {
+      description: 'CSSセレクタの入力欄に値を入れる。',
+      args: { selector: 'CSSセレクタ', value: '入力値' },
+      run: async (a) => fillValue(requireEl(a, '入力欄'), a.value),
+    },
+    selectOption: {
+      description: 'select要素で指定値(value/ラベル)を選択する。',
+      args: { aiId: 'aiId(任意)', selector: 'セレクタ(任意)', value: 'value または表示テキスト' },
+      run: async (a) => {
+        const el = requireEl(a, 'select要素');
+        const opt = Array.from(el.options).find(
+          (o) => o.value === a.value || o.text.trim() === String(a.value).trim()
+        );
+        if (!opt) throw new Error(`選択肢が見つかりません: ${a.value}`);
+        el.value = opt.value;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return { selected: opt.value };
+      },
+    },
+    submitForm: {
+      description: '要素が属するフォームを送信する。',
+      args: { aiId: 'aiId(任意)', selector: 'セレクタ(任意)' },
+      run: async (a) => {
+        const el = requireEl(a, 'フォーム要素');
+        const form = el.tagName === 'FORM' ? el : el.closest('form');
+        if (!form) throw new Error('フォームが見つかりません。');
+        form.requestSubmit ? form.requestSubmit() : form.submit();
+        return { submitted: true };
+      },
+    },
+    focusElement: {
+      description: '要素にフォーカスする。',
+      args: { aiId: 'aiId(任意)', selector: 'セレクタ(任意)' },
+      run: async (a) => {
+        requireEl(a).focus();
+        return { focused: true };
+      },
+    },
+    scrollToElement: {
+      description: '要素まで滑らかにスクロールする。',
+      args: { aiId: 'aiId(任意)', selector: 'セレクタ(任意)' },
+      run: async (a) => {
+        requireEl(a).scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return { scrolled: true };
+      },
+    },
+    highlightElement: {
+      description: '要素を一時的に強調表示する。',
+      args: { aiId: 'aiId(任意)', selector: 'セレクタ(任意)', color: '枠色(任意)' },
+      run: async (a) => {
+        const el = requireEl(a);
+        const prev = el.style.outline;
+        const prevOffset = el.style.outlineOffset;
+        el.style.outline = `3px solid ${a.color || '#0f766e'}`;
+        el.style.outlineOffset = '2px';
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => {
+          el.style.outline = prev;
+          el.style.outlineOffset = prevOffset;
+        }, 2500);
+        return { highlighted: true };
+      },
+    },
+    outlineElement: {
+      description:
+        '要素を継続的な枠線で囲む。highlightElementと違い自動で消えない。チャット成功時は保存され再訪時に再適用される。',
+      args: {
+        aiId: 'aiId(任意)',
+        selector: 'セレクタ(任意)',
+        color: '枠色(省略時red)',
+        width: '線幅px(省略時3px)',
+        style: 'solid|dashed|dotted|double(省略時solid)',
+        offset: '外側余白px(省略時4px)',
+      },
+      run: async (a) => outlineElement(a),
+    },
+    injectHtml: {
+      description:
+        'ユーザーが明示的に依頼した限定HTMLをページに挿入する。idで再挿入時は置き換える。チャット成功時は保存され再訪時に再適用される。',
+      args: {
+        html: '挿入するHTML文字列(class/id/style/script/event属性は除去される)',
+        anchorSelector: '基準要素のCSSセレクタ(省略時はbody)',
+        position: 'beforebegin|afterbegin|beforeend|afterend(省略時beforeend)',
+        id: '識別子(省略可。再適用で置換)',
+      },
+      run: async (a) => injectHtml(a),
+    },
+    injectCss: {
+      description:
+        'ユーザーが明示的に依頼したCSSをページへ追加する。idで再挿入時は置き換える。チャット成功時は保存され再訪時に再適用される。',
+      args: {
+        css: '追加するCSS文字列',
+        id: '識別子(省略可。再適用で置換)',
+      },
+      run: async (a) => injectCss(a),
+    },
+    injectScript: {
+      description:
+        'ユーザーが明示的に依頼したJavaScriptをページへ追加して実行する。idで再挿入時は置き換える。チャット成功時は保存され再訪時に再適用される。',
+      args: {
+        code: '実行するJavaScript文字列。ネットワーク送信や秘密情報の読み取りは禁止。',
+        id: '識別子(省略可。再適用で置換)',
+      },
+      run: async (a) => injectScript(a),
+    },
+    injectButton: {
+      description:
+        'AIが後で理解できる「手がかりボタン」をページに仕込む。クリックでintentがシグナルに記録される。',
+      args: {
+        label: 'ボタン表示名',
+        intent: 'このボタンの目的(AI向けの手がかり)',
+        id: '識別子(省略可)',
+        anchorSelector: '基準要素のセレクタ(省略時は画面右下に固定)',
+        position: '挿入位置(anchor指定時)',
+      },
+      run: async (a) => injectButton(a),
+    },
+    injectPanel: {
+      description: '画面右下に浮かぶ情報パネル(タイトル+限定HTML)を仕込む。',
+      args: { title: 'タイトル', html: '本文HTML(class/id/style/script/event属性は除去される)', id: '識別子(省略可)' },
+      run: async (a) => injectPanel(a),
+    },
+    defineMarker: {
+      description:
+        '既存要素にAI向けの目印(aiId/role/intent)を付与し、以後一貫して参照できるようにする。',
+      args: {
+        selector: '対象のCSSセレクタ',
+        aiId: '付与するaiId',
+        role: '役割(任意)',
+        intent: '目的(任意)',
+      },
+      exposeToAI: false,
+      recipeSafe: false,
+      run: async (a) => {
+        const el = document.querySelector(a.selector);
+        if (!el) throw new Error(`対象が見つかりません: ${a.selector}`);
+        if (a.aiId) el.setAttribute(ATTR.id, a.aiId);
+        if (a.role) el.setAttribute(ATTR.role, a.role);
+        if (a.intent) el.setAttribute(ATTR.intent, a.intent);
+        return { marked: a.aiId || a.selector };
+      },
+    },
+    setStyle: {
+      description: '要素にインラインCSSを適用する。',
+      args: { aiId: 'aiId(任意)', selector: 'セレクタ(任意)', styles: '{cssProp: value} の辞書' },
+      exposeToAI: false,
+      recipeSafe: false,
+      run: async (a) => {
+        const el = requireEl(a);
+        for (const [k, v] of Object.entries(a.styles || {})) {
+          el.style.setProperty(camelToKebab(k), v);
+        }
+        return { styled: true };
+      },
+    },
+    removeElement: {
+      description: '要素を削除する。',
+      args: { aiId: 'aiId(任意)', selector: 'セレクタ(任意)', id: '注入要素のid(任意)' },
+      exposeToAI: false,
+      recipeSafe: false,
+      run: async (a) => {
+        const el = requireEl(a, '削除対象');
+        el.remove();
+        return { removed: true };
+      },
+    },
+    waitForElement: {
+      description: '要素が出現するまで待つ。',
+      args: { selector: 'CSSセレクタ', timeoutMs: 'タイムアウトms(既定5000)' },
+      run: async (a) => {
+        const el = await waitFor(a.selector, a.timeoutMs || 5000);
+        return { found: Boolean(el) };
+      },
+    },
+    navigateTo: {
+      description: '指定URLへ遷移する。',
+      args: { url: '遷移先URL' },
+      run: async (a) => {
+        location.assign(a.url);
+        return { navigating: a.url };
+      },
+    },
+    goBack: {
+      description: '履歴を1つ戻る。',
+      args: {},
+      run: async () => {
+        history.back();
+        return { back: true };
+      },
+    },
+    notify: {
+      description: 'ページ内にトースト通知を表示する。',
+      args: { message: 'メッセージ', level: 'info|success|warn|error(任意)' },
+      run: async (a) => {
+        toast(a.message, a.level || 'info');
+        return { notified: true };
+      },
+    },
+    // ---- ユーザー注釈(永続化される補足・目印・合図ボタン) ----
+    addNote: {
+      description:
+        '対象要素に補足コメントを付けて永続保存する。再訪時も復元され、AIへの文脈にも反映される。',
+      args: {
+        aiId: '対象のaiId(任意)',
+        selector: 'CSSセレクタ(任意)',
+        note: 'コメント本文(人/AI向けの補足)',
+        intent: 'この箇所の目的(AI向け,任意)',
+      },
+      run: async (a) => {
+        const el = getEl(a);
+        if (!el) throw new Error('対象要素が見つかりません。');
+        return await upsertAnnotation({ kind: 'note', anchor: buildAnchor(el), note: a.note || '', intent: a.intent || '' });
+      },
+    },
+    markElement: {
+      description:
+        '対象要素に決定的な「名前(目印)」と目的を付けて永続保存する。以後その名前で一貫・安定して参照できる(連番IDのズレを回避)。',
+      args: {
+        aiId: '対象のaiId(任意)',
+        selector: 'CSSセレクタ(任意)',
+        name: '付ける名前(例: 送信ボタン)',
+        intent: 'この要素の目的(任意)',
+      },
+      run: async (a) => {
+        const el = getEl(a);
+        if (!el) throw new Error('対象要素が見つかりません。');
+        return await upsertAnnotation({
+          kind: 'marker',
+          anchor: buildAnchor(el),
+          name: a.name || labelOf(el) || 'marker',
+          intent: a.intent || '',
+          outline: true,
+        });
+      },
+    },
+    addCueButton: {
+      description:
+        '永続する「合図ボタン」を要素の近く(または画面隅)に置く。人がクリックすると意図がシグナルとして記録され、AIが続きを理解できる。',
+      args: {
+        aiId: '対象のaiId(任意。placement=floating なら不要)',
+        selector: 'CSSセレクタ(任意)',
+        label: 'ボタン表示名',
+        intent: 'このボタンの目的(AI向けの手がかり)',
+        placement: 'floating で画面右下に固定(任意)',
+      },
+      run: async (a) => {
+        const el = a.placement === 'floating' ? null : getEl(a);
+        const anchor = el ? buildAnchor(el) : null;
+        return await upsertAnnotation({
+          kind: 'button',
+          anchor,
+          label: a.label || '合図',
+          intent: a.intent || '',
+          placement: a.placement || (anchor ? 'after' : 'floating'),
+        });
+      },
+    },
+    listAnnotations: {
+      description: 'このページに保存済みの補足/目印/合図ボタンを一覧する。',
+      args: {},
+      run: async () => ({ annotations: annotations.map(annoSummary) }),
+    },
+    removeAnnotation: {
+      description: '保存済みの補足をidで削除する。',
+      args: { id: '注釈id' },
+      run: async (a) => await deleteAnnotation(a.id),
+    },
+    exportContext: {
+      description:
+        '外部のブラウザ操作AI(別のChatUI)へ貼り付けるための、決定的なページ文脈テキストを生成して返す。',
+      args: {},
+      run: async () => ({ text: buildContextText() }),
+    },
+    startAnnotating: {
+      description: 'ページ上で要素をクリックして補足を付ける「注釈モード」を開始する。',
+      args: {},
+      run: async () => startPicker(),
+    },
+    startDrawing: {
+      description:
+        'ページ上に円/四角/矢印/フリーハンドで印を描く「お描きモード」を開始する。描き終えると図形のすぐ隣に編集可能な「AIメモ」が生成され、その場でAIへの指示を書ける。図形とメモは対象要素にアンカーされ永続保存され、再訪時に復元される。「AIに渡す」がONのメモだけがAIへの文脈に同梱される。',
+      args: {},
+      run: async () => startDrawing(),
+    },
+    explainWorkflow: {
+      description:
+        'ページ上の番号付きお描き(🖍)を通し番号の順に読み出し、操作手順(ワークフロー)として返す。各手順は 番号 / 対象要素 / 図形の説明 / メモ(指示) を含む。お描きで手順が示されたページで「手順を説明して」等と言われたら使う。',
+      args: {},
+      run: async () => buildWorkflowContext(),
+    },
+    addWorkflowStep: {
+      description:
+        '指定した要素を囲む番号付きお描き(手順)を1つ追加する。番号は既存の通し番号の続きで自動採番される。ユーザーが「手順を作って/番号を振って/ここを手順に追加して」と明示した時だけ使う。kind は ellipse(円)/rect(四角)/arrow(矢印)。',
+      args: {
+        aiId: '対象のaiId(推奨)',
+        selector: 'CSSセレクタ(任意)',
+        kind: '囲み方: ellipse / rect / arrow(既定 rect)',
+        note: 'この手順の説明・指示(任意)',
+        color: '色 hex(任意, 既定 青)',
+      },
+      run: async (a) => await addWorkflowStep(a),
+    },
+    noop: {
+      description: '何もしない(操作不要時の明示)。',
+      args: {},
+      run: async () => ({ noop: true }),
+    },
+  };
+
+  // ---- 動詞実装の補助 ----
+  function fillValue(el, value) {
+    el.focus();
+    if (el.isContentEditable) {
+      el.textContent = value;
+    } else {
+      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      setter ? setter.call(el, value) : (el.value = value);
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return { filled: true };
+  }
+
+  function injectHtml(a) {
+    const id = a.id || autoId('html');
+    removeInjected(id);
+    const anchor = a.anchorSelector ? document.querySelector(a.anchorSelector) : document.body;
+    if (!anchor) throw new Error(`基準要素が見つかりません: ${a.anchorSelector}`);
+    const wrapper = document.createElement('div');
+    wrapper.setAttribute(ATTR.injected, id);
+    wrapper.appendChild(sanitizeHtmlFragment(assertInjectedText(a.html || '', 'HTML')));
+    anchor.insertAdjacentElement(a.position && a.position !== 'beforeend' ? a.position : 'beforeend', wrapper)
+      || anchor.appendChild(wrapper);
+    return { injectedId: id };
+  }
+
+  function injectCss(a) {
+    const id = a.id || autoId('css');
+    const css = assertInjectedText(a.css || '', 'CSS');
+    removeInjected(id);
+    const style = document.createElement('style');
+    style.type = 'text/css';
+    style.setAttribute(ATTR.injected, id);
+    style.textContent = css;
+    (document.head || document.documentElement).appendChild(style);
+    return { injectedId: id, bytes: css.length };
+  }
+
+  async function injectScript(a) {
+    const id = a.id || autoId('js');
+    const code = assertInjectedText(a.code || '', 'JavaScript');
+    removeInjected(id);
+    const result = await executeUserScript({ id, code });
+    return { injectedId: id, bytes: code.length, executed: true, ...result };
+  }
+
+  function executeUserScript({ id, code }) {
+    return new Promise((resolve, reject) => {
+      if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
+        reject(new Error('JavaScript実行のバックグラウンド経路が利用できません。'));
+        return;
+      }
+      chrome.runtime.sendMessage({ type: 'EXECUTE_USER_SCRIPT', id, code }, (response) => {
+        const runtimeError = chrome.runtime.lastError;
+        if (runtimeError) {
+          reject(new Error(runtimeError.message || String(runtimeError)));
+          return;
+        }
+        if (!response?.ok) {
+          reject(new Error(response?.error || 'JavaScriptを実行できませんでした。'));
+          return;
+        }
+        resolve(response.result || {});
+      });
+    });
+  }
+
+  function outlineElement(a) {
+    const el = requireEl(a);
+    const width = safeCssPx(a.width, '3px', 1, 12);
+    const offset = safeCssPx(a.offset, '4px', 0, 24);
+    const style = safeOutlineStyle(a.style || 'solid');
+    const color = safeCssColor(a.color || 'red', 'red');
+    el.style.outlineWidth = width;
+    el.style.outlineStyle = style;
+    el.style.outlineColor = color;
+    el.style.outlineOffset = offset;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return { outlined: true, outline: `${width} ${style} ${color}`, offset };
+  }
+
+  function safeOutlineStyle(value) {
+    const style = String(value || '').trim().toLowerCase();
+    return ['solid', 'dashed', 'dotted', 'double'].includes(style) ? style : 'solid';
+  }
+
+  function safeCssPx(value, fallback, min, max) {
+    const raw = String(value ?? '').trim();
+    const match = raw.match(/^(\d+(?:\.\d+)?)\s*(px)?$/i);
+    if (!match) return fallback;
+    const n = Number(match[1]);
+    if (!Number.isFinite(n)) return fallback;
+    return `${Math.min(max, Math.max(min, n))}px`;
+  }
+
+  function safeCssColor(value, fallback) {
+    const color = String(value || '').trim();
+    if (/^#[0-9a-f]{3,8}$/i.test(color)) return color;
+    if (/^[a-z]+$/i.test(color)) return color;
+    if (/^rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/i.test(color)) {
+      return color;
+    }
+    if (/^hsla?\(\s*[\d.]+(?:deg)?\s*,\s*[\d.]+%\s*,\s*[\d.]+%(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/i.test(color)) {
+      return color;
+    }
+    return fallback;
+  }
+
+  function assertInjectedText(value, label) {
+    const text = String(value || '');
+    if (!text.trim()) throw new Error(`${label}が空です。`);
+    if (text.length > MAX_INJECTED_TEXT_CHARS) {
+      throw new Error(`${label}が長すぎます(${text.length}/${MAX_INJECTED_TEXT_CHARS}文字)。`);
+    }
+    return text;
+  }
+
+  function injectButton(a) {
+    const id = a.id || autoId('btn');
+    removeInjected(id);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'bag-injected-btn';
+    btn.textContent = a.label || '合図';
+    btn.setAttribute(ATTR.injected, id);
+    btn.setAttribute(ATTR.id, `injected:${id}`);
+    btn.setAttribute(ATTR.role, 'cue-button');
+    btn.setAttribute(ATTR.intent, a.intent || '');
+    btn.addEventListener('click', () => {
+      signalLog.push({
+        aiId: `injected:${id}`,
+        intent: a.intent || a.label || id,
+        at: new Date().toISOString(),
+      });
+      toast(`シグナル記録: ${a.label || id}`, 'success');
+    });
+    if (a.anchorSelector) {
+      const anchor = document.querySelector(a.anchorSelector);
+      if (!anchor) throw new Error(`基準要素が見つかりません: ${a.anchorSelector}`);
+      anchor.insertAdjacentElement(a.position || 'afterend', btn);
+    } else {
+      btn.classList.add('bag-floating');
+      floatingHost().appendChild(btn);
+    }
+    return { injectedId: id, aiId: `injected:${id}` };
+  }
+
+  function injectPanel(a) {
+    const id = a.id || autoId('panel');
+    removeInjected(id);
+    const panel = document.createElement('div');
+    panel.className = 'bag-injected-panel';
+    panel.setAttribute(ATTR.injected, id);
+    const head = document.createElement('div');
+    head.className = 'bag-panel-head';
+    const title = document.createElement('span');
+    title.textContent = a.title || '補足';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'bag-panel-close';
+    close.setAttribute('aria-label', '閉じる');
+    close.textContent = '×';
+    close.addEventListener('click', () => panel.remove());
+    head.append(title, close);
+    const body = document.createElement('div');
+    body.className = 'bag-panel-body';
+    body.appendChild(sanitizeHtmlFragment(a.html || ''));
+    panel.append(head, body);
+    floatingHost().appendChild(panel);
+    return { injectedId: id };
+  }
+
+  function floatingHost() {
+    let host = document.getElementById('bag-floating-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'bag-floating-host';
+      host.className = 'bag-floating-host';
+      document.documentElement.appendChild(host);
+    }
+    return host;
+  }
+
+  function removeInjected(id) {
+    document.querySelectorAll(`[${ATTR.injected}="${cssEscape(id)}"]`).forEach((el) => el.remove());
+  }
+
+  let idCounter = 0;
+  function autoId(prefix) {
+    idCounter += 1;
+    return `${prefix}-${idCounter}`;
+  }
+
+  function camelToKebab(s) {
+    return s.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase());
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  const SAFE_HTML_TAGS = new Set([
+    'A',
+    'B',
+    'BLOCKQUOTE',
+    'BR',
+    'CODE',
+    'DIV',
+    'EM',
+    'I',
+    'LI',
+    'OL',
+    'P',
+    'PRE',
+    'SMALL',
+    'SPAN',
+    'STRONG',
+    'UL',
+  ]);
+  const DROP_HTML_TAGS = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'SVG', 'MATH', 'FORM']);
+
+  function sanitizeHtmlFragment(html) {
+    const tpl = document.createElement('template');
+    tpl.innerHTML = String(html || '');
+    sanitizeHtmlChildren(tpl.content);
+    return tpl.content;
+  }
+
+  function sanitizeHtmlChildren(parent) {
+    for (const node of Array.from(parent.childNodes)) {
+      if (node.nodeType === Node.TEXT_NODE) continue;
+      if (node.nodeType !== Node.ELEMENT_NODE) {
+        node.remove();
+        continue;
+      }
+      const tag = node.tagName;
+      if (DROP_HTML_TAGS.has(tag)) {
+        node.remove();
+        continue;
+      }
+      sanitizeHtmlChildren(node);
+      if (!SAFE_HTML_TAGS.has(tag)) {
+        node.replaceWith(document.createTextNode(node.textContent || ''));
+        continue;
+      }
+      sanitizeAttributes(node);
+    }
+  }
+
+  function sanitizeAttributes(el) {
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase();
+      const value = attr.value || '';
+      const allowed =
+        name === 'title' ||
+        name === 'aria-label' ||
+        (el.tagName === 'A' && (name === 'href' || name === 'target' || name === 'rel'));
+      if (!allowed || name.startsWith('on') || name === 'style' || name === 'class' || name === 'id' || name.startsWith('data-')) {
+        el.removeAttribute(attr.name);
+        continue;
+      }
+      if (name === 'href' && !isSafeHref(value)) {
+        el.removeAttribute(attr.name);
+      }
+    }
+    if (el.tagName === 'A' && el.getAttribute('target') === '_blank') {
+      el.setAttribute('rel', 'noopener noreferrer');
+    }
+  }
+
+  function isSafeHref(value) {
+    const href = String(value || '').trim();
+    if (!href || href.startsWith('#') || href.startsWith('/')) return true;
+    try {
+      const url = new URL(href, location.href);
+      return ['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol);
+    } catch {
+      return false;
+    }
+  }
+
+  function waitFor(selector, timeoutMs) {
+    return new Promise((resolve) => {
+      const existing = document.querySelector(selector);
+      if (existing) return resolve(existing);
+      const obs = new MutationObserver(() => {
+        const el = document.querySelector(selector);
+        if (el) {
+          obs.disconnect();
+          resolve(el);
+        }
+      });
+      obs.observe(document.documentElement, { childList: true, subtree: true });
+      setTimeout(() => {
+        obs.disconnect();
+        resolve(document.querySelector(selector));
+      }, timeoutMs);
+    });
+  }
+
+  // ===========================================================================
+  // ユーザー注釈システム
+  // 非エンジニアがページに「補足・目印・合図ボタン」を付け、ブラウザ操作AIへ
+  // 決定的な文脈として渡すための仕組み。
+  //   - サイト(オリジン+パス)単位で chrome.storage.local に永続化 → 再訪で必ず復元(再現性)
+  //   - 要素は複数シグナルの堅牢アンカーで毎回再解決 → 軽微なDOM変化に強い(決定的)
+  // ===========================================================================
+  const ANNO_KEY = 'aiAdvisorAnnotations';
+  let annotations = []; // 現在ページに適用中の注釈
+  let lastUnresolved = 0; // 直近描画で未解決だった注釈数(再描画要否の判定に使用)
+
+  function scopeKey() {
+    return location.origin + location.pathname;
+  }
+
+  async function loadAnnotations() {
+    try {
+      const all = await chrome.storage.local.get(ANNO_KEY);
+      const map = all[ANNO_KEY] || {};
+      annotations = Array.isArray(map[scopeKey()]) ? map[scopeKey()] : [];
+    } catch {
+      annotations = [];
+    }
+    return annotations;
+  }
+
+  async function persistAnnotations() {
+    const all = await chrome.storage.local.get(ANNO_KEY);
+    const map = all[ANNO_KEY] || {};
+    if (annotations.length) map[scopeKey()] = annotations;
+    else delete map[scopeKey()];
+    await chrome.storage.local.set({ [ANNO_KEY]: map });
+  }
+
+  async function upsertAnnotation(anno) {
+    if (!anno.id) anno.id = autoId('anno');
+    anno.createdAt = anno.createdAt || new Date().toISOString();
+    const i = annotations.findIndex((a) => a.id === anno.id);
+    if (i >= 0) annotations[i] = { ...annotations[i], ...anno };
+    else annotations.push(anno);
+    await persistAnnotations();
+    notifyPageRemembered('annotation');
+    renderAnnotations();
+    return annoSummary(anno);
+  }
+
+  function notifyPageRemembered(source) {
+    try {
+      chrome.runtime.sendMessage(
+        { type: 'REMEMBER_PAGE', url: location.href, title: document.title, source },
+        () => void chrome.runtime.lastError
+      );
+    } catch {
+      /* 記憶通知に失敗しても補足保存自体は成功扱いにする */
+    }
+  }
+
+  async function deleteAnnotation(id) {
+    annotations = annotations.filter((a) => a.id !== id);
+    await persistAnnotations();
+    renderAnnotations();
+    return { removed: id };
+  }
+
+  function annoSummary(a) {
+    const t = a.anchor ? resolveAnchor(a.anchor) : null;
+    return {
+      id: a.id,
+      kind: a.kind,
+      name: a.name || '',
+      label: a.label || '',
+      note: a.note || '',
+      intent: a.intent || '',
+      shapeText: a.kind === 'drawing' ? describeShapes(a.shapes) : '',
+      // お描きメモは forAI 未設定の旧レコードを ON 扱いにして後方互換にする。
+      forAI: a.kind === 'drawing' ? memoForAI(a) : undefined,
+      target: t ? truncate(labelOf(t), 50) : '',
+      resolved: Boolean(t) || a.placement === 'floating',
+    };
+  }
+
+  // お描きメモが AI に渡される対象か。forAI 未設定(旧レコード)は既定でON。
+  function memoForAI(a) {
+    return a.forAI !== false;
+  }
+
+  // ---- 堅牢なアンカー(要素を毎回同じように再解決するための複数シグナル) ----
+  function isStableId(id) {
+    if (!id) return false;
+    if (id.length > 40) return false;
+    if (/\s/.test(id)) return false;
+    if (/[:.]/.test(id)) return false; // フレームワークの動的ID風
+    if (/\d{4,}/.test(id)) return false; // 連番/自動生成風
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(id)) return false; // UUID風
+    return true;
+  }
+
+  function cssIdent(s) {
+    return String(s).replace(/([^a-zA-Z0-9_-])/g, '\\$1');
+  }
+
+  // 安定IDを持つ祖先を起点に、tag + :nth-of-type で短い決定的パスを作る。
+  function cssPath(el) {
+    if (!el || el.nodeType !== 1) return '';
+    if (el.id && isStableId(el.id)) return `#${cssIdent(el.id)}`;
+    const parts = [];
+    let cur = el;
+    let depth = 0;
+    while (cur && cur.nodeType === 1 && depth < 6) {
+      if (cur.id && isStableId(cur.id)) {
+        parts.unshift(`#${cssIdent(cur.id)}`);
+        break;
+      }
+      let part = cur.tagName.toLowerCase();
+      const parent = cur.parentElement;
+      if (parent) {
+        const sameTag = Array.from(parent.children).filter((c) => c.tagName === cur.tagName);
+        if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(cur) + 1})`;
+      }
+      parts.unshift(part);
+      if (!parent || parent === document.body || parent === document.documentElement) break;
+      cur = parent;
+      depth += 1;
+    }
+    return parts.join(' > ');
+  }
+
+  function buildAnchor(el) {
+    return {
+      selector: cssPath(el),
+      tag: el.tagName.toLowerCase(),
+      role: roleOf(el),
+      text: (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80),
+      name: el.getAttribute('name') || '',
+      testid:
+        el.getAttribute('data-testid') ||
+        el.getAttribute('data-test') ||
+        el.getAttribute('data-cy') ||
+        '',
+      placeholder: el.getAttribute('placeholder') || '',
+      ariaLabel: el.getAttribute('aria-label') || '',
+    };
+  }
+
+  // 複数シグナルを優先順に試し、最後はタグ+テキスト一致で粘る。
+  function resolveAnchor(anchor) {
+    if (!anchor) return null;
+    const tries = [];
+    if (anchor.selector) tries.push(() => safeQuery(anchor.selector));
+    if (anchor.testid)
+      tries.push(() =>
+        document.querySelector(
+          `[data-testid="${cssEscape(anchor.testid)}"],[data-test="${cssEscape(anchor.testid)}"],[data-cy="${cssEscape(anchor.testid)}"]`
+        )
+      );
+    if (anchor.name) tries.push(() => document.querySelector(`[name="${cssEscape(anchor.name)}"]`));
+    if (anchor.ariaLabel)
+      tries.push(() => document.querySelector(`[aria-label="${cssEscape(anchor.ariaLabel)}"]`));
+    if (anchor.placeholder)
+      tries.push(() => document.querySelector(`[placeholder="${cssEscape(anchor.placeholder)}"]`));
+    for (const t of tries) {
+      try {
+        const el = t();
+        if (el) return el;
+      } catch {
+        /* 不正セレクタは無視して次の手がかりへ */
+      }
+    }
+    if (anchor.text) {
+      const els = document.querySelectorAll(anchor.tag || '*');
+      for (const el of els) {
+        const txt = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+        if (txt && txt === anchor.text) return el;
+      }
+    }
+    return null;
+  }
+
+  function safeQuery(sel) {
+    try {
+      return document.querySelector(sel);
+    } catch {
+      return null;
+    }
+  }
+
+  // ---- 注釈の描画 ----
+  let annoObserver = null;
+
+  function renderAnnotations() {
+    annoObserver?.disconnect();
+    try {
+      // 既存の注釈DOMと目印属性を一旦クリア
+      document.querySelectorAll(`[${ATTR.anno}]`).forEach((el) => el.remove());
+      document.querySelectorAll(`[${ATTR.annoMarked}]`).forEach((el) => {
+        el.removeAttribute(ATTR.annoMarked);
+        el.removeAttribute(ATTR.annoOutline);
+        // 目印が付与していた intent はクリア(再付与する)
+        if (el.getAttribute(ATTR.intentSrc) === 'marker') {
+          el.removeAttribute(ATTR.intent);
+          el.removeAttribute(ATTR.intentSrc);
+        }
+      });
+
+      // お描きの永続レイヤとピンを一旦クリア(下のループで再構築する)。
+      drawRegistry = [];
+      if (drawLayer) drawLayer.replaceChildren();
+      if (drawPinHost) drawPinHost.replaceChildren();
+
+      let unresolved = 0;
+      for (const a of annotations) {
+        const target = a.anchor ? resolveAnchor(a.anchor) : null;
+        if (!target && a.placement !== 'floating' && a.kind !== 'button') unresolved += 1;
+        if (a.kind === 'marker') applyMarker(a, target);
+        else if (a.kind === 'button') renderAnnoButton(a, target);
+        else if (a.kind === 'note') renderAnnoNote(a, target);
+        else if (a.kind === 'drawing') renderAnnoDrawing(a, target);
+      }
+      syncWorkflowUi(); // お描きが揃った後で手順パネル/順序コネクタを更新
+      lastUnresolved = unresolved;
+      if (unresolved === 0) resolveAttempts = 0; // 全解決でリトライ枠を回復
+      return { resolved: annotations.length - unresolved, total: annotations.length };
+    } finally {
+      observeAnno();
+    }
+  }
+
+  function applyMarker(a, target) {
+    if (!target) return;
+    if (a.name) target.setAttribute(ATTR.id, a.name);
+    target.setAttribute(ATTR.role, a.role || roleOf(target));
+    if (a.intent) {
+      target.setAttribute(ATTR.intent, a.intent);
+      target.setAttribute(ATTR.intentSrc, 'marker');
+    }
+    target.setAttribute(ATTR.annoMarked, a.id);
+    if (a.outline) target.setAttribute(ATTR.annoOutline, '1');
+  }
+
+  function renderAnnoButton(a, target) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'bag-injected-btn bag-anno-btn';
+    btn.textContent = a.label || '合図';
+    btn.setAttribute(ATTR.anno, a.id);
+    btn.setAttribute(ATTR.ui, '1');
+    btn.setAttribute(ATTR.id, `cue:${a.id}`);
+    btn.setAttribute(ATTR.role, 'cue-button');
+    btn.setAttribute(ATTR.intent, a.intent || a.label || '');
+    btn.title = a.intent || '';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      signalLog.push({
+        aiId: `cue:${a.id}`,
+        intent: a.intent || a.label || a.id,
+        label: a.label || '',
+        at: new Date().toISOString(),
+      });
+      toast(`シグナル記録: ${a.label || a.id}`, 'success');
+    });
+    if (target && a.placement !== 'floating') {
+      target.insertAdjacentElement(a.position || 'afterend', btn);
+    } else {
+      btn.classList.add('bag-floating');
+      floatingHost().appendChild(btn);
+    }
+  }
+
+  function renderAnnoNote(a, target) {
+    const pin = document.createElement('span');
+    pin.className = 'bag-note-pin';
+    pin.setAttribute(ATTR.anno, a.id);
+    pin.setAttribute(ATTR.ui, '1');
+    pin.textContent = 'i';
+    const tip = document.createElement('span');
+    tip.className = 'bag-note-tip';
+    tip.textContent = a.note || '';
+    pin.appendChild(tip);
+    if (target && a.placement !== 'floating') {
+      target.insertAdjacentElement('afterend', pin);
+    } else {
+      pin.classList.add('bag-floating');
+      floatingHost().appendChild(pin);
+    }
+  }
+
+  function observeAnno() {
+    if (!annoObserver) {
+      annoObserver = new MutationObserver(onDomMutated);
+    }
+    try {
+      annoObserver.observe(document.documentElement, { childList: true, subtree: true });
+    } catch {
+      /* document未準備は無視 */
+    }
+  }
+
+  let lastUrl = location.href;
+  let renderTimer = null;
+  let resolveAttempts = 0;
+  const MAX_RESOLVE_ATTEMPTS = 15; // 解決不能な注釈で無限リトライしないための上限
+  function onDomMutated() {
+    // SPA遷移(URL変化)を検知したらスコープを切り替えて読み直す。
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      resolveAttempts = 0;
+      loadAnnotations().then(renderAnnotations);
+      return;
+    }
+    // 全注釈が解決済み、または上限到達なら、後発DOM変化での再描画は不要(無駄を抑制)。
+    if (lastUnresolved === 0 || resolveAttempts >= MAX_RESOLVE_ATTEMPTS) return;
+    if (renderTimer) return;
+    renderTimer = setTimeout(() => {
+      renderTimer = null;
+      resolveAttempts += 1;
+      renderAnnotations();
+    }, 600);
+  }
+
+  // ---- 注釈モード(要素ピッカー + 簡易フォーム) ----
+  let picking = false;
+  let pickOverlay = null;
+  let pickHintEl = null;
+  let authoringEl = null;
+
+  function startPicker() {
+    if (picking) return { picking: true };
+    if (drawing.active) stopDrawing(); // お描きモードと排他にする
+    picking = true;
+    document.documentElement.classList.add('bag-picking');
+    pickOverlay = document.createElement('div');
+    pickOverlay.className = 'bag-pick-overlay';
+    pickOverlay.setAttribute(ATTR.ui, '1');
+    document.documentElement.appendChild(pickOverlay);
+    pickHintEl = document.createElement('div');
+    pickHintEl.className = 'bag-pick-hint';
+    pickHintEl.setAttribute(ATTR.ui, '1');
+    pickHintEl.textContent = '補足を付けたい場所をクリック（Escで終了）';
+    document.documentElement.appendChild(pickHintEl);
+    document.addEventListener('mousemove', onPickMove, true);
+    document.addEventListener('click', onPickClick, true);
+    document.addEventListener('keydown', onPickKey, true);
+    return { picking: true };
+  }
+
+  function stopPicker() {
+    picking = false;
+    document.documentElement.classList.remove('bag-picking');
+    pickOverlay?.remove();
+    pickOverlay = null;
+    pickHintEl?.remove();
+    pickHintEl = null;
+    document.removeEventListener('mousemove', onPickMove, true);
+    document.removeEventListener('click', onPickClick, true);
+    document.removeEventListener('keydown', onPickKey, true);
+    return { picking: false };
+  }
+
+  function pickTargetFrom(e) {
+    const path = e.composedPath ? e.composedPath() : [e.target];
+    for (const n of path) {
+      if (n && n.nodeType === 1 && n.closest && !n.closest(`[${ATTR.ui}]`)) return n;
+    }
+    return e.target;
+  }
+
+  function onPickMove(e) {
+    if (!pickOverlay) return;
+    const el = pickTargetFrom(e);
+    if (!el || (el.closest && el.closest(`[${ATTR.ui}]`))) {
+      pickOverlay.style.display = 'none';
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    Object.assign(pickOverlay.style, {
+      display: 'block',
+      left: `${r.left}px`,
+      top: `${r.top}px`,
+      width: `${r.width}px`,
+      height: `${r.height}px`,
+    });
+  }
+
+  function onPickClick(e) {
+    if (e.target.closest && e.target.closest(`[${ATTR.ui}]`)) return; // 自前UIは無視
+    e.preventDefault();
+    e.stopPropagation();
+    const el = pickTargetFrom(e);
+    stopPicker();
+    openAuthoring(el);
+  }
+
+  function onPickKey(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      stopPicker();
+    }
+  }
+
+  // 要素クリック後に出る、非エンジニア向けの簡易フォーム。
+  function openAuthoring(el, existing) {
+    closeAuthoring();
+    const anchor = existing?.anchor || buildAnchor(el);
+    const heading = anchor.text || anchor.ariaLabel || anchor.placeholder || anchor.tag;
+    const wrap = document.createElement('div');
+    wrap.className = 'bag-author';
+    wrap.setAttribute(ATTR.ui, '1');
+    wrap.innerHTML = `
+      <div class="bag-author-head">補足を追加</div>
+      <div class="bag-author-target">対象: <b>${escapeHtml(truncate(heading, 40))}</b> <span class="muted">&lt;${escapeHtml(anchor.role)}&gt;</span></div>
+      <label class="bag-author-row">
+        <span>種類</span>
+        <select data-f="kind">
+          <option value="note">コメント</option>
+          <option value="marker">目印</option>
+          <option value="button">合図ボタン</option>
+        </select>
+      </label>
+      <label class="bag-author-row" data-for="marker button">
+        <span>名前/ラベル</span>
+        <input data-f="label" placeholder="例: 送信ボタン" />
+      </label>
+      <label class="bag-author-row" data-for="note">
+        <span>コメント</span>
+        <textarea data-f="note" rows="2" placeholder="例: ここは送信前に必ず内容を確認すること"></textarea>
+      </label>
+      <label class="bag-author-row">
+        <span>目的（AI向け）</span>
+        <input data-f="intent" placeholder="例: フォームを送信する / 入力内容を確認する" />
+      </label>
+      <div class="bag-author-actions">
+        <button data-f="cancel" type="button">キャンセル</button>
+        <button data-f="save" type="button" class="primary">保存</button>
+      </div>`;
+    document.documentElement.appendChild(wrap);
+    positionAuthoring(wrap, el);
+    authoringEl = wrap;
+
+    const kindSel = wrap.querySelector('[data-f="kind"]');
+    const syncRows = () => {
+      const k = kindSel.value;
+      wrap.querySelectorAll('[data-for]').forEach((row) => {
+        row.style.display = row.getAttribute('data-for').split(' ').includes(k) ? '' : 'none';
+      });
+    };
+    if (existing) {
+      kindSel.value = existing.kind;
+      wrap.querySelector('[data-f="label"]').value = existing.label || existing.name || '';
+      wrap.querySelector('[data-f="note"]').value = existing.note || '';
+      wrap.querySelector('[data-f="intent"]').value = existing.intent || '';
+    }
+    syncRows();
+    kindSel.addEventListener('change', syncRows);
+    wrap.querySelector('[data-f="cancel"]').addEventListener('click', closeAuthoring);
+    wrap.querySelector('[data-f="save"]').addEventListener('click', async () => {
+      const kind = kindSel.value;
+      const label = wrap.querySelector('[data-f="label"]').value.trim();
+      const note = wrap.querySelector('[data-f="note"]').value.trim();
+      const intent = wrap.querySelector('[data-f="intent"]').value.trim();
+      await upsertAnnotation({
+        id: existing?.id,
+        kind,
+        anchor,
+        label: kind === 'note' ? '' : label,
+        name: kind === 'marker' ? label || anchor.text || anchor.tag : '',
+        note,
+        intent,
+        outline: kind === 'marker',
+        placement: kind === 'button' && existing?.placement === 'floating' ? 'floating' : undefined,
+      });
+      closeAuthoring();
+      toast('補足を保存しました（次回も同じ場所に表示されます）', 'success');
+    });
+  }
+
+  function positionAuthoring(wrap, el) {
+    const r = el?.getBoundingClientRect?.();
+    const w = 320;
+    let left = r ? Math.min(r.left, window.innerWidth - w - 16) : window.innerWidth - w - 16;
+    let top = r ? r.bottom + 8 : 80;
+    if (top + 260 > window.innerHeight) top = Math.max(16, window.innerHeight - 280);
+    wrap.style.left = `${Math.max(8, left)}px`;
+    wrap.style.top = `${Math.max(8, top)}px`;
+  }
+
+  function closeAuthoring() {
+    authoringEl?.remove();
+    authoringEl = null;
+  }
+
+  // ===========================================================================
+  // お描き(drawing)注釈
+  // ページ上に 円 / 四角 / 矢印 / フリーハンド で印を描き、対象要素にアンカーして
+  // 永続化する。座標は対象要素の矩形に対する「比率(0..1)」で保存するため、要素が
+  // 動いても追従し、再訪・スクロール・リフローでも同じ位置へ復元される(決定的な再利用)。
+  // AIへは図形を言葉で説明(describeShapes)してテキスト文脈として渡す。
+  // ===========================================================================
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const DRAW_COLORS = [
+    { hex: '#ef4444', name: '赤' },
+    { hex: '#f97316', name: '橙' },
+    { hex: '#eab308', name: '黄' },
+    { hex: '#14b8a6', name: '緑' },
+    { hex: '#3b82f6', name: '青' },
+    { hex: '#111827', name: '黒' },
+  ];
+  const DRAW_TOOLS = [
+    { id: 'ellipse', label: '円', glyph: '◯', verb: '円で囲んだ' },
+    { id: 'rect', label: '四角', glyph: '▭', verb: '四角で囲んだ' },
+    { id: 'arrow', label: '矢印', glyph: '↗', verb: '矢印で指した' },
+    { id: 'pen', label: 'ペン', glyph: '✎', verb: '手書きで印を付けた' },
+  ];
+  const DRAW_DEFAULT_WIDTH = 3;
+  const DRAW_MAX_POINTS = 160; // フリーハンドの点数上限(保存サイズ抑制)
+
+  // 描画モード(オーサリング)の状態
+  let drawing = {
+    active: false,
+    tool: 'ellipse',
+    color: DRAW_COLORS[0].hex,
+    shapes: [], // 確定済み図形(viewport px)。各要素に _node を持つ
+    current: null, // 描画中の図形(viewport px)
+    currentEl: null,
+    pointerId: null,
+  };
+  let drawOverlay = null; // オーサリング用svg(pointer捕捉)
+  let drawCommitG = null; // 確定図形の描画先
+  let drawToolbar = null;
+  // 永続レイヤ
+  let drawLayer = null; // svg(pointer-events:none)。確定済みお描きとコネクタ線を描く
+  let drawPinHost = null; // AIメモカード/畳んだバッジのホスト(DOMオーバーレイ)
+  let drawRegistry = []; // {anno, el, elems:[{node,shape}], memo, connector, collapsed, bbox} 再配置対象
+  let drawRepositionSetup = false;
+  let drawRaf = 0;
+
+  // ---- お描きワークフロー(番号付きお描きを「操作手順」として説明する) ----
+  // 既存の通し番号(annoDrawingNumber)をそのまま手順番号として流用し、番号付きの
+  // お描きを 1→2→3 と結ぶことで手順(ワークフロー)を可視化・再生・AI連携する。
+  let wfMode = false; // 順序コネクタ + 再生コントロールの表示
+  let wfPlayIdx = -1; // 再生/フォーカス中の手順インデックス(0始まり)。-1=なし
+  let wfPlayTimer = 0; // 順送り再生のタイマー
+  let wfConnectors = []; // 手順 i→i+1 を結ぶ順序コネクタ(drawLayer内のSVG線)
+  let wfPanel = null; // 操作パネル(左下フローティング)
+  const WF_PLAY_MS = 1700; // 1手順あたりの再生間隔(ms)
+
+  function svgEl(name, attrs) {
+    const el = document.createElementNS(SVGNS, name);
+    if (attrs) for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    return el;
+  }
+
+  function colorName(hex) {
+    const c = DRAW_COLORS.find((x) => x.hex.toLowerCase() === String(hex || '').toLowerCase());
+    return c ? c.name : '';
+  }
+
+  function toolVerb(type) {
+    if (type === 'path') return '手書きで印を付けた';
+    const t = DRAW_TOOLS.find((x) => x.id === type);
+    return t ? t.verb : '印を付けた';
+  }
+
+  // 図形群を「赤色の円で囲んだ、青色の矢印で指した」のように日本語で説明する(AI向け)。
+  function describeShapes(shapes) {
+    if (!Array.isArray(shapes) || !shapes.length) return 'お描きで印を付けた';
+    const seen = new Map();
+    for (const s of shapes) {
+      const key = `${s.type}|${s.color}`;
+      if (!seen.has(key)) seen.set(key, s);
+    }
+    const parts = Array.from(seen.values()).map((s) => {
+      const cn = colorName(s.color);
+      return `${cn ? cn + '色の' : ''}${toolVerb(s.type)}`;
+    });
+    return Array.from(new Set(parts)).join('、');
+  }
+
+  // ---- 描画モードの開始・終了 ----
+  function startDrawing() {
+    if (drawing.active) return { drawing: true };
+    if (picking) stopPicker(); // 注釈ピッカーと排他にする
+    closeAuthoring(); // 開きかけのオーサリングフォームがあれば閉じる
+    drawing = {
+      active: true,
+      tool: 'ellipse',
+      color: DRAW_COLORS[0].hex,
+      shapes: [],
+      current: null,
+      currentEl: null,
+      pointerId: null,
+    };
+    buildDrawOverlay();
+    buildDrawToolbar();
+    document.documentElement.classList.add('bag-drawing');
+    document.addEventListener('keydown', onDrawKey, true);
+    addDrawShield();
+    return { drawing: true };
+  }
+
+  function stopDrawing() {
+    drawing.active = false;
+    drawing.current = null;
+    drawing.currentEl = null;
+    drawing.pointerId = null;
+    document.documentElement.classList.remove('bag-drawing');
+    document.removeEventListener('keydown', onDrawKey, true);
+    removeDrawShield();
+    drawOverlay?.remove();
+    drawOverlay = null;
+    drawCommitG = null;
+    drawToolbar?.remove();
+    drawToolbar = null;
+    return { drawing: false };
+  }
+
+  function onDrawKey(e) {
+    if (!drawing.active) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      stopDrawing();
+    } else if (e.key === 'z' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      undoDrawShape();
+    }
+  }
+
+  // ---- オーサリング用オーバーレイ(viewport px で描く) ----
+  function buildDrawOverlay() {
+    drawOverlay = svgEl('svg', { class: 'bag-draw-overlay' });
+    drawOverlay.setAttribute(ATTR.ui, '1');
+    drawCommitG = svgEl('g', { class: 'bag-draw-committed' });
+    drawOverlay.appendChild(drawCommitG);
+    document.documentElement.appendChild(drawOverlay);
+    // ポインタ処理は window のキャプチャ段(addDrawShield)へ集約する。
+    // overlay 自身に listener を張ると、サイトの document/window listener より後に
+    // 走るため伝播を止めきれない(モーダルが閉じてしまう)。
+  }
+
+  // 描画中だけ、サイト側の「モーダル外をクリック/タップで閉じる」等の listener へ
+  // ポインタ操作が漏れるのを防ぐ盾。window のキャプチャ段で最初に走り、自前ツールバー
+  // 以外で起きた down/up/click をサイトへ伝播させない。描画ロジックもここから呼ぶ。
+  const DRAW_SHIELD_EVENTS = [
+    'pointerdown', 'pointermove', 'pointerup', 'pointercancel',
+    'mousedown', 'mouseup', 'click', 'dblclick', 'auxclick',
+    'contextmenu', 'touchstart', 'touchend',
+  ];
+
+  function addDrawShield() {
+    for (const type of DRAW_SHIELD_EVENTS) {
+      window.addEventListener(type, onDrawShield, { capture: true, passive: false });
+    }
+  }
+
+  function removeDrawShield() {
+    for (const type of DRAW_SHIELD_EVENTS) {
+      window.removeEventListener(type, onDrawShield, { capture: true });
+    }
+  }
+
+  // ツールバー/ピンなど「操作してほしい自前コントロール」か。描画キャンバス(overlayと
+  // 確定済み図形)は対象外＝描画面として扱う。
+  function isDrawControl(target) {
+    return Boolean(target && target.closest && target.closest('.bag-draw-toolbar, .bag-draw-pin'));
+  }
+
+  function onDrawShield(e) {
+    if (!drawing.active) return;
+    const onControl = isDrawControl(e.target);
+    switch (e.type) {
+      case 'pointerdown': {
+        e.stopImmediatePropagation();
+        if (onControl) return; // ツールバー操作: サイトへは漏らさず、合成clickで処理させる
+        e.preventDefault();
+        onDrawPointerDown(e);
+        return;
+      }
+      case 'pointermove': {
+        if (drawing.current && e.pointerId === drawing.pointerId) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          onDrawPointerMove(e);
+        }
+        return;
+      }
+      case 'pointerup':
+      case 'pointercancel': {
+        e.stopImmediatePropagation();
+        if (drawing.current) {
+          e.preventDefault();
+          onDrawPointerUp(e);
+        }
+        return;
+      }
+      case 'click':
+      case 'dblclick':
+      case 'auxclick':
+      case 'contextmenu': {
+        if (onControl) return; // 自前ツールバー/ピンの click は素通しして動作させる
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        return;
+      }
+      default: {
+        // mousedown / mouseup / touchstart / touchend:
+        // ポインタイベントの裏で発火する重複。サイトの listener には一切渡さない。
+        e.stopImmediatePropagation();
+        if (!onControl) e.preventDefault();
+        return;
+      }
+    }
+  }
+
+  function onDrawPointerDown(e) {
+    if (e.button != null && e.button !== 0) return;
+    e.preventDefault();
+    try {
+      drawOverlay.setPointerCapture?.(e.pointerId);
+    } catch {
+      /* 一部環境ではキャプチャ不可 */
+    }
+    drawing.pointerId = e.pointerId;
+    const x = e.clientX;
+    const y = e.clientY;
+    const tool = drawing.tool;
+    if (tool === 'pen') {
+      drawing.current = { type: 'path', color: drawing.color, width: DRAW_DEFAULT_WIDTH, pts: [[x, y]] };
+    } else if (tool === 'arrow') {
+      drawing.current = { type: 'arrow', color: drawing.color, width: DRAW_DEFAULT_WIDTH, x1: x, y1: y, x2: x, y2: y };
+    } else {
+      drawing.current = { type: tool === 'rect' ? 'rect' : 'ellipse', color: drawing.color, width: DRAW_DEFAULT_WIDTH, x0: x, y0: y, x1: x, y1: y };
+    }
+    drawing.currentEl = renderLiveShape(drawing.current);
+  }
+
+  function onDrawPointerMove(e) {
+    if (!drawing.current || e.pointerId !== drawing.pointerId) return;
+    const x = e.clientX;
+    const y = e.clientY;
+    const s = drawing.current;
+    if (s.type === 'path') {
+      const last = s.pts[s.pts.length - 1];
+      if (!last || Math.hypot(x - last[0], y - last[1]) >= 2) s.pts.push([x, y]);
+    } else if (s.type === 'arrow') {
+      s.x2 = x;
+      s.y2 = y;
+    } else {
+      s.x1 = x;
+      s.y1 = y;
+    }
+    updateLiveShape(drawing.currentEl, s);
+  }
+
+  function onDrawPointerUp(e) {
+    if (!drawing.current) return;
+    if (e && e.pointerId != null && drawing.pointerId != null && e.pointerId !== drawing.pointerId) return;
+    if (isTrivialShape(drawing.current)) {
+      drawing.currentEl?.remove();
+    } else {
+      drawing.current._node = drawing.currentEl;
+      drawing.shapes.push(drawing.current);
+    }
+    drawing.current = null;
+    drawing.currentEl = null;
+    drawing.pointerId = null;
+    updateDrawToolbarState();
+  }
+
+  function isTrivialShape(s) {
+    if (s.type === 'path') return (s.pts?.length || 0) < 3;
+    if (s.type === 'arrow') return Math.hypot(s.x2 - s.x1, s.y2 - s.y1) < 8;
+    return Math.abs(s.x1 - s.x0) < 6 && Math.abs(s.y1 - s.y0) < 6;
+  }
+
+  function undoDrawShape() {
+    const s = drawing.shapes.pop();
+    s?._node?.remove();
+    updateDrawToolbarState();
+  }
+
+  // 図形ノード(rect/ellipse は専用要素、arrow/path は polyline)。座標は後で設定する。
+  function newShapeNode(s) {
+    const attrs = {
+      fill: 'none',
+      stroke: s.color || DRAW_COLORS[0].hex,
+      'stroke-width': s.width || DRAW_DEFAULT_WIDTH,
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+    };
+    if (s.type === 'rect') return svgEl('rect', attrs);
+    if (s.type === 'ellipse') return svgEl('ellipse', attrs);
+    return svgEl('polyline', { ...attrs, points: '' });
+  }
+
+  function renderLiveShape(s) {
+    const node = newShapeNode(s);
+    drawCommitG.appendChild(node);
+    updateLiveShape(node, s);
+    return node;
+  }
+
+  // オーサリング中(viewport px)の図形ノードを更新する。
+  function updateLiveShape(node, s) {
+    if (!node) return;
+    if (s.type === 'rect') {
+      node.setAttribute('x', Math.min(s.x0, s.x1));
+      node.setAttribute('y', Math.min(s.y0, s.y1));
+      node.setAttribute('width', Math.abs(s.x1 - s.x0));
+      node.setAttribute('height', Math.abs(s.y1 - s.y0));
+    } else if (s.type === 'ellipse') {
+      node.setAttribute('cx', (s.x0 + s.x1) / 2);
+      node.setAttribute('cy', (s.y0 + s.y1) / 2);
+      node.setAttribute('rx', Math.abs(s.x1 - s.x0) / 2);
+      node.setAttribute('ry', Math.abs(s.y1 - s.y0) / 2);
+    } else if (s.type === 'arrow') {
+      node.setAttribute('points', arrowPointsPx(s.x1, s.y1, s.x2, s.y2));
+    } else {
+      node.setAttribute('points', (s.pts || []).map(([x, y]) => `${x},${y}`).join(' '));
+    }
+  }
+
+  // 矢印を1本のpolyline(線→先端→かえし)として表現する。
+  function arrowPointsPx(x1, y1, x2, y2) {
+    const ang = Math.atan2(y2 - y1, x2 - x1);
+    const len = Math.min(16, Math.max(8, Math.hypot(x2 - x1, y2 - y1) * 0.25));
+    const spread = 0.45;
+    const hx1 = x2 - len * Math.cos(ang - spread);
+    const hy1 = y2 - len * Math.sin(ang - spread);
+    const hx2 = x2 - len * Math.cos(ang + spread);
+    const hy2 = y2 - len * Math.sin(ang + spread);
+    return `${x1},${y1} ${x2},${y2} ${hx1},${hy1} ${x2},${y2} ${hx2},${hy2}`;
+  }
+
+  // ---- 描画ツールバー ----
+  function buildDrawToolbar() {
+    drawToolbar = document.createElement('div');
+    drawToolbar.className = 'bag-draw-toolbar';
+    drawToolbar.setAttribute(ATTR.ui, '1');
+    const tools = DRAW_TOOLS.map(
+      (t) =>
+        `<button type="button" class="bag-draw-tool" data-tool="${t.id}" title="${t.label}"><span class="bag-draw-glyph">${t.glyph}</span><span>${t.label}</span></button>`
+    ).join('');
+    const colors = DRAW_COLORS.map(
+      (c) => `<button type="button" class="bag-draw-color" data-color="${c.hex}" title="${c.name}" style="--bag-sw:${c.hex}"></button>`
+    ).join('');
+    drawToolbar.innerHTML = `
+      <div class="bag-draw-tools">${tools}</div>
+      <div class="bag-draw-colors">${colors}</div>
+      <div class="bag-draw-ops">
+        <button type="button" class="bag-draw-op" data-op="undo" title="ひとつ戻す (Cmd/Ctrl+Z)">取消</button>
+        <button type="button" class="bag-draw-op" data-op="cancel" title="やめる (Esc)">キャンセル</button>
+        <button type="button" class="bag-draw-op primary" data-op="done" title="コメント入力へ進む">完了</button>
+      </div>
+      <div class="bag-draw-hint">図形を選び、対象をドラッグで囲む（Escで終了 / Cmd+Zで取消）</div>`;
+    document.documentElement.appendChild(drawToolbar);
+    drawToolbar.addEventListener('click', onDrawToolbarClick);
+    updateDrawToolbarState();
+  }
+
+  function onDrawToolbarClick(e) {
+    // ツールバー click はサイトの bubble 段 listener へ伝播させない(モーダル閉じ対策)。
+    e.stopPropagation();
+    const toolBtn = e.target.closest?.('[data-tool]');
+    if (toolBtn) {
+      drawing.tool = toolBtn.getAttribute('data-tool');
+      updateDrawToolbarState();
+      return;
+    }
+    const colorBtn = e.target.closest?.('[data-color]');
+    if (colorBtn) {
+      drawing.color = colorBtn.getAttribute('data-color');
+      updateDrawToolbarState();
+      return;
+    }
+    const opBtn = e.target.closest?.('[data-op]');
+    if (!opBtn) return;
+    const op = opBtn.getAttribute('data-op');
+    if (op === 'undo') undoDrawShape();
+    else if (op === 'cancel') stopDrawing();
+    else if (op === 'done') finishDrawing();
+  }
+
+  function updateDrawToolbarState() {
+    if (!drawToolbar) return;
+    drawToolbar.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('is-active', b.getAttribute('data-tool') === drawing.tool));
+    drawToolbar
+      .querySelectorAll('[data-color]')
+      .forEach((b) => b.classList.toggle('is-active', b.getAttribute('data-color').toLowerCase() === String(drawing.color).toLowerCase()));
+    const has = drawing.shapes.length > 0;
+    const undo = drawToolbar.querySelector('[data-op="undo"]');
+    const done = drawToolbar.querySelector('[data-op="done"]');
+    if (undo) undo.disabled = !has;
+    if (done) done.disabled = !has;
+  }
+
+  // ---- 確定: アンカー要素を特定し、比率座標へ変換してコメント入力へ ----
+  function finishDrawing() {
+    if (!drawing.shapes.length) {
+      toast('お描きがありません。図形を描いてから完了してください。', 'warn');
+      return;
+    }
+    const live = drawing.shapes.slice();
+    const bb = shapesBBoxPx(live);
+    // 中心直下の要素を特定する(自前UIは一時的にクリック透過)。
+    if (drawOverlay) drawOverlay.style.pointerEvents = 'none';
+    const cx = Math.max(1, Math.min(window.innerWidth - 1, bb.cx));
+    const cy = Math.max(1, Math.min(window.innerHeight - 1, bb.cy));
+    const target = pickAnchorElement(cx, cy);
+    if (drawOverlay) drawOverlay.style.pointerEvents = '';
+    if (!target) {
+      toast('お描きの対象要素を特定できませんでした。', 'error');
+      return;
+    }
+    const anchor = buildAnchor(target);
+    const rect = target.getBoundingClientRect();
+    const W = rect.width || 1;
+    const H = rect.height || 1;
+    const shapes = live.map((s) => toFractionalShape(s, rect.left, rect.top, W, H));
+    stopDrawing();
+    // お描き完了で図形の隣にAIメモ(空)を即生成し、その場で指示を書けるようにする。
+    // forAI は既定ON。本文編集はページ上のメモで行う(ページ上＝その場編集)。
+    upsertAnnotation({ kind: 'drawing', anchor, shapes, note: '', intent: '', forAI: true }).then((summary) => {
+      focusMemo(summary?.id);
+      toast('図形の隣にAIメモを置きました。指示を書いてください（次回も復元されます）。', 'success');
+    });
+  }
+
+  // 指定idのメモ(ページ上カード)の入力欄へフォーカスする(生成直後の即編集用)。
+  function focusMemo(id) {
+    if (!id) return;
+    requestAnimationFrame(() => {
+      const card = drawPinHost?.querySelector(`.bag-memo[${ATTR.anno}="${cssEscape(id)}"]`);
+      const ta = card?.querySelector('.bag-memo-text');
+      if (ta) {
+        ta.focus();
+        ta.scrollIntoView?.({ block: 'nearest' });
+      }
+    });
+  }
+
+  // 中心直下にある「自前UI/HTML以外」の要素を返す。無ければ body。
+  function pickAnchorElement(x, y) {
+    const list = document.elementsFromPoint(x, y) || [];
+    for (const el of list) {
+      if (!el || el.nodeType !== 1) continue;
+      if (el.closest && el.closest(`[${ATTR.ui}]`)) continue;
+      if (el.tagName === 'HTML') continue;
+      return el;
+    }
+    return document.body || document.documentElement;
+  }
+
+  function shapesBBoxPx(shapes) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    const add = (x, y) => {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    };
+    for (const s of shapes) {
+      if (s.type === 'path') s.pts.forEach(([x, y]) => add(x, y));
+      else if (s.type === 'arrow') {
+        add(s.x1, s.y1);
+        add(s.x2, s.y2);
+      } else {
+        add(s.x0, s.y0);
+        add(s.x1, s.y1);
+      }
+    }
+    if (!Number.isFinite(minX)) {
+      minX = minY = maxX = maxY = 0;
+    }
+    return { minX, minY, maxX, maxY, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
+  }
+
+  // viewport px の図形を、対象矩形に対する比率(0..1)へ変換する。
+  function toFractionalShape(s, L, T, W, H) {
+    const fx = (x) => (x - L) / W;
+    const fy = (y) => (y - T) / H;
+    if (s.type === 'rect') {
+      const x = Math.min(s.x0, s.x1);
+      const y = Math.min(s.y0, s.y1);
+      return { type: 'rect', x: fx(x), y: fy(y), w: Math.abs(s.x1 - s.x0) / W, h: Math.abs(s.y1 - s.y0) / H, color: s.color, width: s.width };
+    }
+    if (s.type === 'ellipse') {
+      return {
+        type: 'ellipse',
+        cx: fx((s.x0 + s.x1) / 2),
+        cy: fy((s.y0 + s.y1) / 2),
+        rx: Math.abs(s.x1 - s.x0) / 2 / W,
+        ry: Math.abs(s.y1 - s.y0) / 2 / H,
+        color: s.color,
+        width: s.width,
+      };
+    }
+    if (s.type === 'arrow') {
+      return { type: 'arrow', x1: fx(s.x1), y1: fy(s.y1), x2: fx(s.x2), y2: fy(s.y2), color: s.color, width: s.width };
+    }
+    const pts = (s.pts || []).map(([x, y]) => [fx(x), fy(y)]);
+    return { type: 'path', pts: decimatePoints(pts, DRAW_MAX_POINTS), color: s.color, width: s.width };
+  }
+
+  function decimatePoints(pts, max) {
+    if (pts.length <= max) return pts;
+    const step = pts.length / (max - 1);
+    const out = [];
+    for (let i = 0; i < max - 1; i += 1) out.push(pts[Math.floor(i * step)]);
+    out.push(pts[pts.length - 1]); // 末尾点を必ず含める(合計 max 点)
+    return out;
+  }
+
+  // ---- 永続レイヤの確保 ----
+  function ensureDrawLayer() {
+    if (drawLayer && drawLayer.isConnected) return;
+    drawLayer = svgEl('svg', { class: 'bag-draw-layer' });
+    drawLayer.setAttribute(ATTR.ui, '1');
+    document.documentElement.appendChild(drawLayer);
+  }
+
+  function ensureDrawPinHost() {
+    if (drawPinHost && drawPinHost.isConnected) return;
+    drawPinHost = document.createElement('div');
+    drawPinHost.className = 'bag-draw-pin-host';
+    drawPinHost.setAttribute(ATTR.ui, '1');
+    document.documentElement.appendChild(drawPinHost);
+  }
+
+  // お描きのペア識別色(ユーザーが選んだ図形色)と通し番号。図形・引き出し線・番号バッジ・
+  // メモ枠を同色+同番号で束ね、スクショからでも「どのAIメモがどの図形を指すか」を
+  // 人にもAIビジョンにも対応づけやすくする。
+  function annoColor(a) {
+    const c = (a?.shapes || []).find((s) => s && s.color)?.color;
+    return c || DRAW_COLORS[0].hex;
+  }
+  function annoDrawingNumber(a) {
+    return annotations.filter((x) => x.kind === 'drawing').findIndex((x) => x.id === a?.id) + 1;
+  }
+
+  // 確定済みお描きを永続レイヤに描き、その図形の隣にAIメモ(編集可能カード)を生成する。
+  // メモは図形＝指す対象、メモ＝その場の指示、を1対1で結ぶ。再配置レジストリへ登録し、
+  // scroll/resize で図形に追従させる。
+  function renderAnnoDrawing(a, target) {
+    if (!target) return; // 未解決は呼び出し側で集計
+    ensureDrawLayer();
+    const color = annoColor(a);
+    const num = annoDrawingNumber(a);
+    const g = svgEl('g', { class: 'bag-draw-g' });
+    g.setAttribute(ATTR.anno, a.id);
+    g.setAttribute(ATTR.ui, '1');
+    const elems = [];
+    for (const s of a.shapes || []) {
+      const node = newShapeNode(s);
+      g.appendChild(node);
+      elems.push({ node, shape: s });
+    }
+    drawLayer.appendChild(g);
+
+    ensureDrawPinHost();
+    // 図形→メモを結ぶ引き出し線(コネクタ)。ペア色で図形・メモと束ねる。
+    const connector = svgEl('line', { class: 'bag-memo-connector' });
+    connector.setAttribute(ATTR.ui, '1');
+    connector.style.setProperty('--bag-pair', color);
+    drawLayer.appendChild(connector);
+
+    // 図形のとなりに置く通し番号バッジ(色=図形色)。畳んでも対象を指し示し続ける。
+    const numEl = document.createElement('div');
+    numEl.className = 'bag-anno-num';
+    numEl.setAttribute(ATTR.anno, a.id);
+    numEl.setAttribute(ATTR.ui, '1');
+    numEl.textContent = String(num);
+    numEl.style.setProperty('--bag-pair', color);
+    drawPinHost.appendChild(numEl);
+
+    const memo = buildMemoCard(a);
+    memo.style.setProperty('--bag-pair', color);
+    if (memo._bagBadge) {
+      memo._bagBadge.textContent = String(num);
+      memo._bagBadge.style.setProperty('--bag-pair', color);
+    }
+
+    const entry = {
+      anno: a,
+      el: target,
+      elems,
+      g,
+      memo,
+      connector,
+      numEl,
+      collapsed: false,
+      bbox: shapesBBoxFrac(a.shapes),
+    };
+    drawRegistry.push(entry);
+    // forAI OFF の初期状態を図形・線・番号にも反映(淡色化)。
+    if (!memoForAI(a)) {
+      g.classList.add('bag-draw-g--off');
+      connector.classList.add('bag-memo-connector--off');
+      numEl.classList.add('bag-anno-num--off');
+    }
+    redrawEntry(entry);
+    layoutMemos(); // 既存メモも含めて一括再配置(右ガター整列 + 重なり回避)
+    setupDrawingReposition();
+  }
+
+  // お描きの隣に置く編集可能なAIメモカードを作る。
+  // 構成: ヘッダ(ラベル＋畳む)、編集テキスト、フッタ(forAIトグル＋削除)。
+  function buildMemoCard(a) {
+    const card = document.createElement('div');
+    card.className = 'bag-memo';
+    card.setAttribute(ATTR.anno, a.id);
+    card.setAttribute(ATTR.ui, '1');
+    card.style.setProperty('--bag-pair', annoColor(a));
+
+    const head = document.createElement('div');
+    head.className = 'bag-memo-head';
+    // 図形と同じ通し番号チップ(色=図形色)。図形側の番号バッジと対応する。
+    const numChip = document.createElement('span');
+    numChip.className = 'bag-memo-num';
+    numChip.textContent = String(annoDrawingNumber(a));
+    const tag = document.createElement('span');
+    tag.className = 'bag-memo-tag';
+    tag.textContent = 'AIメモ';
+    const collapseBtn = document.createElement('button');
+    collapseBtn.type = 'button';
+    collapseBtn.className = 'bag-memo-collapse';
+    collapseBtn.title = '畳む / 展開';
+    collapseBtn.setAttribute('aria-label', '畳む');
+    collapseBtn.textContent = '–';
+    head.append(numChip, tag, collapseBtn);
+
+    const ta = document.createElement('textarea');
+    ta.className = 'bag-memo-text';
+    ta.rows = 2;
+    ta.placeholder = 'AIへの指示を書く（例: 見出しをもっと短く）';
+    ta.value = a.note || '';
+
+    const foot = document.createElement('div');
+    foot.className = 'bag-memo-foot';
+    const toggle = document.createElement('label');
+    toggle.className = 'bag-memo-toggle';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = memoForAI(a);
+    const toggleText = document.createElement('span');
+    toggleText.textContent = 'AIに渡す';
+    toggle.append(cb, toggleText);
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'bag-memo-del';
+    del.title = 'このメモとお描きを削除';
+    del.setAttribute('aria-label', '削除');
+    del.textContent = '🗑';
+    foot.append(toggle, del);
+
+    card.append(head, ta, foot);
+
+    // 編集テキストは入力が止まったら保存する(過剰書き込みを抑える)。
+    let saveTimer = null;
+    const scheduleSave = () => {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        saveTimer = null;
+        updateMemoFields(a.id, { note: ta.value.trim() });
+      }, 500);
+    };
+    ta.addEventListener('input', scheduleSave);
+    ta.addEventListener('blur', () => {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = null;
+      updateMemoFields(a.id, { note: ta.value.trim() });
+    });
+    cb.addEventListener('change', () => {
+      const off = !cb.checked;
+      card.classList.toggle('bag-memo--off', off);
+      // AIに渡さないメモは、図形・引き出し線・番号バッジも淡色化して文脈から外れたと分かるようにする。
+      const entry = drawRegistry.find((e) => e.anno?.id === a.id);
+      entry?.g?.classList.toggle('bag-draw-g--off', off);
+      entry?.connector?.classList.toggle('bag-memo-connector--off', off);
+      entry?.numEl?.classList.toggle('bag-anno-num--off', off);
+      updateMemoFields(a.id, { forAI: cb.checked });
+    });
+    // メモ⇄図形の相互ハイライト(マウスホバーで対象ペアを強調し、他ペアを減光)。
+    // mouseenter ではなく mousemove で起動する: 描画直後に新規メモがカーソル下へ現れて
+    // 境界イベント(mouseenter)が発火しても、実際にポインタを動かすまでは反応させない。
+    // テキストエリアの focus は連動させない(生成直後の自動フォーカスで他メモが減光するのを防ぐ)。
+    card.addEventListener('mousemove', () => setMemoFocus(a.id, true));
+    card.addEventListener('mouseleave', () => setMemoFocus(a.id, false));
+    del.addEventListener('click', (e) => {
+      e.preventDefault();
+      deleteAnnotation(a.id);
+    });
+    collapseBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      toggleMemoCollapse(a.id);
+    });
+    // 畳んだバッジ(密集時のクリック/ホバー展開用)。
+    const badge = document.createElement('button');
+    badge.type = 'button';
+    badge.className = 'bag-memo-badge';
+    badge.setAttribute(ATTR.anno, a.id);
+    badge.setAttribute(ATTR.ui, '1');
+    badge.title = a.note || 'AIメモ';
+    badge.setAttribute('aria-label', 'AIメモを展開');
+    badge.textContent = 'AI';
+    badge.hidden = true;
+    badge.addEventListener('click', (e) => {
+      e.preventDefault();
+      toggleMemoCollapse(a.id);
+    });
+
+    if (!cb.checked) card.classList.add('bag-memo--off');
+    drawPinHost.append(card, badge);
+    // バッジは card と対で扱えるよう参照を持たせる。
+    card._bagBadge = badge;
+    return card;
+  }
+
+  // メモ本文・forAI を保存する(他フィールドは保持)。
+  async function updateMemoFields(id, patch) {
+    const a = annotations.find((x) => x.id === id);
+    if (!a) return;
+    let changed = false;
+    if ('note' in patch && (a.note || '') !== patch.note) {
+      a.note = patch.note;
+      changed = true;
+    }
+    if ('forAI' in patch && memoForAI(a) !== patch.forAI) {
+      a.forAI = patch.forAI;
+      changed = true;
+    }
+    if (!changed) return;
+    await persistAnnotations();
+  }
+
+  // メモ⇄図形の相互ハイライト。on=true で対象ペアを強調し、他ペアを減光する。
+  // 現在フォーカス中のペアIDを保持し、focusOn は同一IDなら無視、focusOff は自分が
+  // 所有している時だけ解除する(A→B 移動時の取り違えを防ぐ)。
+  let memoFocusId = null;
+  function setMemoFocus(id, on) {
+    if (on) {
+      if (memoFocusId === id) return;
+      memoFocusId = id;
+    } else {
+      if (memoFocusId !== id) return; // 既に別ペアにフォーカスが移っている場合は触らない
+      memoFocusId = null;
+    }
+    for (const e of drawRegistry) {
+      const active = memoFocusId != null && e.anno?.id === memoFocusId;
+      const dim = memoFocusId != null && !active;
+      e.memo?.classList.toggle('bag-memo--active', active);
+      e.memo?.classList.toggle('bag-memo--dim', dim);
+      e.g?.classList.toggle('bag-draw-g--active', active);
+      e.g?.classList.toggle('bag-draw-g--dim', dim);
+      e.connector?.classList.toggle('bag-memo-connector--active', active);
+      e.connector?.classList.toggle('bag-memo-connector--dim', dim);
+      e.numEl?.classList.toggle('bag-anno-num--active', active);
+      e.numEl?.classList.toggle('bag-anno-num--dim', dim);
+    }
+  }
+
+  // メモの畳み/展開を切り替える(密集回避)。再描画はせず表示だけ切り替える。
+  function toggleMemoCollapse(id) {
+    const entry = drawRegistry.find((e) => e.anno?.id === id);
+    if (!entry || !entry.memo) return;
+    entry.collapsed = !entry.collapsed;
+    applyMemoCollapsed(entry);
+    repositionDrawings(); // 畳み/展開で空きが変わるため全メモを再パッキング
+  }
+
+  function applyMemoCollapsed(entry) {
+    const badge = entry.memo?._bagBadge;
+    if (!entry.memo) return;
+    entry.memo.hidden = entry.collapsed;
+    if (badge) badge.hidden = !entry.collapsed;
+  }
+
+  function shapesBBoxFrac(shapes) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    const add = (x, y) => {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    };
+    for (const s of shapes || []) {
+      if (s.type === 'path') (s.pts || []).forEach(([x, y]) => add(x, y));
+      else if (s.type === 'arrow') {
+        add(s.x1, s.y1);
+        add(s.x2, s.y2);
+      } else if (s.type === 'rect') {
+        add(s.x, s.y);
+        add(s.x + (s.w || 0), s.y + (s.h || 0));
+      } else if (s.type === 'ellipse') {
+        add(s.cx - s.rx, s.cy - s.ry);
+        add(s.cx + s.rx, s.cy + s.ry);
+      }
+    }
+    if (!Number.isFinite(minX)) minX = minY = maxX = maxY = 0;
+    return { minX, minY, maxX, maxY };
+  }
+
+  // 対象要素の現在位置(viewport px)から、お描きの全図形・メモを再配置する。
+  function redrawEntry(entry) {
+    const el = entry.el;
+    if (!el || !el.isConnected) return;
+    const rect = el.getBoundingClientRect();
+    const W = rect.width || 1;
+    const H = rect.height || 1;
+    const L = rect.left;
+    const T = rect.top;
+    const fx = (x) => L + x * W;
+    const fy = (y) => T + y * H;
+    for (const { node, shape } of entry.elems) {
+      if (shape.type === 'rect') {
+        const x1 = fx(shape.x);
+        const y1 = fy(shape.y);
+        const x2 = fx(shape.x + shape.w);
+        const y2 = fy(shape.y + shape.h);
+        node.setAttribute('x', Math.min(x1, x2));
+        node.setAttribute('y', Math.min(y1, y2));
+        node.setAttribute('width', Math.abs(x2 - x1));
+        node.setAttribute('height', Math.abs(y2 - y1));
+      } else if (shape.type === 'ellipse') {
+        node.setAttribute('cx', fx(shape.cx));
+        node.setAttribute('cy', fy(shape.cy));
+        node.setAttribute('rx', Math.abs(shape.rx * W));
+        node.setAttribute('ry', Math.abs(shape.ry * H));
+      } else if (shape.type === 'arrow') {
+        node.setAttribute('points', arrowPointsPx(fx(shape.x1), fy(shape.y1), fx(shape.x2), fy(shape.y2)));
+      } else {
+        node.setAttribute('points', (shape.pts || []).map(([x, y]) => `${fx(x)},${fy(y)}`).join(' '));
+      }
+    }
+    // bbox(viewport px)を保持し、番号バッジを図形の左上に置く。メモ本体の配置は layoutMemos が一括で行う。
+    entry._box = {
+      L: fx(entry.bbox.minX),
+      T: fy(entry.bbox.minY),
+      R: fx(entry.bbox.maxX),
+      B: fy(entry.bbox.maxY),
+    };
+    if (entry.numEl) {
+      // 畳んでいる時は畳みバッジ(番号入り)が同役を果たすので、図形角の番号バッジは隠す。
+      if (entry.collapsed) {
+        entry.numEl.style.display = 'none';
+      } else {
+        entry.numEl.style.display = '';
+        entry.numEl.style.left = `${entry._box.L}px`;
+        entry.numEl.style.top = `${entry._box.T}px`;
+      }
+    }
+  }
+
+  const MEMO_GAP = 12; // 図形とメモの間隔(px)
+  const GUTTER_MARGIN = 16; // 右ガター(レール)と画面右端の間隔(px)
+  const MEMO_STACK_GAP = 10; // メモ同士の最小縦間隔(px)
+
+  // 全メモを一括配置する。右側に十分な余白があれば「右ガター整列」(メモを右レールに縦整列)、
+  // 無ければ従来どおり「図形のとなり」(右→左→下)。いずれもメモ同士が重ならないよう縦方向に
+  // パッキングし、図形→メモを引き出し線で結ぶ。各 entry._box は redrawEntry が更新済みであること。
+  function layoutMemos() {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const live = drawRegistry.filter((e) => e.memo && e.el?.isConnected && e._box);
+
+    // 畳んだメモはバッジだけ図形の右上に置き、パッキング対象から外す。
+    for (const e of live) {
+      if (e.collapsed) positionCollapsedBadge(e);
+    }
+    const open = live.filter((e) => !e.collapsed);
+    if (!open.length) return;
+    // 視覚順(上→下)に並べると番号順に読み下せ、パッキングも安定する。
+    open.sort((a, b) => (a._box.T + a._box.B) / 2 - (b._box.T + b._box.B) / 2);
+
+    // メモ幅は固定240(狭幅では画面内に収める)。右レールの左端を決める。
+    const memoW = Math.min(open[0].memo.offsetWidth || 240, vw - 16);
+    const gutterLeft = vw - memoW - GUTTER_MARGIN;
+    const maxShapeR = open.reduce((m, e) => Math.max(m, e._box.R), -Infinity);
+    // 右レールが全図形の右端より右にあり、画面内に収まる時だけ「右ガター」を使う。
+    // 図形が画面右まで広がるページでは自動的に「図形のとなり」へ退避する。
+    const useGutter = gutterLeft >= 4 && gutterLeft - MEMO_GAP > maxShapeR;
+
+    const placed = []; // 既配置メモの矩形(重なり回避用)
+    for (const e of open) {
+      const box = e._box;
+      const memo = e.memo;
+      const mw = memo.offsetWidth || 240;
+      const mh = memo.offsetHeight || 92;
+      const cy = (box.T + box.B) / 2;
+      let side = 'right';
+      let left;
+      let top = cy - mh / 2;
+
+      if (useGutter) {
+        left = gutterLeft;
+      } else {
+        left = box.R + MEMO_GAP;
+        if (left + mw > vw - 4) {
+          // 右に収まらない → 左へ反転、それも無理なら下へ。
+          const leftCandidate = box.L - MEMO_GAP - mw;
+          if (leftCandidate >= 4) {
+            side = 'left';
+            left = leftCandidate;
+          } else {
+            side = 'bottom';
+            left = clamp(box.L, 4, vw - mw - 4);
+            top = box.B + MEMO_GAP;
+          }
+        }
+      }
+      left = clamp(left, 4, vw - mw - 4);
+      if (side === 'bottom' && top + mh > vh - 4) top = box.T - MEMO_GAP - mh;
+      top = clamp(top, 4, Math.max(4, vh - mh - 4));
+      // メモ同士の重なりを避けて下へずらす。
+      top = avoidMemoOverlap(left, top, mw, mh, placed, vh);
+      placed.push({ l: left, r: left + mw, t: top, b: top + mh });
+
+      memo.style.left = `${left}px`;
+      memo.style.top = `${top}px`;
+      memo.dataset.side = side;
+      drawMemoConnector(e, box, left, top, mw, mh, side, cy);
+    }
+  }
+
+  // 既配置メモ(placed)と水平に重なる場合は、重ならない位置まで下へずらした top を返す。
+  function avoidMemoOverlap(left, top, mw, mh, placed, vh) {
+    let t = top;
+    for (let guard = 0; guard < 60; guard += 1) {
+      let moved = false;
+      for (const r of placed) {
+        const overlapX = left < r.r && left + mw > r.l;
+        const overlapY = t < r.b + MEMO_STACK_GAP && t + mh > r.t - MEMO_STACK_GAP;
+        if (overlapX && overlapY) {
+          t = r.b + MEMO_STACK_GAP;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+    return clamp(t, 4, Math.max(4, vh - mh - 4));
+  }
+
+  // 図形の最寄り辺の点 → メモの最寄り辺の点を結ぶ引き出し線を描く。
+  function drawMemoConnector(entry, box, left, top, mw, mh, side, cy) {
+    if (!entry.connector) return;
+    let sx;
+    let sy = clamp(cy, box.T, box.B);
+    let mx;
+    let my = clamp(cy, top, top + mh);
+    if (side === 'left') {
+      sx = box.L;
+      mx = left + mw;
+    } else if (side === 'bottom') {
+      sx = clamp(left + mw / 2, box.L, box.R);
+      sy = box.B;
+      mx = clamp(left + mw / 2, left, left + mw);
+      my = top;
+    } else {
+      // right(図形のとなり右 / 右ガター 共通): 図形右辺 → メモ左辺。
+      sx = box.R;
+      mx = left;
+    }
+    entry.connector.style.display = '';
+    entry.connector.setAttribute('x1', sx);
+    entry.connector.setAttribute('y1', sy);
+    entry.connector.setAttribute('x2', mx);
+    entry.connector.setAttribute('y2', my);
+  }
+
+  // 畳んだメモのバッジを図形の右上(無理なら左上)に置き、引き出し線を隠す。
+  function positionCollapsedBadge(entry) {
+    const box = entry._box;
+    const badge = entry.memo?._bagBadge;
+    if (badge && box) {
+      const bw = badge.offsetWidth || 22;
+      let bx = box.R + 6;
+      if (bx + bw > window.innerWidth - 4) bx = box.L - bw - 6;
+      badge.style.left = `${clamp(bx, 4, window.innerWidth - bw - 4)}px`;
+      badge.style.top = `${clamp(box.T - 6, 4, window.innerHeight - 30)}px`;
+    }
+    if (entry.connector) entry.connector.style.display = 'none';
+  }
+
+  function clamp(v, lo, hi) {
+    return Math.max(lo, Math.min(hi, v));
+  }
+
+  function setupDrawingReposition() {
+    if (drawRepositionSetup) return;
+    drawRepositionSetup = true;
+    const onMove = () => {
+      if (drawRaf) return;
+      drawRaf = requestAnimationFrame(() => {
+        drawRaf = 0;
+        repositionDrawings();
+      });
+    };
+    // capture:true で、入れ子のスクロールコンテナのスクロールも拾う。
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove, true);
+  }
+
+  function repositionDrawings() {
+    for (const entry of drawRegistry) redrawEntry(entry);
+    layoutMemos();
+    renderWorkflowConnectors(); // 順序コネクタもスクロール/リサイズに追従させる
+  }
+
+  // ===========================================================================
+  // お描きワークフロー
+  // 既存の「通し番号(annoDrawingNumber)」を手順番号として流用し、番号付きのお描きを
+  // 1→2→3 と順序コネクタで結ぶ。再生で各手順をスポットライトし、AIには手順として渡す。
+  // すべて加算的: 既定では順序コネクタ/再生UIは出さず、お描きが2件以上の時だけパネルを出す。
+  // ===========================================================================
+
+  // 手順順(通し番号の昇順)に並べた drawRegistry のエントリ。
+  function workflowSteps() {
+    return drawRegistry
+      .filter((e) => e.anno?.kind === 'drawing')
+      .slice()
+      .sort((a, b) => annoDrawingNumber(a.anno) - annoDrawingNumber(b.anno));
+  }
+
+  // パネル・順序コネクタをまとめて最新化する(renderAnnotations / reposition の後に呼ぶ)。
+  function syncWorkflowUi() {
+    updateWorkflowPanel();
+    renderWorkflowConnectors();
+  }
+
+  // 順序コネクタの矢印定義(drawLayer は renderAnnotations で都度クリアされるので毎回確認)。
+  function ensureWorkflowDefs() {
+    if (!drawLayer || drawLayer.querySelector('#bag-wf-arrow')) return;
+    const defs = svgEl('defs');
+    const marker = svgEl('marker', {
+      id: 'bag-wf-arrow', markerWidth: '8', markerHeight: '8',
+      refX: '6', refY: '3', orient: 'auto', markerUnits: 'userSpaceOnUse',
+    });
+    const path = svgEl('path', { class: 'bag-wf-arrowhead', d: 'M0,0 L6,3 L0,6 Z' });
+    path.setAttribute(ATTR.ui, '1');
+    marker.appendChild(path);
+    defs.appendChild(marker);
+    drawLayer.prepend(defs);
+  }
+
+  // 手順 i の番号バッジ中心 → 手順 i+1 の番号バッジ中心 を結ぶ順序コネクタを描く。
+  // 番号バッジは translate(-50%,-50%) で entry._box.L/T(図形左上)に中心が来るので、その点を使う。
+  function renderWorkflowConnectors() {
+    for (const ln of wfConnectors) ln.remove();
+    wfConnectors = [];
+    if (!wfMode || !drawLayer) return;
+    const steps = workflowSteps().filter((e) => e.el?.isConnected && e._box);
+    if (steps.length < 2) return;
+    ensureWorkflowDefs();
+    for (let i = 0; i < steps.length - 1; i += 1) {
+      const a = steps[i]._box;
+      const b = steps[i + 1]._box;
+      const ln = svgEl('line', {
+        class: 'bag-wf-connector',
+        x1: a.L, y1: a.T, x2: b.L, y2: b.T,
+        'marker-end': 'url(#bag-wf-arrow)',
+      });
+      ln.setAttribute(ATTR.ui, '1');
+      if (wfPlayIdx >= 0 && i < wfPlayIdx) ln.classList.add('bag-wf-connector--done');
+      drawLayer.appendChild(ln);
+      wfConnectors.push(ln);
+    }
+  }
+
+  // 手順ハイライト(再生・パネル操作)。step は1始まり、null で全解除。
+  function workflowHighlight(step) {
+    for (const e of drawRegistry) {
+      const isStep = step != null && annoDrawingNumber(e.anno) === step;
+      const dim = step != null && !isStep;
+      e.memo?.classList.toggle('bag-memo--active', isStep);
+      e.memo?.classList.toggle('bag-memo--dim', dim);
+      e.g?.classList.toggle('bag-draw-g--active', isStep);
+      e.g?.classList.toggle('bag-draw-g--dim', dim);
+      e.connector?.classList.toggle('bag-memo-connector--active', isStep);
+      e.connector?.classList.toggle('bag-memo-connector--dim', dim);
+      e.numEl?.classList.toggle('bag-anno-num--active', isStep);
+      e.numEl?.classList.toggle('bag-anno-num--dim', dim);
+    }
+    wfConnectors.forEach((ln, i) => {
+      ln.classList.toggle('bag-wf-connector--done', step != null && i < step - 1);
+    });
+  }
+
+  // 指定手順へ移動してスポットライト(任意でスクロール)。
+  function workflowGoto(step, scroll) {
+    const steps = workflowSteps();
+    if (!steps.length) return;
+    const target = clamp(step, 1, steps.length);
+    wfPlayIdx = target - 1;
+    workflowHighlight(target);
+    if (scroll) {
+      const el = steps[wfPlayIdx]?.el;
+      if (el?.isConnected) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    updateWorkflowPanel();
+  }
+
+  // 1手順ずつ順送りで再生(スポットライト + スクロール)。
+  function workflowPlay() {
+    const steps = workflowSteps();
+    if (!steps.length) return;
+    workflowStop(false);
+    let i = 0;
+    const tick = () => {
+      if (i >= steps.length) { workflowStop(false); return; }
+      workflowGoto(i + 1, true);
+      i += 1;
+    };
+    tick();
+    wfPlayTimer = setInterval(tick, WF_PLAY_MS);
+    updateWorkflowPanel();
+  }
+
+  function workflowStop(clearHighlight) {
+    if (wfPlayTimer) { clearInterval(wfPlayTimer); wfPlayTimer = 0; }
+    if (clearHighlight) { wfPlayIdx = -1; workflowHighlight(null); renderWorkflowConnectors(); }
+    updateWorkflowPanel();
+  }
+
+  // 操作パネル(左下)。お描きが2件以上の時だけ表示する。一度だけ生成しイベントを束ねる。
+  function ensureWorkflowPanel() {
+    if (wfPanel && wfPanel.isConnected) return wfPanel;
+    wfPanel = document.createElement('div');
+    wfPanel.className = 'bag-wf-panel';
+    wfPanel.setAttribute(ATTR.ui, '1');
+    wfPanel.hidden = true;
+    wfPanel.innerHTML =
+      '<div class="bag-wf-row">' +
+      '<span class="bag-wf-title">🖍 ワークフロー</span>' +
+      '<span class="bag-wf-count" data-wf="count"></span>' +
+      '</div>' +
+      '<label class="bag-wf-toggle"><input type="checkbox" data-wf="mode"> 順序を表示</label>' +
+      '<div class="bag-wf-controls" data-wf="controls" hidden>' +
+      '<button type="button" class="bag-wf-btn" data-wf="prev" title="前の手順" aria-label="前の手順">⏮</button>' +
+      '<button type="button" class="bag-wf-btn" data-wf="play" title="再生 / 停止" aria-label="再生 / 停止">▶</button>' +
+      '<button type="button" class="bag-wf-btn" data-wf="next" title="次の手順" aria-label="次の手順">⏭</button>' +
+      '<span class="bag-wf-step" data-wf="step"></span>' +
+      '</div>';
+    document.documentElement.appendChild(wfPanel);
+    const q = (s) => wfPanel.querySelector(`[data-wf="${s}"]`);
+    q('mode').addEventListener('change', (e) => {
+      wfMode = e.target.checked;
+      if (!wfMode) workflowStop(true);
+      syncWorkflowUi();
+    });
+    q('prev').addEventListener('click', () => workflowGoto((wfPlayIdx < 0 ? 1 : wfPlayIdx + 1) - 1, true));
+    q('next').addEventListener('click', () => workflowGoto((wfPlayIdx < 0 ? 0 : wfPlayIdx + 1) + 1, true));
+    q('play').addEventListener('click', () => (wfPlayTimer ? workflowStop(false) : workflowPlay()));
+    return wfPanel;
+  }
+
+  function updateWorkflowPanel() {
+    const n = workflowSteps().length;
+    if (n < 2) {
+      if (wfPlayTimer) { clearInterval(wfPlayTimer); wfPlayTimer = 0; }
+      if (wfPanel) wfPanel.hidden = true;
+      return;
+    }
+    ensureWorkflowPanel();
+    wfPanel.hidden = false;
+    const q = (s) => wfPanel.querySelector(`[data-wf="${s}"]`);
+    q('count').textContent = `${n}手順`;
+    q('mode').checked = wfMode;
+    q('controls').hidden = !wfMode;
+    q('play').textContent = wfPlayTimer ? '⏸' : '▶';
+    q('step').textContent = wfPlayIdx >= 0 ? `${wfPlayIdx + 1} / ${n}` : `– / ${n}`;
+  }
+
+  // AI連携: 番号付きお描きを手順順に構造化して返す(explainWorkflow / COLLECT_CONTEXT 共用)。
+  function buildWorkflowContext() {
+    const steps = annotations
+      .filter((x) => x.kind === 'drawing')
+      .map((a, i) => {
+        const t = a.anchor ? resolveAnchor(a.anchor) : null;
+        return {
+          step: i + 1,
+          target: t ? truncate(labelOf(t), 60) : '',
+          shape: describeShapes(a.shapes),
+          note: a.note || '',
+          forAI: memoForAI(a),
+          resolved: Boolean(t),
+        };
+      });
+    return { count: steps.length, steps };
+  }
+
+  // AI連携: 指定要素を囲む番号付きお描き(手順)を1つ追加する。番号は通し番号の続きで自動採番。
+  async function addWorkflowStep(a) {
+    const el = requireEl(a, '手順の対象要素');
+    const kindMap = { ellipse: 'ellipse', 円: 'ellipse', circle: 'ellipse', rect: 'rect', 四角: 'rect', arrow: 'arrow', 矢印: 'arrow' };
+    const kind = kindMap[a.kind] || 'rect';
+    const color = /^#[0-9a-fA-F]{3,8}$/.test(a.color || '') ? a.color : '#2563eb';
+    const width = DRAW_DEFAULT_WIDTH;
+    let shape;
+    if (kind === 'ellipse') shape = { type: 'ellipse', cx: 0.5, cy: 0.5, rx: 0.62, ry: 0.72, color, width };
+    else if (kind === 'arrow') shape = { type: 'arrow', x1: -0.28, y1: -0.32, x2: 0.12, y2: 0.12, color, width };
+    else shape = { type: 'rect', x: -0.04, y: -0.08, w: 1.08, h: 1.16, color, width };
+    const anchor = buildAnchor(el);
+    const saved = await upsertAnnotation({ kind: 'drawing', anchor, shapes: [shape], note: a.note || '', forAI: true });
+    return {
+      added: saved?.id || true,
+      step: annotations.filter((x) => x.kind === 'drawing').length,
+      target: truncate(labelOf(el), 60),
+    };
+  }
+
+  // ===========================================================================
+  // 視覚フィードバックの収集（vision ブリッジ用）
+  // お描き注釈を「現在のビューポート px」へ解決して返す。service worker が
+  // captureVisibleTab した PNG の上に、この座標で図形を burn-in する。
+  // 比率(0..1)座標は対象要素の現在矩形を基準に px へ戻す（redrawEntry と同式）。
+  // ===========================================================================
+
+  // 次フレームを n 回待つ（自前UIを隠した結果が確実に描画されてから capture するため）。
+  function nextFrames(n) {
+    return new Promise((resolve) => {
+      let i = 0;
+      const step = () => {
+        i += 1;
+        if (i >= n) resolve();
+        else requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  // 比率(0..1)図形を、対象矩形(L,T,W,H)を基準にビューポート px の図形へ戻す。
+  function fracShapeToPx(s, L, T, W, H) {
+    const fx = (x) => L + x * W;
+    const fy = (y) => T + y * H;
+    const base = { type: s.type, color: s.color, width: s.width };
+    if (s.type === 'rect') return { ...base, x: fx(s.x), y: fy(s.y), w: (s.w || 0) * W, h: (s.h || 0) * H };
+    if (s.type === 'ellipse') return { ...base, cx: fx(s.cx), cy: fy(s.cy), rx: (s.rx || 0) * W, ry: (s.ry || 0) * H };
+    if (s.type === 'arrow') return { ...base, x1: fx(s.x1), y1: fy(s.y1), x2: fx(s.x2), y2: fy(s.y2) };
+    return { ...base, pts: (s.pts || []).map(([x, y]) => [fx(x), fy(y)]) };
+  }
+
+  // px 図形群の bounding box（ビューポート px）。
+  function bboxOfPxShapes(shapes) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    const add = (x, y) => {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    };
+    for (const s of shapes) {
+      if (s.type === 'rect') {
+        add(s.x, s.y);
+        add(s.x + s.w, s.y + s.h);
+      } else if (s.type === 'ellipse') {
+        add(s.cx - s.rx, s.cy - s.ry);
+        add(s.cx + s.rx, s.cy + s.ry);
+      } else if (s.type === 'arrow') {
+        add(s.x1, s.y1);
+        add(s.x2, s.y2);
+      } else {
+        (s.pts || []).forEach(([x, y]) => add(x, y));
+      }
+    }
+    if (!Number.isFinite(minX)) minX = minY = maxX = maxY = 0;
+    return { minX, minY, maxX, maxY };
+  }
+
+  // お描き注釈を vision ブリッジ用のデータに変換する。
+  function collectVisualFeedbackData() {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const items = [];
+    for (const a of annotations) {
+      if (a.kind !== 'drawing') continue; // MVP はお描きのみ
+      if (!memoForAI(a)) continue; // 「AIに渡す」OFF は除外
+      const target = a.anchor ? resolveAnchor(a.anchor) : null;
+      const resolved = Boolean(target);
+      let shapesPx = [];
+      let bboxPx = null;
+      let inViewport = false;
+      if (resolved) {
+        const rect = target.getBoundingClientRect();
+        const W = rect.width || 1;
+        const H = rect.height || 1;
+        shapesPx = (a.shapes || []).map((s) => fracShapeToPx(s, rect.left, rect.top, W, H));
+        bboxPx = bboxOfPxShapes(shapesPx);
+        // ビューポートと bbox が少しでも重なれば描画対象。
+        inViewport = bboxPx.maxX > 0 && bboxPx.minX < vw && bboxPx.maxY > 0 && bboxPx.minY < vh;
+      }
+      const firstColor = (a.shapes && a.shapes[0] && a.shapes[0].color) || '#ef4444';
+      items.push({
+        id: a.id,
+        color: firstColor,
+        note: a.note || '',
+        intent: a.intent || '',
+        shapeText: describeShapes(a.shapes),
+        anchorLabel: target ? truncate(labelOf(target), 60) : truncate(a.anchor?.text || a.anchor?.tag || '', 60),
+        selector: a.anchor?.selector || '',
+        testid: a.anchor?.testid || '',
+        resolved,
+        inViewport,
+        shapesPx,
+        bboxPx,
+        shapesFrac: a.shapes || [],
+      });
+    }
+    return {
+      url: location.href,
+      title: document.title,
+      dpr: window.devicePixelRatio || 1,
+      viewport: { width: vw, height: vh },
+      items,
+    };
+  }
+
+  // お描きのコメント(目的)入力フォーム。新規・編集の両方で使う。
+  function openDrawingAuthoring(draft) {
+    closeAuthoring();
+    const anchor = draft.anchor || {};
+    const heading = anchor.text || anchor.ariaLabel || anchor.placeholder || anchor.tag || '対象';
+    const wrap = document.createElement('div');
+    wrap.className = 'bag-author';
+    wrap.setAttribute(ATTR.ui, '1');
+    wrap.innerHTML = `
+      <div class="bag-author-head">お描きにコメントを追加</div>
+      <div class="bag-author-target">対象: <b>${escapeHtml(truncate(heading, 40))}</b> <span class="muted">&lt;${escapeHtml(anchor.role || anchor.tag || '')}&gt;</span></div>
+      <div class="bag-author-target">お描き: ${escapeHtml(describeShapes(draft.shapes))}</div>
+      <label class="bag-author-row">
+        <span>コメント</span>
+        <textarea data-f="note" rows="2" placeholder="例: ここは送信前に必ず内容を確認すること"></textarea>
+      </label>
+      <label class="bag-author-row">
+        <span>目的（AI向け）</span>
+        <input data-f="intent" placeholder="例: フォームを送信する / 入力内容を確認する" />
+      </label>
+      <div class="bag-author-actions">
+        <button data-f="cancel" type="button">キャンセル</button>
+        <button data-f="save" type="button" class="primary">保存</button>
+      </div>`;
+    document.documentElement.appendChild(wrap);
+    const target = anchor ? resolveAnchor(anchor) : null;
+    positionAuthoring(wrap, target);
+    authoringEl = wrap;
+    if (draft.note) wrap.querySelector('[data-f="note"]').value = draft.note;
+    if (draft.intent) wrap.querySelector('[data-f="intent"]').value = draft.intent;
+    wrap.querySelector('[data-f="cancel"]').addEventListener('click', closeAuthoring);
+    wrap.querySelector('[data-f="save"]').addEventListener('click', async () => {
+      const note = wrap.querySelector('[data-f="note"]').value.trim();
+      const intent = wrap.querySelector('[data-f="intent"]').value.trim();
+      await upsertAnnotation({
+        id: draft.id,
+        kind: 'drawing',
+        anchor,
+        shapes: draft.shapes,
+        note,
+        intent,
+        forAI: draft.forAI !== false, // 既存のforAIを保持(未設定はON)
+      });
+      closeAuthoring();
+      toast('お描きを保存しました（次回も同じ場所に表示されます）', 'success');
+    });
+  }
+
+  // ---- 外部AI(別のChatUI)へ貼る決定的なページ文脈テキスト ----
+  function buildContextText() {
+    annotatePage();
+    renderAnnotations();
+    const targets = collectReferenceTargets();
+    const affs = collectAffordances();
+    const lines = [];
+    lines.push('# このページの文脈（Browser Agent Guide が生成）');
+    lines.push(`URL: ${location.href}`);
+    lines.push(`タイトル: ${document.title}`);
+    lines.push('');
+    if (annotations.length) {
+      lines.push('## 人が付けた補足・目印（最優先で従ってください）');
+      for (const a of annotations) {
+        // お描きメモは「AIに渡す」がOFFのものを文脈から除外する(forAI=falseは送らない)。
+        if (a.kind === 'drawing' && !memoForAI(a)) continue;
+        const t = a.anchor ? resolveAnchor(a.anchor) : null;
+        const where = t
+          ? `「${truncate((t.innerText || t.getAttribute('aria-label') || a.anchor.text || '').trim(), 40)}」`
+          : '(対象未検出)';
+        if (a.kind === 'note')
+          lines.push(`- 補足: ${a.note}${a.intent ? `（目的: ${a.intent}）` : ''} -> 対象 ${where}`);
+        else if (a.kind === 'marker')
+          lines.push(`- 目印「${a.name}」: ${a.intent || '(目的未設定)'} -> 対象 ${where}`);
+        else if (a.kind === 'button')
+          lines.push(`- 合図ボタン「${a.label}」: 目的 ${a.intent || '(未設定)'}`);
+        else if (a.kind === 'drawing')
+          lines.push(
+            `- お描きメモ: ${describeShapes(a.shapes)}${a.note ? `（指示: ${a.note}）` : ''}${a.intent ? `（目的: ${a.intent}）` : ''} -> 対象 ${where}`
+          );
+      }
+      lines.push('');
+    }
+    lines.push('## 操作できる要素（指示ではこの[ID]で要素を指してください）');
+    for (const f of affs.slice(0, 60)) {
+      lines.push(
+        `- [${f.aiId}] <${f.role}> "${truncate(f.label, 50)}"${f.value ? ` 値="${truncate(f.value, 24)}"` : ''}`
+      );
+    }
+    if (targets.length) {
+      lines.push('');
+      lines.push('## 参照できる見出し・区画（強調やスクロールではこの[ID]で指してください）');
+      for (const t of targets.slice(0, 80)) {
+        const level = t.level ? ` level=${t.level}` : '';
+        lines.push(`- [${t.aiId}] <${t.role}${level}> "${truncate(t.label, 70)}"`);
+      }
+    }
+    if (signalLog.length) {
+      lines.push('');
+      lines.push('## ユーザーが押した合図ボタンの履歴');
+      for (const s of signalLog) lines.push(`- ${s.intent}（${s.aiId}）`);
+    }
+    return lines.join('\n');
+  }
+
+  function truncate(s, n) {
+    s = String(s ?? '');
+    return s.length > n ? s.slice(0, n - 1) + '…' : s;
+  }
+
+  // ---- 実行器 ----
+  function isActionAllowed(verbName, source) {
+    if (source === 'chat' && CHAT_BLOCKED_VERBS.has(verbName)) return false;
+    if (source === 'recipe' && RECIPE_BLOCKED_VERBS.has(verbName)) return false;
+    return true;
+  }
+
+  async function runActions(actions, source = 'manual') {
+    const results = [];
+    for (const a of actions || []) {
+      const verb = AI_VERBS[a.verb];
+      if (!verb) {
+        results.push({ verb: a.verb, ok: false, error: '未知の動詞です。' });
+        continue;
+      }
+      if (!isActionAllowed(a.verb, source)) {
+        results.push({
+          verb: a.verb,
+          ok: false,
+          reason: a.reason || '',
+          error: 'この経路ではページ本文を直接変更する動詞は許可されていません。',
+        });
+        continue;
+      }
+      try {
+        const value = await verb.run(a.args || {});
+        results.push({ verb: a.verb, ok: true, reason: a.reason || '', result: value ?? null });
+      } catch (e) {
+        results.push({ verb: a.verb, ok: false, reason: a.reason || '', error: String(e?.message || e) });
+      }
+    }
+    return results;
+  }
+
+  function getCatalog() {
+    return Object.entries(AI_VERBS)
+      .filter(([, v]) => v.exposeToAI !== false)
+      .map(([name, v]) => ({
+        name,
+        description: v.description,
+        args: v.args || {},
+      }));
+  }
+
+  // ---- メッセージ受信 ----
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    (async () => {
+      switch (msg?.type) {
+        case 'PING':
+          return { ok: true };
+        case 'COLLECT_CONTEXT':
+          annotatePage();
+          renderAnnotations(); // 目印を最新解決して反映してから収集
+          const targets = collectReferenceTargets();
+          return {
+            url: location.href,
+            title: document.title,
+            affordances: collectAffordances(),
+            targets,
+            verbs: getCatalog(),
+            signals: signalLog.slice(),
+            annotations: annotations.map(annoSummary),
+            workflow: buildWorkflowContext(),
+          };
+        case 'RUN_ACTIONS':
+          return { results: await runActions(msg.actions, msg.source || 'manual') };
+        case 'START_PICKER':
+          await loadAnnotations();
+          return startPicker();
+        case 'STOP_PICKER':
+          return stopPicker();
+        case 'START_DRAWING':
+          await loadAnnotations();
+          return startDrawing();
+        case 'STOP_DRAWING':
+          return stopDrawing();
+        case 'LIST_ANNOTATIONS':
+          await loadAnnotations();
+          renderAnnotations();
+          return { annotations: annotations.map(annoSummary), scope: scopeKey() };
+        case 'EDIT_ANNOTATION': {
+          const a = annotations.find((x) => x.id === msg.id);
+          if (!a) return { error: '注釈が見つかりません。' };
+          if (a.kind === 'drawing') {
+            // お描きはページ上のメモで編集する。メモが表示中ならそこへスクロール＋フォーカス。
+            const onPage = drawPinHost?.querySelector(`.bag-memo[${ATTR.anno}="${cssEscape(msg.id)}"]`);
+            if (onPage) {
+              const entry = drawRegistry.find((e) => e.anno?.id === msg.id);
+              if (entry?.collapsed) toggleMemoCollapse(msg.id);
+              const target = a.anchor ? resolveAnchor(a.anchor) : null;
+              target?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+              focusMemo(msg.id);
+            } else {
+              // 対象未解決などでメモが無い場合は従来のフォームで編集する。
+              openDrawingAuthoring(a);
+            }
+            return { editing: msg.id };
+          }
+          const target = a.anchor ? resolveAnchor(a.anchor) : null;
+          openAuthoring(target, a);
+          return { editing: msg.id };
+        }
+        case 'REMOVE_ANNOTATION':
+          return await deleteAnnotation(msg.id);
+        case 'EXPORT_CONTEXT':
+          return { text: buildContextText() };
+        case 'PREPARE_CAPTURE': {
+          // capture 直前: 注釈を最新解決し、自前UIを一時的に隠す（二重描画回避）。
+          // 図形は自前 px 計算で burn-in するので、隠しても座標計算には影響しない。
+          await loadAnnotations();
+          renderAnnotations();
+          document.documentElement.classList.add('bag-capturing');
+          await nextFrames(2); // 非表示が確実に描画されてから capture させる
+          return collectVisualFeedbackData();
+        }
+        case 'FINISH_CAPTURE':
+          document.documentElement.classList.remove('bag-capturing');
+          return { ok: true };
+        case 'ACTIVATE': {
+          annotatePage();
+          collectReferenceTargets();
+          await loadAnnotations();
+          renderAnnotations();
+          let appliedRecipes = false;
+          if (Array.isArray(msg.recipes) && msg.recipes.length) {
+            // タブ切替等でのACTIVATE再送による二重適用を防ぐ。
+            const sig = JSON.stringify(msg.recipes);
+            if (sig !== appliedRecipeSig) {
+              appliedRecipeSig = sig;
+              await runActions(msg.recipes, 'recipe');
+              appliedRecipes = true;
+            }
+          }
+          return { activated: true, appliedRecipes };
+        }
+        default:
+          return { error: `未知のメッセージ: ${msg?.type}` };
+      }
+    })().then(sendResponse);
+    return true; // 非同期応答
+  });
+
+  // ---- 初期化: 保存済みの注釈を読み込んで復元する ----
+  loadAnnotations().then(renderAnnotations);
+})();

@@ -1,0 +1,42 @@
+{
+  "name": "browser-agent-guide",
+  "version": "0.1.0",
+  "description": "Guardrails that keep browser-operating AIs on track — a Chrome side-panel agent that drives any page through a closed, deterministic verb registry using Structured Outputs.",
+  "private": false,
+  "license": "MIT",
+  "author": "buddypia",
+  "homepage": "https://github.com/buddypia/browser-agent-guide#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/buddypia/browser-agent-guide.git"
+  },
+  "bugs": {
+    "url": "https://github.com/buddypia/browser-agent-guide/issues"
+  },
+  "keywords": [
+    "chrome-extension",
+    "manifest-v3",
+    "side-panel",
+    "ai-agent",
+    "browser-agent",
+    "browser-automation",
+    "structured-outputs",
+    "llm",
+    "openai",
+    "anthropic",
+    "deterministic"
+  ],
+  "scripts": {
+    "check": "npm run check:js && npm test && npm run test:vf && npm run test:ui",
+    "check:js": "for f in content/content-script.js sidepanel/sidepanel.js background/service-worker.js lib/ai-client.js lib/prompt.js lib/storage.js lib/site-matcher.js lib/visual-feedback/compositor.js offscreen/offscreen.js options/options.js; do node --check \"$f\" || exit 1; done && echo 'syntax OK'",
+    "test": "python3 test/anchor.test.py",
+    "test:vf": "node test/visual-feedback/compositor.test.mjs",
+    "test:ui": "playwright test -c playwright.config.mjs",
+    "debug:playground": "node scripts/debug-with-extension.mjs",
+    "zip": "zip -r browser-agent-guide.zip manifest.json background content lib options sidepanel offscreen icons README.md LICENSE -x '*.DS_Store'"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
+    "@playwright/test": "^1.60.0"
+  }
+}

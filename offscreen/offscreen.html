@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Browser Agent Guide offscreen compositor</title>
+  </head>
+  <body>
+    <!--
+      非表示の offscreen document。MV3 の service worker には DOM/Canvas が無いため、
+      スクリーンショットへの注釈 burn-in（OffscreenCanvas + Canvas 2D）をここで行う。
+      service worker から runtime メッセージで呼ばれ、合成済み PNG を data URL で返す。
+    -->
+    <script type="module" src="offscreen.js"></script>
+  </body>
+</html>
