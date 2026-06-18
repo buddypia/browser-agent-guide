@@ -380,6 +380,21 @@ html.bag-drawing .bag-draw-overlay {
   justify-content: flex-start;
   gap: 7px;
   margin-bottom: 5px;
+  /* ヘッダをドラッグハンドルにする(本文/ボタンは各自のカーソルを優先)。
+     touch-action: none でタッチ環境でもヘッダからの移動を取りこぼさない。 */
+  cursor: grab;
+  touch-action: none;
+}
+/* ドラッグ中: 最前面へ + アニメーション無効 + テキスト選択抑止で滑らかに動かす。 */
+.bag-memo--dragging {
+  transition: none;
+  user-select: none;
+  z-index: 2147483646;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
+}
+.bag-memo--dragging,
+.bag-memo--dragging .bag-memo-head {
+  cursor: grabbing;
 }
 /* 図形側の番号バッジと対応するメモ側の番号チップ(色=お描きの色) */
 .bag-memo-num {
