@@ -25,6 +25,7 @@ playwright/.cache/
 blob-report/
 coverage/
 .nyc_output/
+.playwright-cli/
 
 # ──────────────────────────────────────────────────────────────
 # Scratch / temporary working dirs
@@ -32,6 +33,9 @@ coverage/
 .tmp/
 tmp/
 *.tmp
+
+# AI 画像生成ツール (nanobanana) の出力スクラッチ — アイコンは icons/ に採用済み
+nanobanana-output/
 
 # ──────────────────────────────────────────────────────────────
 # Logs
