@@ -124,6 +124,16 @@ intent and continues the task.*
 
 For elements an author wants the AI to target **reliably across reflows**, the repo also defines the **`@agent:` marker convention** — a stable anchor `data-agent-id="@agent:<path>"` found with `rg -n 'data-agent-id="@agent:'`. See [docs/agent-markers.md](docs/agent-markers.md). (Dynamically-injected UI is out of scope — it already has `data-bag-id` + signals.) The `/bag-workflow` skill uses these markers, and `npm run check:markers` lints them.
 
+### Recipes on SPAs & async pages
+
+Saved **recipes** (the `injectHtml / injectCss / injectScript / outlineElement / injectButton / injectPanel` allow-list) re-apply automatically. They also keep working on **single-page apps** and **lazily-rendered content**:
+
+- **SPA internal navigation** — the content script watches `location.href` (via a `MutationObserver`, plus `popstate` / `hashchange`) and notifies the service worker, which re-evaluates the URL and re-applies matching recipes. No full page reload is required.
+- **Wait for async elements** — add `waitFor: { selector, timeoutMs }` to a recipe action to defer it until the target element appears (deferred loading / client-side rendering). The default timeout is 5000 ms; if the element never shows up the action fails (it does not throw). Since a missing element waits out the full `timeoutMs`, gate it with `when: { selectorExists }` first if you'd rather skip than wait.
+- **Render only when a condition holds** — add `when: { urlContains, selectorExists, selectorAbsent }` to a recipe action and it is skipped unless the condition matches. Use `urlContains` for per-screen targeting in a SPA, and `selectorAbsent` to avoid duplicate injection on re-apply.
+
+`waitFor` and `when` are optional per-action fields you set in the recipe JSON (Options → Recipes; the template button ships with examples).
+
 ## Architecture
 
 ```

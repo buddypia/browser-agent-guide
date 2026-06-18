@@ -251,12 +251,30 @@ function insertTemplate() {
     {
       verb: 'injectHtml',
       args: { id: 'saved-note', html: '<p>このページの補足です。</p>' },
+      // when: 条件を満たすときだけ実行する。selectorAbsent は既に挿入済みなら再注入しない
+      //       (SPA内部遷移での再適用時の重複防止)。
+      when: { selectorAbsent: '[data-bag-injected="saved-note"]' },
       reason: '保存済みHTMLを再表示',
     },
     {
       verb: 'injectCss',
       args: { id: 'saved-style', css: '[data-bag-injected="saved-note"] { outline: 2px solid #0f766e; padding: 8px; }' },
       reason: '保存済みCSSを再適用',
+    },
+    {
+      verb: 'outlineElement',
+      args: { selector: '#async-result', color: '#0f766e' },
+      // waitFor: 非同期で後から現れる要素を待ってから実行する(遅延ロード/SPA対応)。
+      //          selector が timeoutMs(ミリ秒)以内に出現しなければ失敗扱いになる。
+      waitFor: { selector: '#async-result', timeoutMs: 5000 },
+      reason: '遅延表示される結果が出てから枠線で強調する',
+    },
+    {
+      verb: 'injectPanel',
+      args: { title: '注文画面の補足', html: '<p>この画面の使い方…</p>', id: 'orders-help' },
+      // urlContains: SPAでURLの一部が一致する画面でだけ表示する(例: ハッシュルート #/orders)。
+      when: { urlContains: '#/orders' },
+      reason: '注文画面のときだけ補足パネルを出す',
     },
   ];
   $('recipe-json').value = JSON.stringify(tpl, null, 2);
@@ -283,6 +301,7 @@ function importSettings(file) {
       ...data,
       ai: { ...DEFAULT_SETTINGS.ai, ...(data.ai || {}) },
       memory: { ...DEFAULT_SETTINGS.memory, ...(data.memory || {}) },
+      ui: { ...DEFAULT_SETTINGS.ui, ...(data.ui || {}) },
       daemon: { ...DEFAULT_SETTINGS.daemon, ...(data.daemon || {}) },
     };
       await saveSettings(settings);

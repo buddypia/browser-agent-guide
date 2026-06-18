@@ -960,11 +960,21 @@
   }
 
   function waitFor(selector, timeoutMs) {
+    // 不正なCSSセレクタでも throw せず「存在しない」として扱う(evalWhen と挙動を揃える)。
+    // ここで reject すると runActions の try の外で await している呼び出しが
+    // バッチ全体を巻き込んで失敗させてしまうため、必ず null/要素を resolve する。
+    const query = () => {
+      try {
+        return document.querySelector(selector);
+      } catch {
+        return null;
+      }
+    };
     return new Promise((resolve) => {
-      const existing = document.querySelector(selector);
+      const existing = query();
       if (existing) return resolve(existing);
       const obs = new MutationObserver(() => {
-        const el = document.querySelector(selector);
+        const el = query();
         if (el) {
           obs.disconnect();
           resolve(el);
@@ -973,7 +983,7 @@
       obs.observe(document.documentElement, { childList: true, subtree: true });
       setTimeout(() => {
         obs.disconnect();
-        resolve(document.querySelector(selector));
+        resolve(query());
       }, timeoutMs);
     });
   }
@@ -1167,7 +1177,40 @@
   // ---- 注釈の描画 ----
   let annoObserver = null;
 
-  function renderAnnotations() {
+  // AIメモ(お描きの隣の編集欄)を編集中は「スプリアスな再描画」を保留する。
+  // renderAnnotations は [data-bag-anno] を全て作り直すので、入力中のテキストエリアまで
+  // 作り直すとフォーカスとIME変換が飛ぶ(日本語入力で特に顕著)。
+  // ただし保留してよいのは内容が変わらない「リフレッシュ目的」の再描画(サイドパネルの一覧更新=
+  // LIST_ANNOTATIONS や MutationObserver の再試行)だけ。追加/削除など構造が変わる再描画は
+  // deferrable=false で必ず実行する(編集中でもフォーカスより整合性を優先)。
+  let memoComposing = false; // IME変換中(compositionstart〜end)
+  let pendingMemoRender = false; // 編集中に保留した再描画があるか
+  let lastRenderResult = { resolved: 0, total: 0 };
+
+  // 「いまページ上のAIメモを実際に編集中か」。ページが実フォーカスを持ち、テキストエリアが
+  // 操作対象、またはIME変換中の時だけ true。サイドパネル側にフォーカスがある時は false。
+  function isMemoEditing() {
+    if (memoComposing) return true;
+    const hasFocus = typeof document.hasFocus !== 'function' || document.hasFocus();
+    if (!hasFocus) return false;
+    const ae = document.activeElement;
+    return !!(ae && ae.classList && ae.classList.contains('bag-memo-text'));
+  }
+
+  // 編集が終わった(blur / IME確定)時に、保留していた再描画を一度だけ反映する。
+  function flushPendingMemoRender() {
+    if (!pendingMemoRender || isMemoEditing()) return;
+    pendingMemoRender = false;
+    renderAnnotations();
+  }
+
+  // deferrable=true: 内容不変のリフレッシュ目的。メモ編集中はDOMを作り直さず保留する
+  // (入力中のフォーカス/IME変換が飛ぶのを防ぐ)。編集終了時に flushPendingMemoRender で反映する。
+  function renderAnnotations(deferrable = false) {
+    if (deferrable && isMemoEditing()) {
+      pendingMemoRender = true;
+      return lastRenderResult;
+    }
     annoObserver?.disconnect();
     try {
       // 既存の注釈DOMと目印属性を一旦クリア
@@ -1199,7 +1242,8 @@
       syncWorkflowUi(); // お描きが揃った後で手順パネル/順序コネクタを更新
       lastUnresolved = unresolved;
       if (unresolved === 0) resolveAttempts = 0; // 全解決でリトライ枠を回復
-      return { resolved: annotations.length - unresolved, total: annotations.length };
+      lastRenderResult = { resolved: annotations.length - unresolved, total: annotations.length };
+      return lastRenderResult;
     } finally {
       observeAnno();
     }
@@ -1279,12 +1323,29 @@
   let renderTimer = null;
   let resolveAttempts = 0;
   const MAX_RESOLVE_ATTEMPTS = 15; // 解決不能な注釈で無限リトライしないための上限
+
+  // SPA(pushState/popstate/hashchange)でURLが変わったときの共通処理。
+  //   - 注釈: スコープ(origin+pathname)を切り替えて読み直す
+  //   - レシピ: 別画面では再適用できるよう適用済みシグネチャを捨て、background へ通知する
+  //     (background が新URLにマッチするレシピを集約して ACTIVATE を再送する)
+  function handleUrlChange() {
+    if (location.href === lastUrl) return;
+    lastUrl = location.href;
+    resolveAttempts = 0;
+    appliedRecipeSig = null; // 別画面なら同一レシピでも再適用を許可する
+    try {
+      // SWが眠っていても次のDOM変化/イベントで再送されるため、失敗は握りつぶす。
+      chrome.runtime.sendMessage({ type: 'SPA_NAVIGATED', url: location.href }, () => void chrome.runtime.lastError);
+    } catch {
+      /* 拡張コンテキスト無効化などは無視 */
+    }
+    loadAnnotations().then(renderAnnotations);
+  }
+
   function onDomMutated() {
     // SPA遷移(URL変化)を検知したらスコープを切り替えて読み直す。
     if (location.href !== lastUrl) {
-      lastUrl = location.href;
-      resolveAttempts = 0;
-      loadAnnotations().then(renderAnnotations);
+      handleUrlChange();
       return;
     }
     // 全注釈が解決済み、または上限到達なら、後発DOM変化での再描画は不要(無駄を抑制)。
@@ -1293,9 +1354,13 @@
     renderTimer = setTimeout(() => {
       renderTimer = null;
       resolveAttempts += 1;
-      renderAnnotations();
+      renderAnnotations(/* deferrable */ true); // メモ編集中の入力フォーカスを奪わない
     }, 600);
   }
+
+  // 戻る/進む・ハッシュ遷移はDOM変化を伴わないことがあるため明示的に拾う(SPA対応)。
+  window.addEventListener('popstate', handleUrlChange);
+  window.addEventListener('hashchange', handleUrlChange);
 
   // ---- 注釈モード(要素ピッカー + 簡易フォーム) ----
   let picking = false;
@@ -2137,19 +2202,34 @@
     card.append(head, ta, foot);
 
     // 編集テキストは入力が止まったら保存する(過剰書き込みを抑える)。
+    // 保存は storage 書き込み→(サイドパネル経由で)再描画要求につながるため、編集中の
+    // フォーカス/IME変換を守る仕組み(isMemoEditing / pendingMemoRender)と必ず併用する。
     let saveTimer = null;
     const scheduleSave = () => {
       if (saveTimer) clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
         saveTimer = null;
+        if (memoComposing) return; // IME変換確定前は保存しない(compositionendで保存する)
         updateMemoFields(a.id, { note: ta.value.trim() });
       }, 500);
     };
     ta.addEventListener('input', scheduleSave);
+    // IME変換中は保存も再描画も止め、変換が飛ぶのを防ぐ。確定(compositionend)で保存を再開する。
+    ta.addEventListener('compositionstart', () => {
+      memoComposing = true;
+    });
+    ta.addEventListener('compositionend', () => {
+      memoComposing = false;
+      scheduleSave();
+    });
     ta.addEventListener('blur', () => {
       if (saveTimer) clearTimeout(saveTimer);
       saveTimer = null;
+      memoComposing = false;
       updateMemoFields(a.id, { note: ta.value.trim() });
+      // 編集中に保留した再描画があれば、フォーカスが外れた後(activeElement確定後)に反映する。
+      // 直接呼ぶと blur 中は activeElement が未確定で、隣のメモへフォーカス移動中に誤って作り直す恐れがある。
+      requestAnimationFrame(flushPendingMemoRender);
     });
     cb.addEventListener('change', () => {
       const off = !cb.checked;
@@ -2194,10 +2274,87 @@
     drawPinHost.append(card, badge);
     // バッジは card と対で扱えるよう参照を持たせる。
     card._bagBadge = badge;
+    setupMemoDrag(card, head, a); // ヘッダをハンドルにドラッグ移動できるようにする
     return card;
   }
 
-  // メモ本文・forAI を保存する(他フィールドは保持)。
+  // メモヘッダをハンドルにしたドラッグ移動。位置は memoPos(図形ボックス相対オフセット)として
+  // 永続化し、再訪時に復元する。スクロール追従は既存の reposition がそのまま面倒を見る。
+  function setupMemoDrag(card, head, a) {
+    let drag = null;
+    head.addEventListener('pointerdown', (ev) => {
+      if (ev.button != null && ev.button !== 0) return;
+      if (ev.target.closest('.bag-memo-collapse')) return; // 畳むボタンは自身の操作なのでドラッグ開始しない
+      const entry = drawRegistry.find((x) => x.anno?.id === a.id);
+      if (!entry) return;
+      const rect = card.getBoundingClientRect();
+      drag = {
+        entry,
+        startX: ev.clientX,
+        startY: ev.clientY,
+        offX: ev.clientX - rect.left,
+        offY: ev.clientY - rect.top,
+        moved: false,
+      };
+      try {
+        head.setPointerCapture(ev.pointerId);
+      } catch {
+        /* 一部環境ではキャプチャ不可 */
+      }
+      ev.preventDefault();
+    });
+    head.addEventListener('pointermove', (ev) => {
+      if (!drag) return;
+      // クリックとドラッグを分けるため、3px 動くまでは開始しない。
+      if (!drag.moved && Math.hypot(ev.clientX - drag.startX, ev.clientY - drag.startY) < 3) return;
+      if (!drag.moved) {
+        drag.moved = true;
+        drag.entry._dragging = true; // 自動レイアウトに位置を奪われないよう印を付ける
+        card.classList.add('bag-memo--dragging');
+      }
+      const mw = card.offsetWidth || 240;
+      const mh = card.offsetHeight || 92;
+      const left = clamp(ev.clientX - drag.offX, 4, Math.max(4, window.innerWidth - mw - 4));
+      const top = clamp(ev.clientY - drag.offY, 4, Math.max(4, window.innerHeight - mh - 4));
+      card.style.left = `${left}px`;
+      card.style.top = `${top}px`;
+      updateMemoConnectorLive(drag.entry); // 引き出し線を追従させる
+      ev.preventDefault();
+    });
+    const end = (ev) => {
+      if (!drag) return;
+      const { entry, moved } = drag;
+      try {
+        head.releasePointerCapture(ev.pointerId);
+      } catch {
+        /* noop */
+      }
+      card.classList.remove('bag-memo--dragging');
+      drag = null;
+      if (!moved) return;
+      entry._dragging = false;
+      // 現在の図形ボックス左上からの px オフセットとして保存する(スクロールしても相対で追従)。
+      const box = entry._box || { L: 0, T: 0 };
+      const left = parseFloat(card.style.left) || 0;
+      const top = parseFloat(card.style.top) || 0;
+      updateMemoFields(a.id, { memoPos: { dx: Math.round(left - box.L), dy: Math.round(top - box.T) } });
+      layoutMemos(); // 他の自動メモが手動メモを避け直すよう再パッキング
+    };
+    head.addEventListener('pointerup', end);
+    head.addEventListener('pointercancel', end);
+    // ヘッダのダブルクリックで「覚えた位置」を破棄し、自動配置へ戻す。
+    head.addEventListener('dblclick', (ev) => {
+      if (ev.target.closest('.bag-memo-collapse')) return;
+      if (!a.memoPos) return;
+      ev.preventDefault();
+      const entry = drawRegistry.find((x) => x.anno?.id === a.id);
+      if (entry) entry._dragging = false;
+      updateMemoFields(a.id, { memoPos: null });
+      layoutMemos();
+    });
+  }
+
+  // メモ本文・forAI・手動配置(memoPos)を保存する(他フィールドは保持)。
   async function updateMemoFields(id, patch) {
     const a = annotations.find((x) => x.id === id);
     if (!a) return;
@@ -2209,6 +2366,15 @@
     if ('forAI' in patch && memoForAI(a) !== patch.forAI) {
       a.forAI = patch.forAI;
       changed = true;
+    }
+    // ドラッグで覚えさせた手動位置(図形ボックス左上からの px オフセット)。null/未指定で自動配置へ戻す。
+    if ('memoPos' in patch) {
+      const next = patch.memoPos && Number.isFinite(patch.memoPos.dx) ? patch.memoPos : null;
+      if (JSON.stringify(a.memoPos ?? null) !== JSON.stringify(next)) {
+        if (next) a.memoPos = next;
+        else delete a.memoPos;
+        changed = true;
+      }
     }
     if (!changed) return;
     await persistAnnotations();
@@ -2345,7 +2511,8 @@
   function layoutMemos() {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const live = drawRegistry.filter((e) => e.memo && e.el?.isConnected && e._box);
+    // ドラッグ操作中(_dragging)のメモは触らない: 手で動かしている最中に自動配置で位置を奪わない。
+    const live = drawRegistry.filter((e) => e.memo && e.el?.isConnected && e._box && !e._dragging);
 
     // 畳んだメモはバッジだけ図形の右上に置き、パッキング対象から外す。
     for (const e of live) {
@@ -2356,16 +2523,24 @@
     // 視覚順(上→下)に並べると番号順に読み下せ、パッキングも安定する。
     open.sort((a, b) => (a._box.T + a._box.B) / 2 - (b._box.T + b._box.B) / 2);
 
+    const placed = []; // 既配置メモの矩形(重なり回避用)
+
+    // ドラッグで覚えさせた手動位置を持つメモを先に置き、placed に積む。
+    // 残りの自動配置メモは、手動メモを既配置として避ける(重なり回避の対象に含める)。
+    const manual = open.filter((e) => e.anno?.memoPos);
+    const auto = open.filter((e) => !e.anno?.memoPos);
+    for (const e of manual) placeManualMemo(e, placed, vw, vh);
+    if (!auto.length) return;
+
     // メモ幅は固定240(狭幅では画面内に収める)。右レールの左端を決める。
-    const memoW = Math.min(open[0].memo.offsetWidth || 240, vw - 16);
+    const memoW = Math.min(auto[0].memo.offsetWidth || 240, vw - 16);
     const gutterLeft = vw - memoW - GUTTER_MARGIN;
-    const maxShapeR = open.reduce((m, e) => Math.max(m, e._box.R), -Infinity);
+    const maxShapeR = auto.reduce((m, e) => Math.max(m, e._box.R), -Infinity);
     // 右レールが全図形の右端より右にあり、画面内に収まる時だけ「右ガター」を使う。
     // 図形が画面右まで広がるページでは自動的に「図形のとなり」へ退避する。
     const useGutter = gutterLeft >= 4 && gutterLeft - MEMO_GAP > maxShapeR;
 
-    const placed = []; // 既配置メモの矩形(重なり回避用)
-    for (const e of open) {
+    for (const e of auto) {
       const box = e._box;
       const memo = e.memo;
       const mw = memo.offsetWidth || 240;
@@ -2449,6 +2624,46 @@
     entry.connector.setAttribute('y1', sy);
     entry.connector.setAttribute('x2', mx);
     entry.connector.setAttribute('y2', my);
+  }
+
+  // ドラッグで覚えさせた手動位置(図形ボックス左上からの px オフセット memoPos{dx,dy})にメモを置く。
+  // スクロール/リサイズでも entry._box が再計算されるので、相対オフセットを保つだけで図形に追従する。
+  function placeManualMemo(e, placed, vw, vh) {
+    const box = e._box;
+    const memo = e.memo;
+    const mw = memo.offsetWidth || 240;
+    const mh = memo.offsetHeight || 92;
+    const pos = e.anno.memoPos || { dx: 0, dy: 0 };
+    const left = clamp(box.L + pos.dx, 4, Math.max(4, vw - mw - 4));
+    const top = clamp(box.T + pos.dy, 4, Math.max(4, vh - mh - 4));
+    memo.style.left = `${left}px`;
+    memo.style.top = `${top}px`;
+    const side = manualSide(box, left, top, mw, mh);
+    memo.dataset.side = side;
+    drawMemoConnector(e, box, left, top, mw, mh, side, (box.T + box.B) / 2);
+    placed.push({ l: left, r: left + mw, t: top, b: top + mh });
+  }
+
+  // 手動配置メモが図形のどちら側にあるかを推定し、引き出し線の接続辺を選ぶ。
+  function manualSide(box, left, top, mw, mh) {
+    if (top >= box.B) return 'bottom';
+    if (left + mw <= box.L) return 'left';
+    if (left >= box.R) return 'right';
+    return left + mw / 2 < (box.L + box.R) / 2 ? 'left' : 'right';
+  }
+
+  // ドラッグ中に当該メモの引き出し線だけを更新する(全体レイアウトは走らせない)。
+  function updateMemoConnectorLive(e) {
+    const box = e._box;
+    const memo = e.memo;
+    if (!box || !memo) return;
+    const mw = memo.offsetWidth || 240;
+    const mh = memo.offsetHeight || 92;
+    const left = parseFloat(memo.style.left) || 0;
+    const top = parseFloat(memo.style.top) || 0;
+    const side = manualSide(box, left, top, mw, mh);
+    memo.dataset.side = side;
+    drawMemoConnector(e, box, left, top, mw, mh, side, (box.T + box.B) / 2);
   }
 
   // 畳んだメモのバッジを図形の右上(無理なら左上)に置き、引き出し線を隠す。
@@ -2916,6 +3131,30 @@
     return true;
   }
 
+  // レシピ/アクションの実行条件(when)を評価する。満たさなければそのアクションはスキップ。
+  //   when.urlContains    : 現在URL(location.href)に指定文字列を含むときだけ実行(SPAの画面別出し分け)
+  //   when.selectorExists : 指定セレクタの要素が存在するときだけ実行
+  //   when.selectorAbsent : 指定セレクタの要素が存在しないときだけ実行(重複注入の防止など)
+  function evalWhen(when) {
+    if (!when || typeof when !== 'object') return true;
+    if (when.urlContains && !location.href.includes(when.urlContains)) return false;
+    if (when.selectorExists) {
+      try {
+        if (!document.querySelector(when.selectorExists)) return false;
+      } catch {
+        return false; // 無効セレクタは「存在しない」とみなす
+      }
+    }
+    if (when.selectorAbsent) {
+      try {
+        if (document.querySelector(when.selectorAbsent)) return false;
+      } catch {
+        /* 無効セレクタは「存在しない」とみなして実行を許す */
+      }
+    }
+    return true;
+  }
+
   async function runActions(actions, source = 'manual') {
     const results = [];
     for (const a of actions || []) {
@@ -2932,6 +3171,24 @@
           error: 'この経路ではページ本文を直接変更する動詞は許可されていません。',
         });
         continue;
+      }
+      // 実行条件(when): 満たさなければスキップ(失敗ではない)。SPAの画面別出し分けに使う。
+      if (a.when && !evalWhen(a.when)) {
+        results.push({ verb: a.verb, ok: true, skipped: true, reason: a.reason || '', result: null });
+        continue;
+      }
+      // 出現待ち(waitFor): 非同期で後から現れる要素を待ってから実行する(遅延ロード/SPA対応)。
+      if (a.waitFor && a.waitFor.selector) {
+        const found = await waitFor(a.waitFor.selector, Number(a.waitFor.timeoutMs) || 5000);
+        if (!found) {
+          results.push({
+            verb: a.verb,
+            ok: false,
+            reason: a.reason || '',
+            error: `waitFor: 要素 "${a.waitFor.selector}" が時間内に出現しませんでした。`,
+          });
+          continue;
+        }
       }
       try {
         const value = await verb.run(a.args || {});
@@ -2986,8 +3243,16 @@
         case 'STOP_DRAWING':
           return stopDrawing();
         case 'LIST_ANNOTATIONS':
-          await loadAnnotations();
-          renderAnnotations();
+          // サイドパネルの一覧更新は storage 変化のたびに飛んでくる。メモ本文を編集すると
+          // その保存自体がこの再読込→再描画を誘発し、入力中のテキストエリアが作り直されて
+          // フォーカス/IME変換が飛ぶ。編集中は再読込・再描画を行わず、現在の一覧だけ返す
+          // (編集終了時に flushPendingMemoRender で最新状態へ反映する)。
+          if (isMemoEditing()) {
+            pendingMemoRender = true;
+          } else {
+            await loadAnnotations();
+            renderAnnotations();
+          }
           return { annotations: annotations.map(annoSummary), scope: scopeKey() };
         case 'EDIT_ANNOTATION': {
           const a = annotations.find((x) => x.id === msg.id);

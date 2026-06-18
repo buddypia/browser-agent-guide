@@ -7,6 +7,7 @@ import { getSettings, saveSettings } from '../lib/storage.js';
 import { findMatchingRules } from '../lib/site-matcher.js';
 import { callAI } from '../lib/ai-client.js';
 import { buildSystemPrompt } from '../lib/prompt.js';
+import { slugFromCapture } from '../lib/slug.js';
 
 const MEMORY_VERBS = new Set([
   'addNote',
@@ -32,7 +33,10 @@ chrome.runtime.onStartup?.addListener(() => {
 
 // ---- タブのURL変化を監視してサイドパネルの有効化＋ページ有効化を行う ----
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-  if (info.status === 'complete' || info.url) {
+  // フルロード完了のみを拾う。SPA の同一ドキュメント遷移(pushState/hashchange)では
+  // onUpdated も info.url 付きで発火しうるが、それは content の SPA_NAVIGATED が担当する。
+  // ここで info.url まで拾うと、同じ遷移で syncTab→ACTIVATE が二重に走り、同一レシピが二重適用される。
+  if (info.status === 'complete') {
     syncTab(tabId, tab?.url).catch(() => {});
   }
 });
@@ -86,6 +90,9 @@ async function handleMessage(msg, sender) {
       return runSingleVerb(msg);
     case 'COLLECT_CONTEXT':
       return collectContext(msg.tabId);
+    case 'SPA_NAVIGATED':
+      // content から SPA内部遷移(URL変化)の通知。新URLにマッチするレシピを再適用する。
+      return syncTab(sender?.tab?.id, msg.url);
     case 'START_PICKER':
       return ensureContentAndSend(msg.tabId, { type: 'START_PICKER' });
     case 'STOP_PICKER':
@@ -509,6 +516,13 @@ async function captureVisualFeedback({ tabId }) {
 
   const settings = await getSettings();
   const daemon = settings.daemon || {};
+  // 過去のダウンロード保存で学習した「ブラウザの実ダウンロード先」。あればデーモンへ伝え、
+  // デーモンが既定 inbox をブラウザの実態(移動済み/Edge/Brave 等)へ合わせられるようにする。
+  // 注意: これは下の chrome.downloads フォールバックが一度でも走って初めて学習される
+  // (chrome.downloads には「既定保存先を取得する」APIが無いため)。デーモン常用ユーザーでは
+  // null のままで送らないが、その場合はデーモン自身の OS 検出が保存先を決めるので実害はない
+  // (デーモン経路はデーモンが保存先を所有し、MCP もそこを読むため経路が一貫する)。
+  const knownDownloadsDir = await getKnownDownloadsDir();
   let daemonError = null;
   if (daemon.enabled && daemon.url && daemon.token) {
     try {
@@ -522,6 +536,7 @@ async function captureVisualFeedback({ tabId }) {
           title: data.title,
           dpr: data.dpr,
           viewport: data.viewport,
+          downloadsDir: knownDownloadsDir || undefined,
           image: { shot: composite.dataUrl, raw: screenshotDataUrl },
           annotation,
           memo,
@@ -534,16 +549,102 @@ async function captureVisualFeedback({ tabId }) {
   }
 
   // chrome.downloads フォールバック（Phase 0 と同じ）。
-  const slug = slugFromIso(capturedAt);
+  const slug = slugFromCapture({ capturedAt, url: data.url, title: data.title });
   const dir = `${INBOX_ROOT}/${slug}`;
-  await Promise.all([
+  const [shotId] = await Promise.all([
     saveDownload(`${dir}/shot.png`, composite.dataUrl),
     saveDownload(`${dir}/raw.png`, screenshotDataUrl),
     saveDownload(`${dir}/annotation.json`, textToDataUrl(JSON.stringify(annotation, null, 2), 'application/json')),
     saveDownload(`${dir}/memo.md`, textToDataUrl(memo, 'text/markdown')),
   ]);
 
-  return { transport: 'downloads', dir, file: `${dir}/shot.png`, daemonError, ...common };
+  // 実際にどこへ書かれたか(絶対パス)を取得して表に出す。ダウンロード先はブラウザ設定依存で、
+  // ~/Downloads とは限らない(移動済み/Edge/Brave/「毎回確認」)。取得できたら downloadsDir を学習保存する。
+  let absDir = null;
+  let absFile = null;
+  try {
+    absFile = await resolveDownloadAbsolutePath(shotId);
+    if (absFile) {
+      absDir = stripLastSegment(absFile); // .../ai-inbox/<slug>
+      const downloadsDir = downloadsRootFromAbsShot(absFile);
+      if (downloadsDir) await chrome.storage.local.set({ [DOWNLOADS_DIR_KEY]: downloadsDir });
+    }
+  } catch {
+    /* 取得失敗時は相対パス表示にフォールバック */
+  }
+
+  return { transport: 'downloads', dir, absDir, file: `${dir}/shot.png`, absFile, daemonError, ...common };
+}
+
+const DOWNLOADS_DIR_KEY = 'bagDownloadsDir';
+
+// 学習済みの「ブラウザの実ダウンロード先」を返す（無ければ null）。
+async function getKnownDownloadsDir() {
+  try {
+    const r = await chrome.storage.local.get(DOWNLOADS_DIR_KEY);
+    return r[DOWNLOADS_DIR_KEY] || null;
+  } catch {
+    return null;
+  }
+}
+
+// download id の保存完了を待ち、確定した絶対パス(DownloadItem.filename)を返す。
+// download() 解決直後は filename が暫定のことがあるため onChanged(state=complete) を主に使う。
+// 返り値は表示専用(取れなければ相対パス表示にフォールバック)なので、保存が滞っても UI を
+// 長く待たせないよう短めのタイムアウトにする(data: URL の保存は通常 1 秒未満で完了する)。
+function resolveDownloadAbsolutePath(downloadId, timeoutMs = 2000) {
+  if (downloadId == null) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (val) => {
+      if (done) return;
+      done = true;
+      try {
+        chrome.downloads.onChanged.removeListener(onChanged);
+      } catch {
+        /* listener 解除失敗は無視 */
+      }
+      clearTimeout(timer);
+      resolve(val || null);
+    };
+    const onChanged = (delta) => {
+      if (delta.id !== downloadId) return;
+      if (delta.state?.current === 'complete' || delta.filename?.current) {
+        chrome.downloads
+          .search({ id: downloadId })
+          .then((items) => finish(items?.[0]?.filename || delta.filename?.current))
+          .catch(() => finish(delta.filename?.current));
+      }
+    };
+    chrome.downloads.onChanged.addListener(onChanged);
+    // data: URL は即時完了しがちなので、既に完了済みのケースを即 search で拾う。
+    chrome.downloads
+      .search({ id: downloadId })
+      .then((items) => {
+        if (items?.[0]?.state === 'complete' && items[0].filename) finish(items[0].filename);
+      })
+      .catch(() => {});
+    const timer = setTimeout(() => {
+      chrome.downloads
+        .search({ id: downloadId })
+        .then((items) => finish(items?.[0]?.filename))
+        .catch(() => finish(null));
+    }, timeoutMs);
+  });
+}
+
+// 絶対パスから末尾セグメント(ファイル名)を除いてディレクトリを返す（/ と \ の両対応）。
+function stripLastSegment(p) {
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+  return i > 0 ? p.slice(0, i) : p;
+}
+
+// .../<INBOX_ROOT>/<slug>/shot.png から INBOX_ROOT の親(=ブラウザのダウンロードルート)を取り出す。
+// needle は INBOX_ROOT から導出する(保存パス組み立てと同じ定数で同期させる)。
+function downloadsRootFromAbsShot(absShot) {
+  const needle = `/${INBOX_ROOT}/`;
+  const i = absShot.replace(/\\/g, '/').lastIndexOf(needle);
+  return i > 0 ? absShot.slice(0, i) : null;
 }
 
 // 拡張 → デーモンへ WebSocket で1件 push し、ack を待つ。
@@ -626,11 +727,6 @@ async function sendToOffscreen(message, retried = false) {
 
 async function saveDownload(filename, url) {
   return chrome.downloads.download({ url, filename, saveAs: false, conflictAction: 'uniquify' });
-}
-
-// ISO8601 → ファイル名に使える slug（コロン/ドットを除去）。
-function slugFromIso(iso) {
-  return iso.replace(/[:.]/g, '-').replace(/[^0-9A-Za-z-]/g, '');
 }
 
 // UTF-8 を安全に base64 data URL 化する（日本語メモ対応）。
