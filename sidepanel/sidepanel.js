@@ -1,8 +1,10 @@
+import { getSettings, patchSettings } from '../lib/storage.js';
+import { createI18n, DEFAULT_LOCALE, LANGUAGE_OPTIONS, languageName, localeToIntl, normalizeLocale } from './i18n.js';
+
 // サイドパネルのチャットUI。background経由でAI呼び出しと動詞実行を行う。
 
 const els = {
   messages: document.getElementById('messages'),
-  emptyHint: document.getElementById('empty-hint'),
   input: document.getElementById('input'),
   send: document.getElementById('send'),
   composer: document.getElementById('composer'),
@@ -13,6 +15,7 @@ const els = {
   btnAffordances: document.getElementById('btn-affordances'),
   btnHistory: document.getElementById('btn-history'),
   btnSettings: document.getElementById('btn-settings'),
+  languageSelect: document.getElementById('language-select'),
   rememberScope: document.getElementById('remember-scope'),
   annoPanel: document.getElementById('anno-panel'),
   annoList: document.getElementById('anno-list'),
@@ -34,27 +37,111 @@ const MAX_CHAT_MESSAGES = 40;
 const MAX_MESSAGE_CHARS = 8000;
 const MAX_PROMPT_HISTORY = 50;
 const MAX_PROMPT_CHARS = 4000;
-const EMPTY_HINT_HTML = els.emptyHint?.outerHTML || '';
 const REMEMBER_SCOPES = new Set(['page', 'domain', 'all']);
+
+let i18n = null;
+let suppressNextSettingsRefresh = false;
 
 let state = {
   tabId: null,
   url: '',
   title: '',
   pageKey: '',
+  language: DEFAULT_LOCALE,
   history: [],
   promptHistory: [],
   promptCursor: null,
   rememberScope: 'page',
+  activeTabState: null,
+  annotations: [],
   busy: false,
 };
+
+function t(key, values) {
+  return i18n?.t(key, values) ?? key;
+}
+
+function renderLanguageOptions() {
+  els.languageSelect.innerHTML = '';
+  LANGUAGE_OPTIONS.forEach((language) => {
+    const opt = document.createElement('option');
+    opt.value = language.value;
+    opt.textContent = language.shortLabel;
+    opt.title = language.label;
+    els.languageSelect.appendChild(opt);
+  });
+  els.languageSelect.value = state.language;
+}
+
+function applyI18n() {
+  document.documentElement.lang = state.language;
+  document.title = t('document.title');
+  els.languageSelect.value = state.language;
+
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll('[data-i18n-title]').forEach((el) => {
+    el.setAttribute('title', t(el.dataset.i18nTitle));
+  });
+  document.querySelectorAll('[data-i18n-aria-label]').forEach((el) => {
+    el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel));
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+    el.setAttribute('placeholder', t(el.dataset.i18nPlaceholder));
+  });
+}
+
+function rerenderLocalizedContent() {
+  applyI18n();
+  renderChatHistory();
+  renderPromptHistory();
+  renderAnnotationList(state.annotations);
+  if (state.activeTabState) renderBanner(state.activeTabState);
+  syncHistoryButton();
+}
+
+async function changeLanguage(nextLanguage) {
+  const previous = state.language;
+  const language = normalizeLocale(nextLanguage);
+  if (language === previous) return;
+
+  els.languageSelect.disabled = true;
+  try {
+    await i18n.setLocale(language);
+    state.language = i18n.locale;
+    suppressNextSettingsRefresh = true;
+    await patchSettings({ ui: { language: state.language } });
+    rerenderLocalizedContent();
+    showBanner(escapeHtml(t('language.changed', { language: languageName(state.language) })), true);
+  } catch (e) {
+    suppressNextSettingsRefresh = false;
+    await i18n.setLocale(previous);
+    state.language = previous;
+    els.languageSelect.value = previous;
+    showBanner(escapeHtml(t('errors.languageChangeFailed', { message: e.message })), false);
+  } finally {
+    els.languageSelect.disabled = false;
+  }
+}
+
+async function handleSettingsChanged(settings) {
+  if (!i18n) return;
+  const nextLanguage = normalizeLocale(settings?.ui?.language || DEFAULT_LOCALE);
+  if (nextLanguage !== state.language) {
+    await i18n.setLocale(nextLanguage);
+    state.language = i18n.locale;
+    rerenderLocalizedContent();
+  }
+  await refreshState();
+}
 
 // background へメッセージ送信(エラーはthrow)。
 function send(message) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(message, (res) => {
       if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
-      if (!res?.ok) return reject(new Error(res?.error || '不明なエラー'));
+      if (!res?.ok) return reject(new Error(res?.error || t('errors.unknown')));
       resolve(res.result);
     });
   });
@@ -81,6 +168,7 @@ async function setLocal(key, value) {
 async function refreshState() {
   try {
     const s = await send({ type: 'GET_ACTIVE_TAB_STATE' });
+    state.activeTabState = s;
     state.tabId = s.tabId;
     state.url = s.url || '';
     state.title = s.title || '';
@@ -94,7 +182,7 @@ async function refreshState() {
     renderBanner(s);
     refreshAnnotations();
   } catch (e) {
-    showBanner(`状態取得に失敗: ${e.message}`, false);
+    showBanner(escapeHtml(t('errors.stateFetchFailed', { message: e.message })), false);
   }
 }
 
@@ -104,15 +192,12 @@ function normalizeRememberScope(scope) {
 
 function renderBanner(s) {
   if (!s.hasApiKey) {
-    showBanner('APIキーが未設定です。<a id="open-opt">設定を開く</a>', false);
+    showBanner(`${escapeHtml(t('banner.apiKeyMissing'))} <a id="open-opt">${escapeHtml(t('common.openSettings'))}</a>`, false);
   } else if (!s.matched) {
-    showBanner(
-      'このページはまだ記憶されていません。補足やチャットでページを変えると、このURLのルールとして自動保存されます。',
-      false
-    );
+    showBanner(escapeHtml(t('banner.pageNotRemembered')), false);
   } else {
-    const label = s.remembered ? '記憶済みページ' : '対象ルール';
-    showBanner(`${label} / ${s.provider} で接続`, true);
+    const label = s.remembered ? t('banner.rememberedPage') : t('banner.targetRule');
+    showBanner(escapeHtml(t('banner.connected', { label, provider: s.provider })), true);
   }
   const link = document.getElementById('open-opt');
   if (link) link.onclick = () => send({ type: 'OPEN_OPTIONS' });
@@ -227,9 +312,42 @@ async function clearPromptHistory() {
 }
 
 function renderChatHistory() {
-  els.messages.innerHTML = state.history.length ? '' : EMPTY_HINT_HTML;
+  els.messages.innerHTML = '';
+  if (!state.history.length) renderEmptyHint();
   state.history.forEach((msg) => addMessage(msg.role, msg.content));
   scrollToBottom();
+}
+
+function renderEmptyHint() {
+  const hint = document.createElement('div');
+  hint.className = 'empty-hint';
+  hint.id = 'empty-hint';
+
+  const title = document.createElement('h1');
+  title.textContent = t('empty.title');
+  const description = document.createElement('p');
+  description.textContent = t('empty.description');
+  const list = document.createElement('ol');
+  list.className = 'rail-list';
+  list.setAttribute('aria-label', t('empty.railsLabel'));
+
+  [
+    ['empty.goalLabel', 'empty.goalText'],
+    ['empty.contextLabel', 'empty.contextText'],
+    ['empty.verifyLabel', 'empty.verifyText'],
+  ].forEach(([labelKey, textKey]) => {
+    const item = document.createElement('li');
+    const label = document.createElement('span');
+    label.className = 'rail-step';
+    label.textContent = t(labelKey);
+    const text = document.createElement('span');
+    text.textContent = t(textKey);
+    item.append(label, text);
+    list.appendChild(item);
+  });
+
+  hint.append(title, description, list);
+  els.messages.appendChild(hint);
 }
 
 function renderPromptHistory() {
@@ -237,7 +355,7 @@ function renderPromptHistory() {
   if (!state.promptHistory.length) {
     const empty = document.createElement('div');
     empty.className = 'history-empty';
-    empty.textContent = 'まだ保存されたプロンプトはありません。';
+    empty.textContent = t('history.empty');
     els.promptHistoryList.appendChild(empty);
     return;
   }
@@ -268,7 +386,7 @@ function formatHistoryDate(value) {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
-  return new Intl.DateTimeFormat('ja-JP', {
+  return new Intl.DateTimeFormat(localeToIntl(state.language), {
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
@@ -306,7 +424,7 @@ function addMessage(role, content) {
   document.getElementById('empty-hint')?.remove();
   const wrap = document.createElement('div');
   wrap.className = `msg ${role}`;
-  wrap.innerHTML = `<div class="role">${role === 'user' ? 'あなた' : role === 'assistant' ? 'AI' : 'エラー'}</div>`;
+  wrap.innerHTML = `<div class="role">${escapeHtml(roleLabel(role))}</div>`;
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
   bubble.textContent = content;
@@ -314,6 +432,12 @@ function addMessage(role, content) {
   els.messages.appendChild(wrap);
   scrollToBottom();
   return wrap;
+}
+
+function roleLabel(role) {
+  if (role === 'user') return t('roles.user');
+  if (role === 'assistant') return t('roles.assistant');
+  return t('roles.error');
 }
 
 function renderActions(parent, actions, results) {
@@ -328,8 +452,8 @@ function renderActions(parent, actions, results) {
     const detail = r
       ? ok
         ? formatResult(r.result)
-        : `失敗: ${r.error}`
-      : '(未実行)';
+        : t('actionsResult.failed', { message: r.error })
+      : t('actionsResult.notRun');
     div.innerHTML = `<span class="verb">${escapeHtml(a.verb)}</span> <span class="muted">${escapeHtml(a.reason || '')}</span>
       <div class="detail">${escapeHtml(detail)}</div>`;
     box.appendChild(div);
@@ -339,7 +463,7 @@ function renderActions(parent, actions, results) {
 }
 
 function formatResult(result) {
-  if (result == null) return 'OK';
+  if (result == null) return t('result.ok');
   try {
     return JSON.stringify(result);
   } catch {
@@ -350,7 +474,7 @@ function formatResult(result) {
 function addTyping() {
   const wrap = document.createElement('div');
   wrap.className = 'msg assistant';
-  wrap.innerHTML = `<div class="typing"><span class="spinner"></span>考え中…</div>`;
+  wrap.innerHTML = `<div class="typing"><span class="spinner"></span>${escapeHtml(t('chat.typing'))}</div>`;
   els.messages.appendChild(wrap);
   scrollToBottom();
   return wrap;
@@ -370,7 +494,7 @@ async function handleSubmit(text) {
   if (!cleanText || state.busy) return;
   if (state.tabId == null) await refreshState();
   if (state.tabId == null) {
-    addMessage('error', '対象タブを特定できませんでした。');
+    addMessage('error', t('errors.targetTabMissing'));
     return;
   }
   setBusy(true);
@@ -392,7 +516,7 @@ async function handleSubmit(text) {
     typing.remove();
     const nextHistory = normalizeMessages([...previousHistory, userMessage, { role: 'assistant', content: reply || '' }]);
     if (state.pageKey === submitPage.pageKey) {
-      const wrap = addMessage('assistant', reply || '(応答なし)');
+      const wrap = addMessage('assistant', reply || t('chat.noReply'));
       renderActions(wrap, actions, results);
       state.history = nextHistory;
       if (actions?.length) refreshState();
@@ -425,7 +549,7 @@ async function runVerb(verb, args) {
     const result = await send({ type: 'RUN_VERB', tabId: state.tabId, verb, args, rememberScope: state.rememberScope });
     return result;
   } catch (e) {
-    addMessage('error', `${verb} 失敗: ${e.message}`);
+    addMessage('error', t('errors.runVerbFailed', { verb, message: e.message }));
     return null;
   }
 }
@@ -456,14 +580,18 @@ els.input.addEventListener('keydown', (e) => {
   }
 });
 
+els.languageSelect.addEventListener('change', (e) => {
+  changeLanguage(e.target.value);
+});
+
 // 「補足を付ける」: ページ上で要素をクリックして補足を付ける注釈モードを開始。
 els.btnPick.addEventListener('click', async () => {
   if (state.tabId == null) await refreshState();
   try {
     await send({ type: 'START_PICKER', tabId: state.tabId });
-    showBanner('ページ上で補足を付けたい場所をクリックしてください（Escで終了）。', true);
+    showBanner(escapeHtml(t('picker.started')), true);
   } catch (e) {
-    addMessage('error', `注釈モードを開始できません: ${e.message}`);
+    addMessage('error', t('errors.pickerStartFailed', { message: e.message }));
   }
 });
 
@@ -472,9 +600,9 @@ els.btnDraw.addEventListener('click', async () => {
   if (state.tabId == null) await refreshState();
   try {
     await send({ type: 'START_DRAWING', tabId: state.tabId });
-    showBanner('ページ上で図形を選んで印を描いてください（描き終えたら「完了」、Escで終了）。', true);
+    showBanner(escapeHtml(t('drawing.started')), true);
   } catch (e) {
-    addMessage('error', `お描きを開始できません: ${e.message}`);
+    addMessage('error', t('errors.drawingStartFailed', { message: e.message }));
   }
 });
 
@@ -484,44 +612,52 @@ els.btnCapture.addEventListener('click', async () => {
   if (state.tabId == null) await refreshState();
   if (els.btnCapture.disabled) return;
   els.btnCapture.disabled = true;
-  showBanner('スクリーンショットを撮って、お描きを焼き込み中…', true);
+  showBanner(escapeHtml(t('capture.processing')), true);
   try {
     const res = await send({ type: 'CAPTURE_VISUAL_FEEDBACK', tabId: state.tabId });
     const dir = res?.dir || '';
-    const meta = `画像: shot.png (${res.width}×${res.height}px${res.downscaled ? ' / 2000pxに縮小済み' : ''}) / 注釈 ${res.drawn}/${res.items} 件`;
+    const meta = t('capture.meta', {
+      width: res.width,
+      height: res.height,
+      downscaled: res.downscaled ? t('capture.downscaled') : '',
+      drawn: res.drawn,
+      items: res.items,
+    });
     if (res.transport === 'daemon') {
       addMessage(
         'assistant',
         [
-          'デーモンへ送信しました（WebSocket）。',
+          t('capture.sentDaemon'),
           '',
-          `保存先: ${dir}/`,
+          t('capture.savePath', { path: dir }),
           meta,
           '',
-          'CLI で「視覚フィードバックの最新を見て」と頼めば、MCP 経由で自動取得されます。',
-          '複数プロジェクトが混在する場合は urlContains で今のページに絞れます。',
+          t('capture.daemonCliHint'),
+          t('capture.daemonScopeHint'),
         ].join('\n')
       );
-      showBanner('デーモンへ送信しました。', true);
+      showBanner(escapeHtml(t('capture.daemonSentBanner')), true);
     } else {
-      const note = res.daemonError ? `\n（デーモン送信に失敗→ダウンロード保存にフォールバック: ${res.daemonError}）` : '';
+      const note = res.daemonError ? t('capture.fallbackNote', { message: res.daemonError }) : '';
       addMessage(
         'assistant',
         [
-          '視覚フィードバックをダウンロードフォルダに保存しました。',
+          t('capture.savedDownload'),
           '',
-          `保存先: Downloads/${dir}/`,
+          // 実際の保存先(絶対パス)が取れていればそれを表示。ダウンロード先はブラウザ設定依存で
+          // ~/Downloads とは限らない(移動済み/Edge/Brave 等)ため、取れた絶対パスを優先する。
+          t('capture.savePath', { path: res.absDir || `Downloads/${dir}` }),
           meta,
           '',
-          'AIに見せる手順: このフォルダの shot.png を Claude Code / Codex に **画像** として渡してください。',
-          '（同フォルダの memo.md に各CLIでの貼り方が書いてあります）' + note,
+          t('capture.imageInstruction'),
+          t('capture.memoInstruction') + note,
         ].join('\n')
       );
-      showBanner('視覚フィードバックを保存しました。', true);
+      showBanner(escapeHtml(t('capture.savedBanner')), true);
     }
   } catch (e) {
-    addMessage('error', `視覚フィードバックの保存に失敗: ${e.message}`);
-    showBanner(`保存に失敗: ${e.message}`, false);
+    addMessage('error', t('errors.captureFailed', { message: e.message }));
+    showBanner(escapeHtml(t('errors.captureFailed', { message: e.message })), false);
   } finally {
     els.btnCapture.disabled = false;
   }
@@ -534,9 +670,9 @@ els.btnContext.addEventListener('click', async () => {
     const res = await send({ type: 'EXPORT_CONTEXT', tabId: state.tabId });
     const text = res?.text || '';
     await navigator.clipboard.writeText(text);
-    addMessage('assistant', `ページの文脈をコピーしました。別のAIチャットの先頭に貼り付けてから指示してください。\n\n${text}`);
+    addMessage('assistant', t('context.copied', { text }));
   } catch (e) {
-    addMessage('error', `文脈のコピーに失敗: ${e.message}`);
+    addMessage('error', t('errors.contextCopyFailed', { message: e.message }));
   }
 });
 
@@ -546,7 +682,7 @@ els.btnAffordances.addEventListener('click', async () => {
     const list = r.result?.affordances || [];
     const text = list.length
       ? list.map((a) => `[${a.aiId}] <${a.role}> ${a.label}`).join('\n')
-      : '操作可能要素は見つかりませんでした。';
+      : t('context.noAffordances');
     addMessage('assistant', text);
   }
 });
@@ -554,19 +690,21 @@ els.btnAffordances.addEventListener('click', async () => {
 els.btnSettings.addEventListener('click', () => {
   send({ type: 'OPEN_OPTIONS' });
 });
+
 els.rememberScope.addEventListener('change', async (e) => {
   const prev = state.rememberScope;
   const scope = normalizeRememberScope(e.target.value);
   state.rememberScope = scope;
   try {
     await send({ type: 'SET_REMEMBER_SCOPE', scope });
-    showBanner(`AI注入の自動保存範囲: ${rememberScopeLabel(scope)}`, true);
+    showBanner(escapeHtml(t('memory.scopeSaved', { scope: rememberScopeLabel(scope) })), true);
   } catch (err) {
-    addMessage('error', `保存範囲を変更できません: ${err.message}`);
+    addMessage('error', t('errors.scopeChangeFailed', { message: err.message }));
     state.rememberScope = prev;
     els.rememberScope.value = state.rememberScope;
   }
 });
+
 els.btnAnnoRefresh.addEventListener('click', refreshAnnotations);
 els.btnHistory.addEventListener('click', () => {
   els.promptHistoryPanel.hidden = !els.promptHistoryPanel.hidden;
@@ -580,7 +718,7 @@ els.btnClearChat.addEventListener('click', () => {
 
 async function clearChat() {
   if (state.busy) return;
-  if (!confirm('現在のチャット履歴をクリアして、新しいチャットを開始しますか？')) return;
+  if (!confirm(t('confirm.clearChat'))) return;
   state.history = [];
   await persistChatHistory();
   renderChatHistory();
@@ -599,10 +737,16 @@ async function refreshAnnotations() {
   }
 }
 
-const KIND_LABEL = { note: 'メモ', marker: '目印', button: '合図', drawing: 'お描き' };
+function kindLabel(kind) {
+  return t(`annotations.kind.${kind}`) === `annotations.kind.${kind}` ? t('annotations.kind.fallback') : t(`annotations.kind.${kind}`);
+}
 
 function rememberScopeLabel(scope) {
-  return { page: 'このURLだけ', domain: 'このドメイン全体', all: 'すべてのサイト' }[scope] || 'このURLだけ';
+  return {
+    page: t('memory.pageFull'),
+    domain: t('memory.domainFull'),
+    all: t('memory.allFull'),
+  }[scope] || t('memory.pageFull');
 }
 
 function updateMemoCountBadge(list) {
@@ -611,10 +755,11 @@ function updateMemoCountBadge(list) {
     if (count > 0) {
       els.memoCountBadge.hidden = false;
       els.memoCountBadge.textContent = String(count);
-      els.memoCountBadge.title = `お描きメモ ${count} 件`;
+      els.memoCountBadge.title = t('annotations.memoCountTitle', { count });
     } else {
       els.memoCountBadge.hidden = true;
       els.memoCountBadge.textContent = '';
+      els.memoCountBadge.removeAttribute('title');
     }
   }
   // 「お描きを画像でAIへ」はお描きが1件以上ある時だけ出す(独立機能ではなくお描きの一部)。
@@ -623,14 +768,15 @@ function updateMemoCountBadge(list) {
 }
 
 function renderAnnotationList(list) {
+  state.annotations = Array.isArray(list) ? list : [];
   els.annoList.innerHTML = '';
-  updateMemoCountBadge(list);
-  if (!list.length) {
+  updateMemoCountBadge(state.annotations);
+  if (!state.annotations.length) {
     els.annoPanel.hidden = true;
     return;
   }
   els.annoPanel.hidden = false;
-  list.forEach((a) => {
+  state.annotations.forEach((a) => {
     const row = document.createElement('div');
     row.className = 'anno-item' + (a.resolved ? '' : ' unresolved');
     const title =
@@ -639,7 +785,7 @@ function renderAnnotationList(list) {
         : a.kind === 'marker'
           ? a.name
           : a.kind === 'drawing'
-            ? a.note || a.shapeText || 'お描き'
+            ? a.note || a.shapeText || t('annotations.kind.drawing')
             : a.label;
     const sub =
       a.kind === 'drawing'
@@ -649,21 +795,21 @@ function renderAnnotationList(list) {
     const memoFlag =
       a.kind === 'drawing'
         ? a.forAI === false
-          ? '<span class="anno-flag off">AIに渡さない</span>'
-          : '<span class="anno-flag on">AIに渡す</span>'
+          ? `<span class="anno-flag off">${escapeHtml(t('annotations.forAIOff'))}</span>`
+          : `<span class="anno-flag on">${escapeHtml(t('annotations.forAIOn'))}</span>`
         : '';
     row.innerHTML = `
-      <span class="anno-kind">${KIND_LABEL[a.kind] || '補足'}</span>
+      <span class="anno-kind">${escapeHtml(kindLabel(a.kind))}</span>
       <span class="anno-body">
-        <span class="anno-title">${escapeHtml(title || '(無題)')}</span>
+        <span class="anno-title">${escapeHtml(title || t('annotations.noTitle'))}</span>
         ${sub ? `<span class="anno-sub">${escapeHtml(sub)}</span>` : ''}
         ${memoFlag}
-        ${a.target ? `<span class="anno-target">対象: ${escapeHtml(a.target)}</span>` : ''}
-        ${a.resolved ? '' : '<span class="anno-warn">対象が見つかりません</span>'}
+        ${a.target ? `<span class="anno-target">${escapeHtml(t('annotations.target', { target: a.target }))}</span>` : ''}
+        ${a.resolved ? '' : `<span class="anno-warn">${escapeHtml(t('annotations.unresolved'))}</span>`}
       </span>
       <span class="anno-actions">
-        <button data-act="edit" title="編集">編集</button>
-        <button data-act="del" title="削除">削除</button>
+        <button data-act="edit" title="${escapeHtml(t('annotations.edit'))}">${escapeHtml(t('annotations.edit'))}</button>
+        <button data-act="del" title="${escapeHtml(t('annotations.delete'))}">${escapeHtml(t('annotations.delete'))}</button>
       </span>`;
     row.querySelector('[data-act="edit"]').addEventListener('click', async () => {
       await send({ type: 'EDIT_ANNOTATION', tabId: state.tabId, id: a.id });
@@ -678,9 +824,18 @@ function renderAnnotationList(list) {
 
 // 注釈は content 側で保存されるため、storage変化を監視して一覧を更新する。
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes.aiAdvisorAnnotations) refreshAnnotations();
-  if (area === 'local' && changes.aiAdvisorSettings) refreshState();
-  if (area === 'local' && changes[PROMPT_HISTORY_KEY]) {
+  if (area !== 'local') return;
+  if (changes.aiAdvisorAnnotations) refreshAnnotations();
+  if (changes.aiAdvisorSettings) {
+    if (suppressNextSettingsRefresh) {
+      suppressNextSettingsRefresh = false;
+    } else {
+      handleSettingsChanged(changes.aiAdvisorSettings.newValue).catch((e) => {
+        showBanner(escapeHtml(t('errors.stateFetchFailed', { message: e.message })), false);
+      });
+    }
+  }
+  if (changes[PROMPT_HISTORY_KEY]) {
     state.promptHistory = normalizePromptHistory(changes[PROMPT_HISTORY_KEY].newValue || []);
     renderPromptHistory();
   }
@@ -694,6 +849,11 @@ chrome.tabs.onUpdated.addListener((_tabId, info) => {
 
 // 初期化
 async function init() {
+  const settings = await getSettings().catch(() => ({ ui: { language: DEFAULT_LOCALE } }));
+  i18n = await createI18n(settings.ui?.language || DEFAULT_LOCALE);
+  state.language = i18n.locale;
+  renderLanguageOptions();
+  applyI18n();
   await Promise.all([loadPromptHistory(), refreshState()]);
   syncHistoryButton();
   els.input.focus();
