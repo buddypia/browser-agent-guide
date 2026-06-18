@@ -90,7 +90,7 @@ async function installChromeMock(page) {
           return { ok: true, result: {} };
         case 'CHAT':
           return {
-            reply: '問題、文脈、実行結果を確認しました。',
+            reply: 'Checked the goal, context, and result.',
             actions: [],
             results: [],
           };
@@ -171,29 +171,55 @@ test.describe('UI quality gates', () => {
   test('side panel exposes frequent actions and passes axe', async ({ page }) => {
     await page.goto(pageUrl('sidepanel/sidepanel.html'));
 
-    await expect(page.getByRole('heading', { name: 'ページ操作のレール' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '補足を付ける' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '文脈をコピー' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '手がかりを表示' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'プロンプト履歴を開く' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '新規チャット' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '設定を開く' })).toBeVisible();
-    await expect(page.getByRole('textbox', { name: 'AIへの指示' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Page Operation Rails' })).toBeVisible();
+    await expect(page.getByLabel('Language')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Add context' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Copy context' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Show clues' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open prompt history' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'New chat' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open settings' })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Instruction for AI' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'プロンプト履歴を開く' }).click();
+    await page.getByRole('button', { name: 'Open prompt history' }).click();
     await expect(page.locator('#prompt-history-panel')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'プロンプト履歴を開く' })).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByRole('button', { name: 'Open prompt history' })).toHaveAttribute('aria-expanded', 'true');
 
     await expectNoAxeViolations(page);
   });
 
+  test('side panel changes language from the top control', async ({ page }) => {
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+
+    const language = page.getByLabel('Language');
+    await expect(language).toBeVisible();
+    await expect(language).toHaveValue('en');
+    await expect(language.locator('option')).toHaveCount(4);
+    await expect(language.locator('option')).toHaveText(['EN', 'KO', 'JA', 'ZH']);
+
+    await language.selectOption('ja');
+    await expect(page.getByRole('heading', { name: 'ページ操作のレール' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '補足を付ける' })).toBeVisible();
+
+    await page.getByLabel('言語').selectOption('ko');
+    await expect(page.getByRole('heading', { name: '페이지 작업 레일' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '맥락 추가' })).toBeVisible();
+
+    await page.getByLabel('언어').selectOption('zh');
+    await expect(page.getByRole('heading', { name: '页面操作轨道' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '添加上下文' })).toBeVisible();
+
+    await page.getByLabel('语言').selectOption('en');
+    await expect(page.getByRole('heading', { name: 'Page Operation Rails' })).toBeVisible();
+  });
+
   test('side panel can send a mocked prompt', async ({ page }) => {
     await page.goto(pageUrl('sidepanel/sidepanel.html'));
-    await page.getByRole('textbox', { name: 'AIへの指示' }).fill('このページの主要CTAを確認して');
-    await page.getByRole('button', { name: '送信' }).click();
+    await page.getByRole('textbox', { name: 'Instruction for AI' }).fill('Check the main CTA on this page');
+    await page.getByRole('button', { name: 'Send' }).click();
 
-    await expect(page.locator('#messages').getByText('このページの主要CTAを確認して')).toBeVisible();
-    await expect(page.locator('#messages').getByText('問題、文脈、実行結果を確認しました。')).toBeVisible();
+    await expect(page.locator('#messages').getByText('Check the main CTA on this page')).toBeVisible();
+    await expect(page.locator('#messages').getByText('Checked the goal, context, and result.')).toBeVisible();
   });
 
   test('options page passes axe on the default settings state', async ({ page }) => {

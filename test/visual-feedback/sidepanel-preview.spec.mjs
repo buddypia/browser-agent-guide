@@ -42,7 +42,7 @@ test.afterAll(async () => {
   await new Promise((resolve) => server.close(resolve));
 });
 
-test('preview: お描きがある時、注釈パネルに「画像でAIへ」CTAが出る', async ({ page }) => {
+test('preview: お描きがある時、注釈パネルに画像でAIへ渡すCTAが出る', async ({ page }) => {
   await page.addInitScript(() => {
     const drawing = {
       id: 'a1',
@@ -82,7 +82,7 @@ test('preview: お描きがある時、注釈パネルに「画像でAIへ」CTA
   await page.goto(`${origin}/sidepanel/sidepanel.html`);
   const cta = page.locator('#btn-capture');
   await expect(cta).toBeVisible();
-  await expect(cta).toContainText('お描きを画像でAIへ');
+  await expect(cta).toContainText('Send drawing to AI');
 
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   await page.locator('#anno-panel').screenshot({ path: outPath });
