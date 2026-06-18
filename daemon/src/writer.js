@@ -3,13 +3,7 @@
 // 原子的書き込み(tmp→rename) + 0600。slug はサーバ側で生成し、クライアントのパスは信用しない（traversal 防止）。
 import { writeFileSync, mkdirSync, renameSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-
-export function slugFromIso(iso) {
-  const base = String(iso || '')
-    .replace(/[:.]/g, '-')
-    .replace(/[^0-9A-Za-z-]/g, '');
-  return base || 'capture';
-}
+import { slugFromCapture } from './slug.js';
 
 // inbox 配下に未使用の <slug>/ を確保する（衝突時は -2, -3…）。
 function uniqueDir(inboxDir, slug) {
@@ -47,7 +41,10 @@ export function writeEntry(inboxDir, payload, { now } = {}) {
   const shot = decodeBase64(payload?.image?.shot);
   if (!shot || !shot.length) throw new Error('image.shot (base64 PNG) が必要です。');
   const capturedAt = payload?.capturedAt || payload?.annotation?.capturedAt || now || new Date().toISOString();
-  const slug = slugFromIso(capturedAt);
+  // フォルダー名は {日時}__{ホスト}__{タイトル}__{ID}。url/title はペイロード(または annotation)から取る。
+  const url = payload?.url || payload?.annotation?.url || '';
+  const title = payload?.title || payload?.annotation?.title || '';
+  const slug = slugFromCapture({ capturedAt, url, title });
   mkdirSync(inboxDir, { recursive: true });
   const { name, dir } = uniqueDir(inboxDir, slug);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
