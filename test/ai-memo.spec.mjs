@@ -333,4 +333,141 @@ test.describe('お描き連動のAIメモ', () => {
     const side = await memo.getAttribute('data-side');
     expect(['left', 'bottom']).toContain(side);
   });
+
+  // ヘッダ(タグ部分)を掴んでドラッグするとメモが移動し、図形ボックス相対オフセット(memoPos)が
+  // storage に保存され、再描画(storage 再読込)後も同じ位置に復元される。
+  test('ヘッダをドラッグするとメモが移動し、位置が保存され再描画後も復元される', async ({ page }) => {
+    await page.setViewportSize({ width: 1000, height: 780 });
+    await drawRectAndFinish(page);
+    const memo = page.locator('.bag-memo');
+    await expect(memo).toHaveCount(1);
+    await page.mouse.move(960, 740); // 生成直後の境界イベント対策で十分離す
+
+    const before = await memo.boundingBox();
+    // 畳むボタン(ヘッダ右端)を避け、'AIメモ'タグを掴んでドラッグする。
+    const tag = memo.locator('.bag-memo-tag');
+    const tb = await tag.boundingBox();
+    const sx = tb.x + tb.width / 2;
+    const sy = tb.y + tb.height / 2;
+    await page.mouse.move(sx, sy);
+    await page.mouse.down();
+    await page.mouse.move(sx - 200, sy + 160, { steps: 8 });
+    await page.mouse.move(sx - 320, sy + 240, { steps: 8 });
+    await page.mouse.up();
+
+    // 目に見えて移動している。
+    const after = await memo.boundingBox();
+    expect(Math.abs(after.x - before.x)).toBeGreaterThan(80);
+    expect(Math.abs(after.y - before.y)).toBeGreaterThan(80);
+
+    // memoPos(図形ボックス相対オフセット)が保存される。
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const map = window.__store.aiAdvisorAnnotations || {};
+          const scope = location.origin + location.pathname;
+          const a = (map[scope] || []).find((x) => x.kind === 'drawing');
+          return a && a.memoPos && Number.isFinite(a.memoPos.dx) && Number.isFinite(a.memoPos.dy) ? 'yes' : 'no';
+        })
+      )
+      .toBe('yes');
+
+    // storage から再読込して再描画(再訪相当)→ 手動位置が復元される。
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'LIST_ANNOTATIONS' }, {}, r)));
+    const restored = page.locator('.bag-memo');
+    await expect(restored).toHaveCount(1);
+    const rb = await restored.boundingBox();
+    expect(Math.abs(rb.x - after.x)).toBeLessThanOrEqual(3);
+    expect(Math.abs(rb.y - after.y)).toBeLessThanOrEqual(3);
+  });
+
+  // ドラッグで手動配置したメモは、ヘッダのダブルクリックで自動配置(右ガター/となり)に戻る。
+  test('ヘッダのダブルクリックで覚えた位置を破棄して自動配置に戻る', async ({ page }) => {
+    await page.setViewportSize({ width: 1000, height: 780 });
+    await drawRectAndFinish(page);
+    const memo = page.locator('.bag-memo');
+    await expect(memo).toHaveAttribute('data-side', 'right'); // 既定は右側
+    await page.mouse.move(960, 740);
+
+    // まずドラッグして手動配置にする。
+    const tag = memo.locator('.bag-memo-tag');
+    const tb = await tag.boundingBox();
+    await page.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(tb.x - 260, tb.y + 180, { steps: 8 });
+    await page.mouse.up();
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const map = window.__store.aiAdvisorAnnotations || {};
+          const scope = location.origin + location.pathname;
+          return (map[scope] || []).find((x) => x.kind === 'drawing')?.memoPos ? 'has' : 'none';
+        })
+      )
+      .toBe('has');
+
+    // ヘッダ左側(タグ付近)をダブルクリック → memoPos が消え、自動配置へ戻る。
+    await memo.locator('.bag-memo-head').dblclick({ position: { x: 6, y: 8 } });
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const map = window.__store.aiAdvisorAnnotations || {};
+          const scope = location.origin + location.pathname;
+          return (map[scope] || []).find((x) => x.kind === 'drawing')?.memoPos ? 'has' : 'none';
+        })
+      )
+      .toBe('none');
+    await expect(memo).toHaveAttribute('data-side', 'right');
+  });
+
+  // 回帰ガード(フォーカスのハズレ): お描き後にAIメモへ日本語(IME変換中)を入力している最中、
+  // メモ保存→(サイドパネルの storage 監視経由で)LIST_ANNOTATIONS による再描画が走っても、
+  // 入力中のテキストエリアが作り直されず、ノード同一性・本文・IME変換が保持されること。
+  test('IME変換中はページ再描画でメモが作り直されず、フォーカス/本文が保たれる', async ({ page }) => {
+    await drawRectAndFinish(page);
+    await expect(page.locator('.bag-memo-text')).toHaveCount(1);
+
+    // テキストエリアにマーク(JSプロパティ)を付け、フォーカスして「IME変換中」に本文を入れる。
+    // CompositionEvent を実発火することで content 側の memoComposing=true を成立させる。
+    await page.evaluate(() => {
+      const ta = document.querySelector('.bag-memo-text');
+      ta.__bagMark = 'm1';
+      ta.focus();
+      ta.dispatchEvent(new CompositionEvent('compositionstart'));
+      ta.value = '見出しをみじかく';
+      ta.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: true }));
+    });
+
+    // サイドパネルの storage 監視 → LIST_ANNOTATIONS 相当の再描画を起こす(これが従来フォーカスを奪っていた)。
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'LIST_ANNOTATIONS' }, {}, r)));
+
+    // 同一ノードが生き残り(作り直されていない)、入力中の本文も保持されている。
+    const survived = await page.evaluate(() => {
+      const ta = document.querySelector('.bag-memo-text');
+      return { mark: ta && ta.__bagMark, value: ta && ta.value, count: document.querySelectorAll('.bag-memo').length };
+    });
+    expect(survived.mark).toBe('m1'); // 作り直されればプロパティは消える
+    expect(survived.value).toBe('見出しをみじかく');
+    expect(survived.count).toBe(1);
+
+    // 変換確定(compositionend)→blur で保存され、本文は失われない。
+    await page.evaluate(() => {
+      const ta = document.querySelector('.bag-memo-text');
+      ta.dispatchEvent(new CompositionEvent('compositionend'));
+      ta.blur();
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const map = window.__store.aiAdvisorAnnotations || {};
+          const scope = location.origin + location.pathname;
+          return (map[scope] || []).find((a) => a.kind === 'drawing')?.note;
+        })
+      )
+      .toBe('見出しをみじかく');
+
+    // 保存後に再描画(再訪相当)しても本文が残る。
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'LIST_ANNOTATIONS' }, {}, r)));
+    await expect(page.locator('.bag-memo-text')).toHaveValue('見出しをみじかく');
+  });
 });
