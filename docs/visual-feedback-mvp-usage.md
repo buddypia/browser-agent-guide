@@ -6,8 +6,9 @@
 ## 何が入ったか（Phase 0）
 
 ブラウザのお描き注釈を **スクリーンショットへ焼き込み（burn-in）**、画像ファイルとして
-`Downloads/ai-inbox/<timestamp>/` に保存する。デーモンも MCP も無し。AI には保存された
-`shot.png` を **vision（画像）として** 渡す。
+`<ブラウザのダウンロードフォルダ>/ai-inbox/<slug>/` に保存する。デーモンも MCP も無し。AI には保存された
+`shot.png` を **vision（画像）として** 渡す。保存後、拡張は実際の保存先（絶対パス）を
+`chrome.downloads.search` で取得してサイドパネルに表示する（保存先はブラウザ設定依存で `~/Downloads` とは限らない）。
 
 - `manifest.json`: `offscreen` / `downloads` 権限を追加
 - `lib/visual-feedback/compositor.js`: 純粋な合成モジュール（Canvas 2D 直描き / 2000px ガード / DPR 整合）
@@ -20,7 +21,7 @@
 ## 出力物（1回の保存）
 
 ```
-Downloads/ai-inbox/<ISO-slug>/
+<ダウンロードフォルダ>/ai-inbox/<slug>/      # slug = {ローカル日時}__{ホスト}__{タイトル}__{ID}
   shot.png         # 注釈を焼き込んだ合成本（vision 1次）
   raw.png          # 注釈なしの元スクショ（位置ずれ比較・将来のデーモン用）
   annotation.json  # 座標(frac)/selector/testid/intent/bbox（テキスト fallback）
