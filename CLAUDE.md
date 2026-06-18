@@ -35,7 +35,7 @@ npx playwright test -c playwright.config.mjs -g "title substring"        # one t
 ### Daemon (`cd daemon` first)
 ```bash
 npm install                      # daemon deps (@modelcontextprotocol/sdk, ws, zod)
-npm start                        # node src/index.js  (default inbox ~/Downloads/ai-inbox, port 8765, host 127.0.0.1)
+npm start                        # node src/index.js  (default inbox = <auto-detected Downloads>/ai-inbox, port 8765, host 127.0.0.1)
 npm test                         # node --test 'test/*.test.mjs'  (node:test)
 node --test test/inbox.test.mjs  # single daemon test file
 node scripts/e2e-smoke.mjs       # real-binary E2E: spawn daemon, WS push -> MCP get, on a temp inbox
@@ -68,7 +68,7 @@ The `lib/` modules are the "brains" — pure-ish ES modules with no global state
 3. SW → `RUN_ACTIONS` to content; content executes each verb deterministically in document order (with a source-based blocklist — destructive verbs are rejected on the `'chat'` path).
 4. SW `rememberSuccessfulChanges` persists successful recipe verbs as a learned site rule + recipe; on later navigation `syncTab`/`ACTIVATE` re-applies them once.
 
-Visual-feedback (capture): SW captures the tab → offscreen composites drawings onto the PNG → if the daemon is enabled, WebSocket push to `ws://127.0.0.1:8765/ws?token=…`; else `chrome.downloads` to `~/Downloads/ai-inbox/<slug>/{shot.png,raw.png,annotation.json,memo.md}`.
+Visual-feedback (capture): SW captures the tab → offscreen composites drawings onto the PNG → if the daemon is enabled, WebSocket push to `ws://127.0.0.1:8765/ws?token=…`; else `chrome.downloads` to `<browser download dir>/ai-inbox/<slug>/{shot.png,raw.png,annotation.json,memo.md}`. The `<slug>` is `{localYYYYMMDD-HHMMSS}__{host}__{title}__{id}` (see `lib/slug.js`). On the download path the SW then resolves the **absolute** on-disk path via `chrome.downloads.search` (`DownloadItem.filename`), surfaces it in the side panel, and caches the discovered downloads dir; on the daemon path the SW sends that dir as `payload.downloadsDir` so the daemon can adopt it.
 
 ## Daemon architecture
 
@@ -78,7 +78,8 @@ One `http.Server` on one loopback port (default 8765) serves three surfaces: `/h
 - `src/http.js` — Node built-in `http` (not express/hono). MCP is **stateless**: a fresh `McpServer` + `StreamableHTTPServerTransport` per POST, so all CLIs can hit one endpoint concurrently. 8MB body cap.
 - `src/ws.js` — token-checked WS receive (constant-time compare; 401 + destroy on mismatch). 64MB payload cap (composite PNG base64 is large).
 - `src/server.js` — MCP server `bag-visual-feedback` with 3 tools: `list_visual_feedback`, `get_latest_visual_feedback`, `get_visual_feedback`. All filters are optional case-insensitive substring matches.
-- `src/inbox.js` / `src/writer.js` — read (newest-first scan, skips `done/`) and write (server-side slug from `capturedAt`, tmp→rename atomic, 0600/0700, rollback on failure) sides.
+- `src/inbox.js` / `src/writer.js` — read (newest-first scan, skips `done/`) and write (server-side slug via `src/slug.js` from `capturedAt`+`url`+`title`, tmp→rename atomic, 0600/0700, rollback on failure) sides. `inbox.js` also owns `resolveDownloadsDir()` (Win32 registry / Linux XDG / macOS `~/Downloads`) used by `defaultInboxDir()`.
+- **`inboxDir` is runtime-mutable**: `index.js` holds `inboxState.dir` and passes a getter (not a string) to `http.js`/`ws.js`. When the extension reports `downloadsDir` over WS, `index.js` `adoptDownloadsDir` switches the inbox to `<downloadsDir>/ai-inbox` — UNLESS `--inbox`/`BAG_VF_INBOX` pinned it. So tests/callers may pass `inboxDir` as a string **or** a `() => dir` function.
 - `src/token.js` — shared secret at `~/.bag-vf/token`; precedence flag > env > persisted file > newly generated.
 
 ## Conventions & gotchas
@@ -93,7 +94,22 @@ One `http.Server` on one loopback port (default 8765) serves three surfaces: `/h
 - **Security boundary**: high-risk verbs (`setStyle`, `removeElement`, `defineMarker`) are hidden from chat and rejected on chat/auto-recipe paths; page text/attributes are treated as **untrusted** (prompt-injection defense in `prompt.js`). Don't widen verb exposure casually.
 - **`injectScript` runs via the User Scripts API in the service worker**, not the content script (content sends `EXECUTE_USER_SCRIPT` to SW → `chrome.userScripts.execute`). Requires Chrome 135+ and the user manually enabling "Allow User Scripts" in `chrome://extensions`.
 - **If you add a source JS file**, add it to BOTH the `check:js` file list and the `zip` file list in `package.json` (no glob — explicit lists).
+- **The slug generator is DUPLICATED in two independent npm projects with no shared import**: `lib/slug.js` (extension) and `daemon/src/slug.js` (daemon) must stay **byte-identical** — `test/slug.test.mjs` imports both and fails if they drift. Folder name = `{localYYYYMMDD-HHMMSS}__{host}__{title}__{id}`; id is a **synchronous** FNV-1a hash (NOT `crypto.subtle`, which is async-only in the SW). The folder name **is** the daemon entry `id` (`inbox.js` `id: d.name`), so changing the scheme invalidates previously-emitted ids; old timestamp-named folders still list fine (scan reads arbitrary names). Embedding host/title in the name is a human/AI **skim aid only** — `annotation.json` stays the authority for `urlContains`/`titleContains` (the sanitized name is lossy, so name-matching would false-negative).
+- **The `chrome.downloads` save path is the browser's configured download dir, NOT necessarily `~/Downloads`** (user-moved, Edge/Brave, or "ask where to save"). Never assume `~/Downloads/ai-inbox` for the FILE fallback: the SW resolves the real absolute path (`chrome.downloads.search` → `DownloadItem.filename`) and the daemon auto-detects + adopts the reported `downloadsDir`. With the daemon ON the path is owned end-to-end (no mismatch); the mismatch only exists on the daemon-OFF fallback.
 - **Three test runners, easy to confuse**: Playwright runs `*.spec.mjs` (`testMatch` excludes `.test.mjs`); compositor `*.test.mjs` (root) is a bare node script; daemon `*.test.mjs` run via `node --test`; `test/anchor.test.py` is Python.
 - **Daemon MCP registration uses a different JSON key per CLI**: Claude Code / Codex use `url`, Antigravity uses `serverUrl` — all pointing at `http://127.0.0.1:8765/mcp` (see `daemon/README.md`). Auth is WS-only; `/mcp` relies on loopback binding.
 - **The shared `~/Downloads/ai-inbox`** means `get_latest_visual_feedback` can return another project's last capture — pass `urlContains`/`titleContains` to scope it. A non-matching filter returns text-only (no image) on purpose.
 - **UI is bilingual JP/EN**; keep new user-facing strings bilingual. The anti-slop UI quality workflow (`docs/ui-quality-workflow.md`) requires generated UI changes to be backed by a repeatable Playwright/axe test or screenshot, verified at side-panel width.
+
+## Skills (bundled Claude Code skills)
+
+- **`bag-workflow`** (`.claude/skills/bag-workflow/`) — project-scoped, **user-invoked** skill (`/bag-workflow [urlContains]`, `disable-model-invocation: true` so this side-effecting flow never auto-fires). The name uses the project's `bag` namespace (`bag` ≈ **B**rowser **A**gent **G**uide; cf. `data-bag-id`, `BAG_VF_*`), giving a playwright→playwright-cli style parent/child: project `browser-agent-guide` → skill `/bag-workflow`. Its job is to **teach a browser-operation workflow to the AI and have it carried out from the cues the user leaves on the page** — お描き is just ONE cue, not the whole story (other cues: live DOM/a11y, extension `data-bag-id`, `@agent:` markers, recorded steps). Common uses: point at a bug in the UI and have it fixed; record steps so the AI stops repeating a mistake. Pipeline = preflight → read cues → read live page → locate target → operate/edit → verify:
+  - **Cues** (= WHAT to do): daemon MCP `visual_feedback:get_latest_visual_feedback` (scoped by `urlContains`); fallback = direct read of `~/Downloads/ai-inbox/<slug>/{shot.png,raw.png,annotation.json,memo.md}` (the MCP dual image+`file_path` return is the load-bearing fallback invariant).
+  - **Target** (= WHERE): `rg -n 'data-agent-id="@agent:' -g '!*.md' -g '!.claude'` (ALWAYS attribute-anchored; bare `@agent:` grep forbidden; exclude `.md`/`.claude` so docs examples aren't matched). **Core controls now carry `@agent:` markers** (`sidepanel.html` 5 + `options.html` 8 = 13; most other elements don't), so prefer markers when present and otherwise map `annotation.json` `selector`/`anchorLabel`/`url(file://)` to source; more markers are an opt-in bootstrap (`references/agent-markers.md`, lint via `npm run check:markers`).
+  - **Live browser** (locate + verify): order is `playwright-cli` (installed, zero-setup, reads `data-bag-id`/`data-agent-id` via `eval`) → `claude --chrome` (login-gated) → chrome-devtools-mcp / @playwright/mcp. **Codex `codex:rescue`/`codex exec` have NO browser** (escape hatch only; Codex's browser lives in the desktop app's `@chrome`).
+  - **Structure**: `scripts/preflight.sh` is a deterministic daemon/MCP/inbox/browser probe printing a `STATUS … source_branch=MCP|FILE|NONE` line; volume lives one level deep in `references/{daemon-mcp,browser-tools,agent-markers,fallbacks}.md` so SKILL.md stays <500 lines. `Edit`/`Write` are intentionally LEFT OUT of `allowed-tools` so code changes still hit the user's approval prompt. New skill is recognized after a Claude Code session restart.
+
+## Git workflow
+
+- **GitHub Flow** — never commit straight to `main`. Branch from `main` (`feat/…`, `fix/…`), commit, push, open a PR, then merge.
+- **Commit messages in English**, imperative mood (e.g. "Add @agent: marker lint"); subject ≤ ~72 chars, body explains the *why* when non-trivial.

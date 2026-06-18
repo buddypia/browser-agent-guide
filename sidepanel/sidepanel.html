@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,22 +11,46 @@
       <div class="brand-row">
         <div class="brand">
           <span class="brand-mark"></span>
-          <span>Browser Agent Guide</span>
+          <span class="brand-name">Browser Agent Guide</span>
         </div>
-        <div class="session-actions" aria-label="セッション操作">
+        <div class="session-actions" aria-label="Session actions" data-i18n-aria-label="topbar.sessionActions">
+          <label class="language-control" title="Language" data-i18n-title="language.title">
+            <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" />
+              <path d="M3.6 9h16.8M3.6 15h16.8" />
+              <path d="M12 3a13.5 13.5 0 0 1 0 18M12 3a13.5 13.5 0 0 0 0 18" />
+            </svg>
+            <span class="sr-only" data-i18n="language.label">Language</span>
+            <select id="language-select" aria-label="Language" data-i18n-aria-label="language.label">
+              <option value="en">EN</option>
+              <option value="ko">KO</option>
+              <option value="ja">JA</option>
+              <option value="zh">ZH</option>
+            </select>
+          </label>
           <button
             id="btn-clear-chat"
             class="icon-action danger-action"
             type="button"
-            title="現在のチャット履歴を消去して、新しいチャットを開始します"
-            aria-label="新規チャット"
+            title="Clear the current chat history and start a new chat"
+            aria-label="New chat"
+            data-i18n-title="topbar.clearChatTitle"
+            data-i18n-aria-label="topbar.newChat"
           >
             <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M7 8h10M7 12h6m-8 7 3-3h9a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v12Z" />
               <path d="M18 17v4m-2-2h4" />
             </svg>
           </button>
-          <button id="btn-settings" class="icon-action" type="button" title="設定を開く" aria-label="設定を開く">
+          <button
+            id="btn-settings"
+            class="icon-action"
+            type="button"
+            title="Open settings"
+            aria-label="Open settings"
+            data-i18n-title="topbar.openSettings"
+            data-i18n-aria-label="topbar.openSettings"
+          >
             <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
               <path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.04.04a2 2 0 0 1-2.82 2.82l-.04-.04a1.8 1.8 0 0 0-1.98-.36 1.8 1.8 0 0 0-1.08 1.65V21a2 2 0 0 1-4 0v-.09a1.8 1.8 0 0 0-1.08-1.65 1.8 1.8 0 0 0-1.98.36l-.04.04a2 2 0 0 1-2.82-2.82l.04-.04A1.8 1.8 0 0 0 4.6 15a1.8 1.8 0 0 0-1.65-1.08H3a2 2 0 0 1 0-4h.09A1.8 1.8 0 0 0 4.74 8a1.8 1.8 0 0 0-.36-1.98l-.04-.04a2 2 0 0 1 2.82-2.82l.04.04A1.8 1.8 0 0 0 9 4.6a1.8 1.8 0 0 0 1.08-1.65V3a2 2 0 0 1 4 0v.09A1.8 1.8 0 0 0 15.16 4.74a1.8 1.8 0 0 0 1.98-.36l.04-.04a2 2 0 0 1 2.82 2.82l-.04.04A1.8 1.8 0 0 0 19.4 9a1.8 1.8 0 0 0 1.65 1.08H21a2 2 0 0 1 0 4h-.09A1.8 1.8 0 0 0 19.4 15Z" />
@@ -35,131 +59,179 @@
         </div>
       </div>
       <div class="toolbar">
-        <label class="scope-control" title="AIが注入したHTML/CSS/JSを自動保存する範囲">
-          <span>保存</span>
+        <label class="scope-control" title="Range for automatically saving AI-injected HTML/CSS/JS" data-i18n-title="memory.scopeTitle">
+          <span data-i18n="memory.saveLabel">Save</span>
           <select id="remember-scope">
-            <option value="page">URL</option>
-            <option value="domain">ドメイン</option>
-            <option value="all">全サイト</option>
+            <option value="page" data-i18n="memory.page">URL</option>
+            <option value="domain" data-i18n="memory.domain">Domain</option>
+            <option value="all" data-i18n="memory.all">All sites</option>
           </select>
         </label>
-        <div class="quick-actions" aria-label="よく使う操作">
-          <button id="btn-pick" class="quick-action primary-action" type="button" title="ページ上で要素をクリックして補足を付ける" aria-label="補足を付ける">
+        <div class="quick-actions" aria-label="Frequent actions" data-i18n-aria-label="quickActions.label">
+          <button
+            id="btn-pick"
+            class="quick-action primary-action"
+            type="button"
+            title="Click an element on the page to add context"
+            aria-label="Add context"
+            data-i18n-title="actions.pickTitle"
+            data-i18n-aria-label="actions.pickAria"
+          >
             <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 3v4m0 10v4M3 12h4m10 0h4" />
               <path d="M8 12a4 4 0 1 0 8 0 4 4 0 0 0-8 0Z" />
             </svg>
-            <span>補足</span>
+            <span data-i18n="actions.pick">Context</span>
           </button>
-          <button id="btn-draw" class="quick-action" type="button" title="ページ上に円・四角・矢印・ペンで印を描き、隣にAIメモを付ける" aria-label="お描き">
+          <button
+            id="btn-draw"
+            data-agent-id="@agent:sidepanel.draw"
+            data-agent-action="draw"
+            class="quick-action"
+            type="button"
+            title="Draw circles, boxes, arrows, or pen marks on the page and attach AI notes"
+            aria-label="Draw"
+            data-i18n-title="actions.drawTitle"
+            data-i18n-aria-label="actions.drawAria"
+          >
             <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 19l7-7a2.1 2.1 0 0 0-3-3l-7 7-1 4 4-1Z" />
               <path d="M14 7l3 3" />
             </svg>
-            <span>お描き</span>
+            <span data-i18n="actions.draw">Draw</span>
             <span id="memo-count-badge" class="memo-count-badge" aria-hidden="true" hidden></span>
           </button>
-          <button id="btn-context" class="quick-action" type="button" title="このページの文脈を、別のAIチャットに貼れる形でコピー" aria-label="文脈をコピー">
+          <button
+            id="btn-context"
+            class="quick-action"
+            type="button"
+            title="Copy this page context in a format you can paste into another AI chat"
+            aria-label="Copy context"
+            data-i18n-title="actions.contextTitle"
+            data-i18n-aria-label="actions.contextAria"
+          >
             <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M8 8h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z" />
               <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2" />
             </svg>
-            <span>文脈</span>
+            <span data-i18n="actions.context">Context</span>
           </button>
-          <button id="btn-affordances" class="quick-action" type="button" title="操作可能要素を一覧表示" aria-label="手がかりを表示">
+          <button
+            id="btn-affordances"
+            class="quick-action"
+            type="button"
+            title="List operable elements"
+            aria-label="Show clues"
+            data-i18n-title="actions.affordancesTitle"
+            data-i18n-aria-label="actions.affordancesAria"
+          >
             <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M9 6h11M9 12h11M9 18h11" />
               <path d="M4 6h.01M4 12h.01M4 18h.01" />
             </svg>
-            <span>手がかり</span>
+            <span data-i18n="actions.affordances">Clues</span>
           </button>
           <button
             id="btn-history"
             class="quick-action"
             type="button"
-            title="保存したプロンプト履歴を開く"
-            aria-label="プロンプト履歴を開く"
+            title="Open saved prompt history"
+            aria-label="Open prompt history"
             aria-controls="prompt-history-panel"
             aria-expanded="false"
+            data-i18n-title="actions.historyTitle"
+            data-i18n-aria-label="actions.historyAria"
           >
             <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M3 12a9 9 0 1 0 3-6.7" />
               <path d="M3 4v5h5" />
               <path d="M12 7v5l3 2" />
             </svg>
-            <span>履歴</span>
+            <span data-i18n="actions.history">History</span>
           </button>
         </div>
       </div>
     </header>
 
-    <aside id="status-banner" class="status-banner" aria-label="接続状態" aria-live="polite" hidden></aside>
+    <aside id="status-banner" class="status-banner" aria-label="Connection status" aria-live="polite" hidden data-i18n-aria-label="status.label"></aside>
 
-    <!-- このページに保存済みの補足(再訪時も復元される) -->
-    <section id="anno-panel" class="anno-panel" aria-label="このページの補足" hidden>
+    <section id="anno-panel" class="anno-panel" aria-label="Page context" hidden data-i18n-aria-label="annotations.panelLabel">
       <div class="anno-head">
-        <span>このページの補足</span>
-        <button id="btn-anno-refresh" title="再読み込み" class="link">更新</button>
+        <span data-i18n="annotations.heading">Page context</span>
+        <button id="btn-anno-refresh" title="Refresh" class="link" data-i18n-title="common.refresh" data-i18n="common.refresh">Refresh</button>
       </div>
       <div id="anno-list" class="anno-list"></div>
-      <!-- お描き(図形+メモ)がある時だけ出る。お描きの成果物を画像でAIへ渡すための操作。 -->
       <div id="anno-foot" class="anno-foot" hidden>
         <button
           id="btn-capture"
+          data-agent-id="@agent:sidepanel.capture"
+          data-agent-action="capture"
           class="anno-capture"
           type="button"
-          title="お描き(図形+メモ)をスクリーンショットに焼き込み、画像としてAIに渡せる形でダウンロード保存"
+          title="Burn drawings and notes into a screenshot, then save them as an image for AI"
+          data-i18n-title="annotations.captureTitle"
         >
           <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L19 6h0a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z" />
             <path d="M12 16a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" />
           </svg>
-          <span>お描きを画像でAIへ</span>
+          <span data-i18n="annotations.capture">Send drawing to AI</span>
           <span id="capture-count" class="capture-count" aria-hidden="true"></span>
         </button>
       </div>
     </section>
 
-    <section id="prompt-history-panel" class="prompt-history-panel" aria-label="プロンプト履歴" hidden>
+    <section id="prompt-history-panel" class="prompt-history-panel" aria-label="Prompt history" hidden data-i18n-aria-label="history.panelLabel">
       <div class="history-head">
-        <span>プロンプト履歴</span>
-        <button id="btn-history-clear" title="プロンプト履歴を削除" class="link danger-link">クリア</button>
+        <span data-i18n="history.heading">Prompt history</span>
+        <button
+          id="btn-history-clear"
+          title="Delete prompt history"
+          class="link danger-link"
+          data-i18n-title="history.clearTitle"
+          data-i18n="common.clear"
+        >
+          Clear
+        </button>
       </div>
       <div id="prompt-history-list" class="prompt-history-list"></div>
     </section>
 
     <main id="messages" class="messages">
       <div class="empty-hint" id="empty-hint">
-        <h1>ページ操作のレール</h1>
-        <p>このページでAIに任せる作業を、目的、文脈、操作、検証の順に残します。</p>
-        <ol class="rail-list" aria-label="操作レール">
+        <h1 data-i18n="empty.title">Page Operation Rails</h1>
+        <p data-i18n="empty.description">Keep the work you hand to AI organized as goal, context, action, and verification.</p>
+        <ol class="rail-list" aria-label="Operation rails" data-i18n-aria-label="empty.railsLabel">
           <li>
-            <span class="rail-step">目的</span>
-            <span>何を変えるかを短く書く</span>
+            <span class="rail-step" data-i18n="empty.goalLabel">Goal</span>
+            <span data-i18n="empty.goalText">Briefly write what should change</span>
           </li>
           <li>
-            <span class="rail-step">文脈</span>
-            <span>ページ上の対象へ補足を付ける</span>
+            <span class="rail-step" data-i18n="empty.contextLabel">Context</span>
+            <span data-i18n="empty.contextText">Add notes to targets on the page</span>
           </li>
           <li>
-            <span class="rail-step">検証</span>
-            <span>実行結果と保存範囲を確認する</span>
+            <span class="rail-step" data-i18n="empty.verifyLabel">Verify</span>
+            <span data-i18n="empty.verifyText">Check results and the save range</span>
           </li>
         </ol>
       </div>
     </main>
 
-    <form id="composer" class="composer" aria-label="AIへの指示入力">
-      <label class="sr-only" for="input">AIへの指示</label>
+    <form id="composer" class="composer" data-agent-id="@agent:sidepanel.composer" data-agent-role="region" aria-label="Instruction input for AI" data-i18n-aria-label="composer.label">
+      <label class="sr-only" for="input" data-i18n="composer.inputLabel">Instruction for AI</label>
       <textarea
         id="input"
+        data-agent-id="@agent:sidepanel.composer.input"
         rows="2"
-        aria-label="AIへの指示"
-        placeholder="このページへの指示を入力"
+        aria-label="Instruction for AI"
+        placeholder="Type an instruction for this page"
+        data-i18n-aria-label="composer.inputLabel"
+        data-i18n-placeholder="composer.placeholder"
       ></textarea>
-      <button id="send" type="submit">送信</button>
+      <button id="send" type="submit" data-agent-id="@agent:sidepanel.composer.send" data-agent-action="submit" data-i18n="composer.send">Send</button>
     </form>
 
-    <script src="sidepanel.js"></script>
+    <script type="module" src="sidepanel.js"></script>
   </body>
 </html>

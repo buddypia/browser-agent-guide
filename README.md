@@ -122,6 +122,8 @@ Buttons planted with `injectButton` carry a neutral DOM attribute such as `data-
 readable via `readSignals`. This closes the loop: *a human clicks a planted button → the AI reads the
 intent and continues the task.*
 
+For elements an author wants the AI to target **reliably across reflows**, the repo also defines the **`@agent:` marker convention** — a stable anchor `data-agent-id="@agent:<path>"` found with `rg -n 'data-agent-id="@agent:'`. See [docs/agent-markers.md](docs/agent-markers.md). (Dynamically-injected UI is out of scope — it already has `data-bag-id` + signals.) The `/bag-workflow` skill uses these markers, and `npm run check:markers` lints them.
+
 ## Architecture
 
 ```

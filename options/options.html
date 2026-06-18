@@ -52,7 +52,7 @@
           </label>
         </div>
         <div class="row">
-          <button id="save-ai" class="primary">保存</button>
+          <button id="save-ai" class="primary" data-agent-id="@agent:options.ai.save" data-agent-action="submit">保存</button>
           <span id="ai-status" class="status"></span>
         </div>
         <p class="hint">
@@ -74,7 +74,7 @@
           </label>
         </div>
         <div class="row">
-          <button id="save-memory" class="primary">保存</button>
+          <button id="save-memory" class="primary" data-agent-id="@agent:options.memory.save" data-agent-action="submit">保存</button>
           <span id="memory-status" class="status"></span>
         </div>
         <p class="hint">
@@ -106,8 +106,8 @@
           </label>
         </div>
         <div class="row">
-          <button id="save-daemon" class="primary">保存</button>
-          <button id="test-daemon" class="secondary">接続テスト</button>
+          <button id="save-daemon" class="primary" data-agent-id="@agent:options.daemon.save" data-agent-action="submit">保存</button>
+          <button id="test-daemon" class="secondary" data-agent-id="@agent:options.daemon.test" data-agent-action="submit">接続テスト</button>
           <span id="daemon-status" class="status"></span>
         </div>
         <p class="hint">
@@ -152,7 +152,7 @@
             パターン
             <input id="new-pattern" placeholder="例: https://example.com/app / example.com / ^https://.*\\.example\\.com" />
           </label>
-          <button id="add-rule" class="primary">追加</button>
+          <button id="add-rule" class="primary" data-agent-id="@agent:options.rules.add" data-agent-action="submit">追加</button>
         </div>
       </section>
 
@@ -174,7 +174,7 @@
   ]'></textarea>
         </label>
         <div class="row">
-          <button id="save-recipe" class="primary">保存</button>
+          <button id="save-recipe" class="primary" data-agent-id="@agent:options.recipe.save" data-agent-action="submit">保存</button>
           <button id="recipe-template" class="secondary">テンプレート</button>
           <span id="recipe-status" class="status"></span>
         </div>
@@ -184,8 +184,8 @@
       <section class="card">
         <h2>バックアップ</h2>
         <div class="row">
-          <button id="export" class="secondary">エクスポート</button>
-          <button id="import" class="secondary">インポート</button>
+          <button id="export" class="secondary" data-agent-id="@agent:options.export" data-agent-action="submit">エクスポート</button>
+          <button id="import" class="secondary" data-agent-id="@agent:options.import" data-agent-action="submit">インポート</button>
           <input id="import-file" type="file" accept="application/json" hidden />
         </div>
       </section>
