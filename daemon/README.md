@@ -23,7 +23,7 @@
 
 ### 複数プロジェクトの絞り込み（urlContains / titleContains）
 
-MVP は `chrome.downloads` の制約で、どのページのキャプチャも 1 つの `~/Downloads/ai-inbox` に積まれる。
+どのページのキャプチャも 1 つの inbox（既定は `<ブラウザのダウンロードフォルダ>/ai-inbox`）に積まれる。
 そのため `get_latest_visual_feedback` をそのまま呼ぶと「直前に別プロジェクトで撮ったもの」が返りうる。
 `list_visual_feedback` / `get_latest_visual_feedback` は `urlContains` / `titleContains`（部分一致・大小無視）を
 受け取り、今のプロジェクトのものだけに絞れる。
@@ -43,9 +43,11 @@ CLI への運用ヒント: 作業中ページの URL 断片を `urlContains` に
 ```bash
 cd daemon
 npm install
-# 既定: inbox=~/Downloads/ai-inbox（拡張 MVP の保存先と一致）, port=8765
+# 既定: inbox=<自動検出した Downloads>/ai-inbox（拡張のフォールバック保存先に一致）, port=8765
+#   - Downloads は OS から自動検出（Win=レジストリ / Linux=XDG / mac=~/Downloads）。
+#   - さらに拡張が報告する実ダウンロード先（移動済み/Edge・Brave）に自動追従する。
 npm start
-# 明示指定:
+# 明示指定（指定すると「固定」され拡張の報告では上書きされない）:
 node src/index.js --inbox ~/Downloads/ai-inbox --port 8765
 # プロジェクト直下の .ai-inbox を見る場合:
 node src/index.js --inbox ./.ai-inbox

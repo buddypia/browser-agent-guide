@@ -6,7 +6,10 @@ import { tokenEquals } from './token.js';
 
 const MAX_PAYLOAD = 64 * 1024 * 1024; // 合成PNG(base64) + raw を許容
 
-export function attachWebSocketServer(httpServer, { inboxDir, token, path = '/ws', onSaved } = {}) {
+// inboxDir は文字列でも「現在の inbox を返す関数」でも良い。
+// onHello(downloadsDir) が渡されると、push 時に拡張が報告した実ダウンロード先を採用できる。
+export function attachWebSocketServer(httpServer, { inboxDir, token, path = '/ws', onSaved, onHello } = {}) {
+  const currentInbox = () => (typeof inboxDir === 'function' ? inboxDir() : inboxDir);
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
 
   httpServer.on('upgrade', (req, socket, head) => {
@@ -44,7 +47,9 @@ export function attachWebSocketServer(httpServer, { inboxDir, token, path = '/ws
         return;
       }
       try {
-        const { id, dir, files } = writeEntry(inboxDir, msg);
+        // 拡張が実ダウンロード先を報告してきたら、書き込み前に inbox を合わせる（固定時は無視）。
+        if (msg.downloadsDir) onHello?.(msg.downloadsDir);
+        const { id, dir, files } = writeEntry(currentInbox(), msg);
         onSaved?.({ id, dir, files });
         ws.send(JSON.stringify({ type: 'ack', id, dir, files }));
       } catch (e) {

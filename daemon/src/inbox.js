@@ -9,17 +9,103 @@
 //                     memo.md         # 人間可読
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, resolve, isAbsolute } from 'node:path';
-import { homedir } from 'node:os';
+import { join, resolve, isAbsolute, sep } from 'node:path';
+import { homedir, platform } from 'node:os';
+import { execFileSync } from 'node:child_process';
 
 export const SHOT = 'shot.png';
 export const RAW = 'raw.png';
 export const ANNOTATION = 'annotation.json';
 export const MEMO = 'memo.md';
 
-// MVP は chrome.downloads で ~/Downloads/ai-inbox/ に保存するため、これを既定にする。
+// Windows の「Downloads」既知フォルダー GUID（移動済み時はレジストリにこの名前で絶対パスが入る）。
+const DOWNLOADS_GUID = '{374DE290-123F-4565-9164-39C4925E467B}';
+
+// Windows: レジストリから実 Downloads パスを読む（移動/OneDrive バックアップ対応）。無ければ null。
+// 'Shell Folders'(REG_SZ=解決済み) を優先し、'User Shell Folders'(REG_EXPAND_SZ=%VAR% 入り) を後段に。
+function downloadsFromWindowsRegistry() {
+  for (const key of ['Shell Folders', 'User Shell Folders']) {
+    try {
+      const out = execFileSync(
+        'reg',
+        ['query', `HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\${key}`, '/v', DOWNLOADS_GUID],
+        { encoding: 'utf8', timeout: 2000, windowsHide: true }
+      );
+      // REG_SZ は解決済みなので %VAR% 展開しない（パスに literal '%' があっても壊さない）。
+      // REG_EXPAND_SZ のみ %VAR% を展開し、未解決の %...% が残れば不採用にする。
+      const m = out.match(/(REG_(?:EXPAND_)?SZ)\s+(.+?)\s*$/m);
+      if (m) {
+        if (m[1] === 'REG_EXPAND_SZ') {
+          const expanded = m[2].replace(/%([^%]+)%/g, (_, v) => process.env[v] || `%${v}%`);
+          if (expanded && !expanded.includes('%')) return expanded;
+        } else {
+          const val = m[2].trim();
+          if (val) return val;
+        }
+      }
+    } catch {
+      /* 値が無い(クリーンインストール既定)/reg 不在 → 次のキーやフォールバックへ */
+    }
+  }
+  return null;
+}
+
+// Linux: XDG から実 Downloads パスを得る。無ければ null。
+function downloadsFromXdg() {
+  // 1) xdg-user-dir DOWNLOAD（引数はハードコード必須。内部で eval されるため外部入力厳禁）。
+  try {
+    const out = execFileSync('xdg-user-dir', ['DOWNLOAD'], { encoding: 'utf8', timeout: 2000 })
+      .trim()
+      .replace(/\/+$/, '');
+    if (out && out !== homedir()) return out;
+  } catch {
+    /* 未インストール(headless 等) → user-dirs.dirs を直接読む */
+  }
+  // 2) ${XDG_CONFIG_HOME:-~/.config}/user-dirs.dirs を直接パース（$HOME 展開のみ）。
+  try {
+    const cfg = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+    const text = readFileSync(join(cfg, 'user-dirs.dirs'), 'utf8');
+    const m = text.match(/^\s*XDG_DOWNLOAD_DIR="?(.+?)"?\s*$/m);
+    if (m) {
+      // 末尾スラッシュを除いてから homedir 等価判定（"$HOME/" を Downloads と誤認しない）。
+      const v = m[1].replace(/^\$\{?HOME\}?/, homedir()).replace(/\/+$/, '');
+      if (v && v !== homedir()) return v;
+    }
+  } catch {
+    /* 無ければ OS 既定へフォールバック */
+  }
+  return null;
+}
+
+// OS のダウンロードフォルダーを解決する。検出失敗時は <homedir>/Downloads。
+// 注意: chrome.downloads の実保存先は「ブラウザ設定」依存で、OS の Downloads と必ずしも一致しない
+// （ユーザーが変更/Edge・Brave 等）。その差は拡張からの downloadsDir ハンドシェイクで埋める。
+export function resolveDownloadsDir() {
+  let detected = null;
+  try {
+    if (platform() === 'win32') detected = downloadsFromWindowsRegistry();
+    else if (platform() === 'linux') detected = downloadsFromXdg();
+    // darwin: ~/Downloads（ディスク上の実名は常に英語 'Downloads'。ローカライズは表示のみ）。
+  } catch {
+    detected = null;
+  }
+  return detected || join(homedir(), 'Downloads');
+}
+
+// 既定 inbox は <検出した Downloads>/ai-inbox（拡張のフォールバック保存先に合わせる）。
 export function defaultInboxDir() {
-  return join(homedir(), 'Downloads', 'ai-inbox');
+  return join(resolveDownloadsDir(), 'ai-inbox');
+}
+
+// 拡張が報告した downloadsDir から「採用してよい inbox」を計算する。採用不可なら null。
+// 安全境界: 採用先はユーザーのホーム配下に限定する（WS トークンが漏れても書き込み範囲を絞る）。
+// ホーム外に Downloads を置くケース（例: Windows で D:\Downloads）は --inbox / BAG_VF_INBOX の明示指定を使う。
+export function inboxFromDownloadsDir(downloadsDir, { home = homedir() } = {}) {
+  if (!downloadsDir || typeof downloadsDir !== 'string' || !isAbsolute(downloadsDir)) return null;
+  const candidate = resolve(join(downloadsDir, 'ai-inbox'));
+  const root = resolve(home);
+  if (candidate !== root && !candidate.startsWith(root + sep)) return null;
+  return candidate;
 }
 
 export function resolveInboxDir(p) {
