@@ -17,22 +17,39 @@
   // ※ AI へ渡すテキスト(動詞カタログ・図形の説明・文脈エクスポート)は対象外で日本語のまま。
   let i18nMessages = {};
   let i18nFallback = {};
+  let i18nLoaded = false;
+  let i18nLoadPromise = null;
   function t(key, vars) {
     const tpl = i18nMessages[key] ?? i18nFallback[key] ?? key;
     return String(tpl).replace(/\{(\w+)\}/g, (m, name) =>
       vars && Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : m
     );
   }
-  async function loadI18n() {
-    try {
-      const res = await chrome.runtime.sendMessage({ type: 'GET_I18N' });
-      if (res?.ok && res.result) {
-        i18nMessages = res.result.messages || {};
-        i18nFallback = res.result.fallback || {};
-      }
-    } catch {
-      /* SW未起動などはキー素通しで描画し、次回の更新で反映する */
+  async function loadI18n({ force = false } = {}) {
+    if (i18nLoadPromise) {
+      if (!force) return i18nLoadPromise;
+      await i18nLoadPromise;
     }
+    if (i18nLoaded && !force) return;
+    i18nLoadPromise = (async () => {
+      try {
+        const res = await chrome.runtime.sendMessage({ type: 'GET_I18N' });
+        if (res?.ok && res.result) {
+          const nextMessages = res.result.messages || {};
+          const nextFallback = res.result.fallback || {};
+          if (Object.keys(nextMessages).length || Object.keys(nextFallback).length) {
+            i18nMessages = nextMessages;
+            i18nFallback = nextFallback;
+            i18nLoaded = true;
+          }
+        }
+      } catch {
+        /* SW未起動などはキー素通しで描画し、次回の更新で反映する */
+      } finally {
+        i18nLoadPromise = null;
+      }
+    })();
+    return i18nLoadPromise;
   }
 
   const ATTR = {
@@ -3446,6 +3463,7 @@
   // ---- メッセージ受信 ----
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     (async () => {
+      if (msg?.type !== 'PING') await loadI18n();
       switch (msg?.type) {
         case 'PING':
           return { ok: true };
@@ -3551,7 +3569,8 @@
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && changes.aiAdvisorSettings) {
-        loadI18n().then(() => renderAnnotations());
+        i18nLoaded = false;
+        loadI18n({ force: true }).then(() => renderAnnotations());
       }
     });
   } catch {
