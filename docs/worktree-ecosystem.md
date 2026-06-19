@@ -29,8 +29,8 @@ Target adaptations:
 - `.claude/settings.json` registers only hooks that are present in this
   transplant. The donor settings file had brief2dev-only hooks and was not
   copied wholesale.
-- `.brief2dev/system/` is ignored because donor worktree scripts use it as
-  shared local worktree state.
+- `.brief2dev/system` and `.agents/` are ignored because donor worktree scripts
+  use them as shared or machine-local worktree state.
 - `worktree-new.mjs` resolves companion scripts from the checkout containing
   `worktree-new.mjs`. This keeps the transplant verifiable from this linked
   worktree before the new files are merged into `main`, while preserving normal

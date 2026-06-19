@@ -4,6 +4,7 @@
 import { test, expect, chromium } from '@playwright/test';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -78,12 +79,14 @@ test.describe('SPA / 非同期レシピ再適用 (拡張ロード)', () => {
   let origin;
   let context;
   let pageUrl;
+  let userDataDir;
 
   test.beforeAll(async () => {
     server = await startStaticServer();
     origin = `http://127.0.0.1:${server.address().port}`;
     pageUrl = `${origin}/${FIXTURE}`;
-    context = await chromium.launchPersistentContext('', {
+    userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bag-spa-recipe-'));
+    context = await chromium.launchPersistentContext(userDataDir, {
       headless: false,
       args: [
         '--headless=new',
@@ -95,7 +98,12 @@ test.describe('SPA / 非同期レシピ再適用 (拡張ロード)', () => {
 
   test.afterAll(async () => {
     await context?.close().catch(() => {});
-    if (server) await new Promise((r) => server.close(r));
+    if (server) {
+      const closed = new Promise((r) => server.close(r));
+      server.closeAllConnections?.();
+      await closed;
+    }
+    if (userDataDir) fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
   test('SPA内部遷移(hashchange)でレシピが再適用され、when(urlContains)で画面別に出し分く', async () => {
