@@ -61,18 +61,19 @@ disallowed-tools: Bash(rm *)
 
 **MCP 経路 (主):** MCP ツールを**完全修飾名**で呼ぶ。`$ARGUMENTS` を `urlContains` に渡して、自分のプロジェクトのお描きだけに絞る (共有 inbox `~/Downloads/ai-inbox` は他プロジェクトの直近キャプチャを返しうる)。
 
-- `bag_visual_feedback:get_latest_visual_feedback({ urlContains: "<$ARGUMENTS>" })` — 最新のお描きを **注釈付きPNG (vision) ＋ 絶対パス file_path** で取得
-- 候補が複数/古いものを指す時は `bag_visual_feedback:list_visual_feedback({ urlContains })` → `bag_visual_feedback:get_visual_feedback({ id })`
+- まず `bag_visual_feedback:get_latest_visual_feedback_context({ urlContains: "<$ARGUMENTS>" })` — 最新のお描きを **画像なしの軽量 context** で取得。`@agent:` (`dataAgentId`) / selector / testid / anchorLabel で対象を特定できるか見る。
+- context だけで十分なら画像は読まない。曖昧、または見た目の判断が必要な時だけ `bag_visual_feedback:get_latest_visual_feedback({ urlContains })` / `bag_visual_feedback:get_visual_feedback({ id })` で **注釈付きPNG (vision) ＋ 絶対パス file_path** を取得する。
+- 候補が複数/古いものを指す時は `bag_visual_feedback:list_visual_feedback({ urlContains })` → `bag_visual_feedback:get_visual_feedback_context({ id })` → 必要時のみ `bag_visual_feedback:get_visual_feedback({ id })`
 
 **FILE 経路 (救済):** preflight の `latest=` が指す `~/Downloads/ai-inbox/<slug>/` を直接読む。
 - `shot.png` (注釈入り画像 / vision で見る)、`raw.png` (注釈なし＝before)、`annotation.json` (構造化メタ)、`memo.md` (人間可読)
 
 **読み取る項目** (`annotation.json` の `items[]`。詳細スキーマは `references/daemon-mcp.md`):
 - `n` = 手順番号、`note` = ユーザーの指示文、`intent` = 目的
-- `anchorLabel` = 対象の表示テキスト、`selector` = CSSセレクタ、`testid` = data-testid
+- `dataAgentId` = `@agent:` マーカー、`anchorLabel` = 対象の表示テキスト、`selector` = CSSセレクタ、`testid` = data-testid
 - `url` (トップレベル) = お描きしたページ。**`file://` で始まる (= Webサイトではなく PC 上の保存 HTML) なら、そのパスがほぼ対象ソースファイルそのもの**
 
-**画像は必ず vision で見る** (テキスト座標ではなく絵を見る)。各注釈は画像中の丸数字①②…に対応する。
+**画像を取得した場合は必ず vision で見る** (テキスト座標ではなく絵を見る)。各注釈は画像中の丸数字①②…に対応する。
 
 → **ユーザーに番号順で要約を見せる**。例:「お描きは3件: ① 見出しを大きく / ② ボタンの色を青に / ③ この一文を削除」。
 
@@ -84,8 +85,9 @@ disallowed-tools: Bash(rm *)
 
 **主: playwright-cli (追加設定ゼロ・ただの Bash)。** 詳細は `references/browser-tools.md`。
 ```bash
-BAG_SESSION="bag-target"                   # 例: bag-amazon。ワークフローごとに専用セッションを使う
-playwright-cli -s="$BAG_SESSION" open "<お描きしたURL>"
+TARGET_URL="<お描きしたURL>"
+BAG_SESSION="bag-$(printf '%s' "$TARGET_URL" | sed -E 's#^[a-z]+://##; s#/.*##; s#[^A-Za-z0-9]+#-#g; s#^-+|-+$##g' | tr '[:upper:]' '[:lower:]' | cut -c1-48)"
+playwright-cli -s="$BAG_SESSION" open "$TARGET_URL"
 playwright-cli -s="$BAG_SESSION" --raw eval "location.href"  # 期待URL/hostか確認してから続行
 playwright-cli -s="$BAG_SESSION" snapshot     # アクセシビリティツリー (要素ref e1,e2…)
 # data-bag-id (拡張の目印) と data-agent-id (@agent:マーカー) を両方読む:
@@ -93,6 +95,7 @@ playwright-cli -s="$BAG_SESSION" --raw eval "JSON.stringify([...document.querySe
 playwright-cli -s="$BAG_SESSION" screenshot --filename=before.png
 ```
 - **セッション安全ルール**: `playwright-cli` は必ず `-s="$BAG_SESSION"` 付きで操作し、既存の `default` セッションに混ざらないようにする。
+- セッション名は対象URL/タスクから汎用的に作る。過去実行の具体名や特定サイト前提の名前には依存しない。既存セッションを再利用する場合も、名前ではなく `location.href` が対象URL/hostに一致することを確認してから操作する。
 - `snapshot` の `e123` のような ref は**そのセッション・そのページ・その時点だけ**の一時ID。別セッション/別ページ/遷移後に持ち越さない。クリック直前に同じ `BAG_SESSION` で URL 確認と fresh snapshot を取り直す。
 - Amazon など動的な外部サイトや副作用のある操作では、可能な限り商品名・`href`・安定 selector/locator を使い、古い ref 番号だけでクリックしない。
 - ページが **ログイン必須** で使い捨てブラウザでは入れない → ネイティブ `claude --chrome` / `/chrome` (ユーザーのログイン済み Chrome を使う)。`references/browser-tools.md` 参照。

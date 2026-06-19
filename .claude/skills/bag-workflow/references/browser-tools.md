@@ -18,9 +18,10 @@
 `data-bag-id`(拡張の目印) も `data-agent-id`(@agent:マーカー) も `eval` で読める。
 
 ```bash
-BAG_SESSION="bag-target"              # 例: bag-amazon / bag-localhost。ワークフローごとの専用セッション
-playwright-cli -s="$BAG_SESSION" open "<url>"    # ブラウザを開いて遷移 (open https://… でも可)
-playwright-cli -s="$BAG_SESSION" goto "<url>"
+TARGET_URL="<url>"
+BAG_SESSION="bag-$(printf '%s' "$TARGET_URL" | sed -E 's#^[a-z]+://##; s#/.*##; s#[^A-Za-z0-9]+#-#g; s#^-+|-+$##g' | tr '[:upper:]' '[:lower:]' | cut -c1-48)"
+playwright-cli -s="$BAG_SESSION" open "$TARGET_URL"    # ブラウザを開いて遷移 (open https://… でも可)
+playwright-cli -s="$BAG_SESSION" goto "$TARGET_URL"
 playwright-cli -s="$BAG_SESSION" --raw eval "location.href"  # 期待URL/hostのガード
 playwright-cli -s="$BAG_SESSION" snapshot        # アクセシビリティツリー (要素ref e1,e2…)。--boxes で座標も
 playwright-cli -s="$BAG_SESSION" screenshot --filename=before.png
@@ -39,6 +40,8 @@ playwright-cli -s="$BAG_SESSION" close
 ### セッションと ref の安全ルール
 
 - `bag-workflow` では、必ず `-s="$BAG_SESSION"` 付きの名前付きセッションを使う。既存の `default` セッションや他タブの状態に混ざると、snapshot の ref が別ページに対して解決されることがある。
+- `BAG_SESSION` は対象URL/タスクから生成する汎用名にする。過去実行の具体名や特定サイト前提の名前に依存しない。
+- 既存セッションを再利用する場合は、セッション名ではなく `location.href` / title / host が対象と一致することを確認してから操作する。
 - `snapshot` に出る `e1`, `e2` などの ref は、**同じセッション・同じページ・同じ時点**でだけ使う一時参照。遷移後、reload後、別セッションでは再利用しない。
 - クリック/入力/フォーム送信の直前に `playwright-cli -s="$BAG_SESSION" --raw eval "location.href"` で期待する URL/host か確認する。外れていたら操作せず、対象 URL を開き直して fresh snapshot を取る。
 - Amazon などの動的な外部サイトや副作用のある操作では、可能なら ref 番号ではなく、商品名、`href`、`data-*`、role locator、安定 selector を使う。ref を使う場合も直前に同じセッションで取り直したものだけにする。
