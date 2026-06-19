@@ -1,5 +1,5 @@
 // MCP 統合テスト: 実際の MCP クライアント（Streamable HTTP）でデーモンに接続し、
-// ツール一覧 / 最新取得 / id 取得が image+パスを返すことを検証する。
+// ツール一覧 / lightweight context / image+パス取得を検証する。
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
@@ -37,11 +37,17 @@ async function withClient(fn) {
   }
 }
 
-test('tools/list が 3 ツールを公開する', async () => {
+test('tools/list が 5 ツールを公開する', async () => {
   await withClient(async (client) => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    assert.deepEqual(names, ['get_latest_visual_feedback', 'get_visual_feedback', 'list_visual_feedback']);
+    assert.deepEqual(names, [
+      'get_latest_visual_feedback',
+      'get_latest_visual_feedback_context',
+      'get_visual_feedback',
+      'get_visual_feedback_context',
+      'list_visual_feedback',
+    ]);
   });
 });
 
@@ -69,9 +75,37 @@ test('get_latest_visual_feedback が image(PNG) + file_path を返す', async ()
   });
 });
 
+test('get_latest_visual_feedback_context が image 無しで @agent と selector を返す', async () => {
+  await withClient(async (client) => {
+    const res = await client.callTool({ name: 'get_latest_visual_feedback_context', arguments: {} });
+    assert.ok(!res.content.some((c) => c.type === 'image'), 'context-only なので image を返さない');
+    const txt = res.content.find((c) => c.type === 'text');
+    assert.ok(txt.text.includes('visual_feedback_context: image omitted'));
+    assert.ok(txt.text.includes('agent="@agent:docs/api-list"'));
+    assert.ok(txt.text.includes('selector="main h2"'));
+    assert.equal(res.structuredContent.id, NEWER);
+    assert.equal(res.structuredContent.annotations[0].dataAgentId, '@agent:docs/api-list');
+  });
+});
+
+test('get_visual_feedback_context が id 指定で image 無し context を返す', async () => {
+  await withClient(async (client) => {
+    const res = await client.callTool({ name: 'get_visual_feedback_context', arguments: { id: NEWER } });
+    assert.ok(!res.content.some((c) => c.type === 'image'), 'id 指定 context も image を返さない');
+    assert.equal(res.structuredContent.id, NEWER);
+  });
+});
+
 test('get_visual_feedback: 不明 id は isError', async () => {
   await withClient(async (client) => {
     const res = await client.callTool({ name: 'get_visual_feedback', arguments: { id: 'nope' } });
+    assert.equal(res.isError, true);
+  });
+});
+
+test('get_visual_feedback_context: 不明 id は isError', async () => {
+  await withClient(async (client) => {
+    const res = await client.callTool({ name: 'get_visual_feedback_context', arguments: { id: 'nope' } });
     assert.equal(res.isError, true);
   });
 });

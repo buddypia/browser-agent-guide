@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Browser Agent Guide 視覚フィードバック デーモン（Phase 1 / 消費側）。
 // inbox を Streamable HTTP MCP で公開し、Claude Code / Codex / Antigravity が
-// get_latest_visual_feedback で image+パスを取得できるようにする。
+// context-first で annotation メタを読み、必要時だけ image+パスを取得できるようにする。
 //
 // 使い方:
 //   node src/index.js                       # 既定 inbox=<自動検出した Downloads>/ai-inbox, port=8765

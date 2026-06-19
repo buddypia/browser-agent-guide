@@ -193,6 +193,93 @@ export function buildEntryContent(entry, { includeImage = true } = {}) {
   return content;
 }
 
+// 画像を送らず、annotation.json 由来の手がかりだけを返す軽量 context。
+// @agent: / selector / testid で特定できる時は vision を呼ばずに進められる。
+export function buildEntryContext(entry) {
+  const annotation = readAnnotation(entry.dir) || {};
+  const files = {
+    shot: entry.shot,
+    raw: pathIfExists(entry.dir, RAW),
+    annotation: pathIfExists(entry.dir, ANNOTATION),
+    memo: pathIfExists(entry.dir, MEMO),
+  };
+  const items = Array.isArray(annotation.items) ? annotation.items : [];
+  return {
+    id: entry.id,
+    entryDir: entry.dir,
+    files,
+    url: annotation.url || '',
+    title: annotation.title || '',
+    capturedAt: annotation.capturedAt || '',
+    viewport: annotation.viewport || null,
+    image: annotation.image || null,
+    annotations: items.map((it) => ({
+      n: it.n ?? null,
+      id: it.id || '',
+      note: it.note || '',
+      intent: it.intent || '',
+      shapeText: it.shapeText || '',
+      anchorLabel: it.anchorLabel || '',
+      dataAgentId: it.dataAgentId || '',
+      selector: it.selector || '',
+      testid: it.testid || '',
+      dataAsin: it.dataAsin || '',
+      href: it.href || '',
+      tag: it.tag || '',
+      role: it.role || '',
+      resolved: Boolean(it.resolved),
+      inViewport: it.inViewport !== false,
+      bboxPx: it.bboxPx || null,
+    })),
+  };
+}
+
+export function buildEntryContextText(context) {
+  const lines = [];
+  lines.push('visual_feedback_context: image omitted');
+  lines.push(`id: ${context.id}`);
+  lines.push(`entry_dir: ${context.entryDir}`);
+  lines.push(`shot_path: ${context.files.shot}`);
+  if (context.files.raw) lines.push(`raw_path: ${context.files.raw}`);
+  if (context.files.annotation) lines.push(`annotation_path: ${context.files.annotation}`);
+  if (context.files.memo) lines.push(`memo_path: ${context.files.memo}`);
+  if (context.url) lines.push(`url: ${context.url}`);
+  if (context.title) lines.push(`title: ${context.title}`);
+  if (context.capturedAt) lines.push(`captured_at: ${context.capturedAt}`);
+  if (context.viewport) lines.push(`viewport: ${context.viewport.width}x${context.viewport.height}`);
+  if (context.annotations.length) {
+    lines.push('annotations:');
+    for (const it of context.annotations) {
+      const n = it.n != null ? it.n : '?';
+      const memo = String(it.note || '').trim() || it.shapeText || '(メモなし)';
+      const intent = String(it.intent || '').trim();
+      const parts = [
+        it.dataAgentId && `agent="${it.dataAgentId}"`,
+        it.anchorLabel && `target="${it.anchorLabel}"`,
+        it.selector && `selector="${it.selector}"`,
+        it.testid && `testid="${it.testid}"`,
+        it.dataAsin && `dataAsin="${it.dataAsin}"`,
+        it.href && `href="${it.href}"`,
+        it.role && `role="${it.role}"`,
+        it.inViewport === false && 'offscreen=true',
+      ].filter(Boolean);
+      lines.push(`  ${n}. ${memo}${intent ? ` / intent: ${intent}` : ''}`);
+      if (parts.length) lines.push(`     ${parts.join(' ')}`);
+    }
+  }
+  lines.push('');
+  lines.push(
+    'まず agent / selector / testid / anchorLabel で対象を特定してください。' +
+      ' それでも曖昧、または見た目の判断が必要な時だけ get_visual_feedback / get_latest_visual_feedback で image を取得してください。'
+  );
+  return lines.join('\n');
+}
+
+function pathIfExists(dir, name) {
+  const p = join(dir, name);
+  return existsSync(p) ? p : '';
+}
+
 // image と並走させるテキスト。先頭に絶対パス、続いて指示一覧（selector/intent）。
 export function buildEntryText(entry, annotation) {
   const lines = [];
@@ -207,10 +294,11 @@ export function buildEntryText(entry, annotation) {
       const n = it.n != null ? it.n : '?';
       const memo = String(it.note || '').trim() || it.shapeText || '(メモなし)';
       const intent = String(it.intent || '').trim();
+      const agent = it.dataAgentId ? ` agent="${it.dataAgentId}"` : '';
       const where = it.anchorLabel ? ` target="${it.anchorLabel}"` : '';
       const sel = it.selector ? ` selector="${it.selector}"` : '';
       const off = it.inViewport === false ? ' (画面外)' : '';
-      lines.push(`  ${n}. ${memo}${intent ? ` / intent: ${intent}` : ''}${where}${sel}${off}`);
+      lines.push(`  ${n}. ${memo}${intent ? ` / intent: ${intent}` : ''}${agent}${where}${sel}${off}`);
     }
   }
   lines.push('');

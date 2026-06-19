@@ -4,8 +4,9 @@
 
 - **受信（WebSocket / `/ws`）**: 拡張の「お描きを画像でAIへ」が push した PNG+注釈を、
   トークン認証のうえ inbox に書き出す（原子的書き込み・0600・slug 採番はサーバ側）。
-- **公開（MCP / Streamable HTTP / `/mcp`）**: AI コーディング CLI が `get_latest_visual_feedback`
-  を呼ぶと **image(PNG) + ファイルパスの両方**が返り、モデルが注釈画像を vision で直接解釈できる。
+- **公開（MCP / Streamable HTTP / `/mcp`）**: AI コーディング CLI はまず `get_latest_visual_feedback_context`
+  で **画像なしの軽量メタ**を読み、必要な時だけ `get_latest_visual_feedback` で
+  **image(PNG) + ファイルパスの両方**を受け取って vision 解釈できる。
 
 受信と公開は**同一ポート**に同居（HTTP は `/mcp`、WebSocket upgrade は `/ws`）。
 
@@ -15,21 +16,23 @@
 
 - 拡張からの WebSocket push を受けて inbox に書き出す（トークン認証）。
 - inbox(`<slug>/shot.png` + `annotation.json` + `memo.md`)を新しい順にスキャン。
-- 3 つの MCP ツールを公開:
+- 5 つの MCP ツールを公開:
   - `bag_visual_feedback:list_visual_feedback` — 一覧（id・取得元 url/title 付き）
-  - `bag_visual_feedback:get_latest_visual_feedback` — 最新を image+パスで返す（主用途）
-  - `bag_visual_feedback:get_visual_feedback` — id 指定で取得
-- image を読めない CLI 向けに、常に `file_path` テキストを併走させる（fallback 内蔵）。
+  - `bag_visual_feedback:get_latest_visual_feedback_context` — 最新を image なしの text/structured context で返す（主用途）
+  - `bag_visual_feedback:get_visual_feedback_context` — id 指定で image なし context を返す
+  - `bag_visual_feedback:get_latest_visual_feedback` — 最新を image+パスで返す（必要時の vision）
+  - `bag_visual_feedback:get_visual_feedback` — id 指定で image+パスを返す
+- image ツールでは、image を読めない CLI 向けに `file_path` テキストを併走させる（fallback 内蔵）。
 
 ### 複数プロジェクトの絞り込み（urlContains / titleContains）
 
 どのページのキャプチャも 1 つの inbox（既定は `<ブラウザのダウンロードフォルダ>/ai-inbox`）に積まれる。
-そのため `get_latest_visual_feedback` をそのまま呼ぶと「直前に別プロジェクトで撮ったもの」が返りうる。
-`list_visual_feedback` / `get_latest_visual_feedback` は `urlContains` / `titleContains`（部分一致・大小無視）を
+そのため `get_latest_visual_feedback_context` をそのまま呼ぶと「直前に別プロジェクトで撮ったもの」が返りうる。
+`list_visual_feedback` / `get_latest_visual_feedback_context` / `get_latest_visual_feedback` は `urlContains` / `titleContains`（部分一致・大小無視）を
 受け取り、今のプロジェクトのものだけに絞れる。
 
 ```
-bag_visual_feedback:get_latest_visual_feedback({ urlContains: "example.com" })   # その URL を含む最新だけ
+bag_visual_feedback:get_latest_visual_feedback_context({ urlContains: "example.com" })   # その URL を含む最新だけ
 bag_visual_feedback:list_visual_feedback({ titleContains: "ダッシュボード" })
 ```
 
@@ -127,7 +130,8 @@ url = "http://127.0.0.1:8765/mcp"
 2. デーモンを起動（既定でその inbox を見る／受ける）。
 3. CLI に MCP を登録して、こう頼む:
    「ブラウザで指示した視覚フィードバックを見て直して」
-   → CLI が `bag_visual_feedback:get_latest_visual_feedback` を呼び、返った image を vision 解釈する。
+   → CLI が `bag_visual_feedback:get_latest_visual_feedback_context` を呼び、`@agent:` / selector / testid を先に読む。
+   → 画像が必要な時だけ `bag_visual_feedback:get_latest_visual_feedback` を呼び、返った image を vision 解釈する。
    - **(検証済)** Claude Code / Codex が MCP image を実際に vision として読む（handoff §2.2）。
 
 ## テスト

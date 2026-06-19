@@ -28,6 +28,11 @@ console.log('filter:', JSON.stringify(filter));
 const list = await client.callTool({ name: 'list_visual_feedback', arguments: { ...filter } });
 console.log('\n[list_visual_feedback]\n' + list.content.find((c) => c.type === 'text').text);
 
+const context = await client.callTool({ name: 'get_latest_visual_feedback_context', arguments: { ...filter } });
+const contextText = context.content.find((c) => c.type === 'text');
+console.log('\n[get_latest_visual_feedback_context]');
+console.log('  text:\n' + contextText.text.split('\n').map((l) => '    ' + l).join('\n'));
+
 const latest = await client.callTool({ name: 'get_latest_visual_feedback', arguments: { ...filter } });
 const img = latest.content.find((c) => c.type === 'image');
 const txt = latest.content.find((c) => c.type === 'text');
