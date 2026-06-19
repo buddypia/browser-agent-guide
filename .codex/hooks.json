@@ -1,0 +1,107 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(apply_patch|Edit|Write|MultiEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/codex/worktree-policy-guard.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Worktree Policy: checking write target"
+          }
+        ]
+      },
+      {
+        "matcher": "^(apply_patch|Edit|Write|MultiEdit|Bash|shell|run_shell|run_shell_command|exec_command)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/codex/worktree-session-owner-guard.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Worktree Owner: cross-worktree confinement"
+          }
+        ]
+      },
+      {
+        "matcher": "^(Bash|shell|run_shell|run_shell_command|exec_command)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/codex/agent-worktree-guard.mjs\" pre-tool",
+            "timeout": 5,
+            "statusMessage": "Agent Worktree Guard: checking worktree command"
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/codex/commit-guard.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Commit Guard: main protection"
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/codex/destructive-git-guard.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Destructive Git Guard: working tree protection"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(Bash|shell|run_shell|run_shell_command|exec_command)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/codex/agent-worktree-guard.mjs\" post-tool",
+            "timeout": 5,
+            "statusMessage": "Agent Worktree Guard: updating worktree ledger"
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/codex/worktree-owner-tracker.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Worktree Owner: recording session ownership sidecar"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/codex/agent-worktree-guard.mjs\" stop",
+            "timeout": 10,
+            "statusMessage": "Agent Worktree Guard: auditing worktree completion"
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/codex/worktree-shipping-guard.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Worktree Shipping: uncommitted/unmerged check"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/codex/trunk-session-warn.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Trunk Warning: worktree guidance"
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/codex/agent-worktree-guard.mjs\" session-start",
+            "timeout": 10,
+            "statusMessage": "Agent Worktree Guard: loading ledger"
+          }
+        ]
+      }
+    ]
+  }
+}
