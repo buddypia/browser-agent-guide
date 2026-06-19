@@ -69,10 +69,13 @@ test('buildEntryContext: image 無しの軽量文脈に @agent と selector を�
   assert.equal(context.id, NEWER);
   assert.equal(context.annotations[0].dataAgentId, '@agent:docs/api-list');
   assert.equal(context.annotations[0].selector, 'main h2');
+  assert.equal(context.annotations[0].targetCandidates[0].href, 'https://example.com/dp/B012345678');
   const text = buildEntryContextText(context);
   assert.ok(text.includes('visual_feedback_context: image omitted'));
   assert.ok(text.includes('agent="@agent:docs/api-list"'));
   assert.ok(text.includes('selector="main h2"'));
+  assert.ok(text.includes('candidate: source=nearest-link'));
+  assert.ok(text.includes('href="https://example.com/dp/B012345678"'));
 });
 
 test('matchesFilter: url/title の部分一致（大文字小文字無視）。未指定は素通し', () => {
@@ -101,5 +104,7 @@ test('buildEntryText: 指示一覧（番号/メモ/intent/selector）を含む',
   assert.ok(text.includes('intent: API一覧を構造化して抽出'));
   assert.ok(text.includes('agent="@agent:docs/api-list"'));
   assert.ok(text.includes('selector="main h2"'));
+  assert.ok(text.includes('dataAsin="B012345678"'));
+  assert.ok(text.includes('candidate: source=nearest-link'));
   assert.ok(text.includes('vision'), 'vision で見るよう指示');
 });

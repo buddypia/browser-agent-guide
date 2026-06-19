@@ -227,6 +227,7 @@ export function buildEntryContext(entry) {
       href: it.href || '',
       tag: it.tag || '',
       role: it.role || '',
+      targetCandidates: Array.isArray(it.targetCandidates) ? it.targetCandidates.map(normalizeTargetCandidate) : [],
       resolved: Boolean(it.resolved),
       inViewport: it.inViewport !== false,
       bboxPx: it.bboxPx || null,
@@ -265,6 +266,18 @@ export function buildEntryContextText(context) {
       ].filter(Boolean);
       lines.push(`  ${n}. ${memo}${intent ? ` / intent: ${intent}` : ''}`);
       if (parts.length) lines.push(`     ${parts.join(' ')}`);
+      if (it.targetCandidates?.length) {
+        for (const c of it.targetCandidates.slice(0, 4)) {
+          const candidateParts = [
+            c.source && `source=${c.source}`,
+            c.label && `label="${c.label}"`,
+            c.dataAsin && `dataAsin="${c.dataAsin}"`,
+            c.href && `href="${c.href}"`,
+            c.selector && `selector="${c.selector}"`,
+          ].filter(Boolean);
+          if (candidateParts.length) lines.push(`     candidate: ${candidateParts.join(' ')}`);
+        }
+      }
     }
   }
   lines.push('');
@@ -297,8 +310,20 @@ export function buildEntryText(entry, annotation) {
       const agent = it.dataAgentId ? ` agent="${it.dataAgentId}"` : '';
       const where = it.anchorLabel ? ` target="${it.anchorLabel}"` : '';
       const sel = it.selector ? ` selector="${it.selector}"` : '';
+      const asin = it.dataAsin ? ` dataAsin="${it.dataAsin}"` : '';
+      const href = it.href ? ` href="${it.href}"` : '';
       const off = it.inViewport === false ? ' (画面外)' : '';
-      lines.push(`  ${n}. ${memo}${intent ? ` / intent: ${intent}` : ''}${agent}${where}${sel}${off}`);
+      lines.push(`  ${n}. ${memo}${intent ? ` / intent: ${intent}` : ''}${agent}${where}${sel}${asin}${href}${off}`);
+      if (Array.isArray(it.targetCandidates) && it.targetCandidates.length) {
+        const c = normalizeTargetCandidate(it.targetCandidates[0]);
+        const candidateParts = [
+          c.source && `source=${c.source}`,
+          c.label && `label="${c.label}"`,
+          c.dataAsin && `dataAsin="${c.dataAsin}"`,
+          c.href && `href="${c.href}"`,
+        ].filter(Boolean);
+        if (candidateParts.length) lines.push(`     candidate: ${candidateParts.join(' ')}`);
+      }
     }
   }
   lines.push('');
@@ -307,4 +332,18 @@ export function buildEntryText(entry, annotation) {
       'image を読めない場合は file_path の PNG を開いてください。各注釈は画像中の丸数字①②…と対応します。'
   );
   return lines.join('\n');
+}
+
+function normalizeTargetCandidate(candidate = {}) {
+  return {
+    source: candidate.source || '',
+    selector: candidate.selector || '',
+    label: candidate.label || '',
+    dataAgentId: candidate.dataAgentId || '',
+    testid: candidate.testid || '',
+    dataAsin: candidate.dataAsin || '',
+    href: candidate.href || '',
+    tag: candidate.tag || '',
+    role: candidate.role || '',
+  };
 }
