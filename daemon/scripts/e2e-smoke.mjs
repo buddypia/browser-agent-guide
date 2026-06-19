@@ -62,7 +62,14 @@ try {
   const client = new Client({ name: 'e2e', version: '0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`)));
   const ctx = await client.callTool({ name: 'get_latest_visual_feedback_context', arguments: { urlContains: 'e2e' } });
-  const res = await client.callTool({ name: 'get_latest_visual_feedback', arguments: { urlContains: 'e2e' } });
+  const res = await client.callTool({
+    name: 'get_latest_visual_feedback',
+    arguments: {
+      urlContains: 'e2e',
+      contextId: ctx.structuredContent?.id,
+      imageReason: 'e2e smoke explicitly verifies the high-cost MCP image transport path',
+    },
+  });
   await client.close();
   const ctxTxt = ctx.content.find((c) => c.type === 'text');
   if (!ctxTxt?.text.includes(ack.id)) fail('context が push したエントリを返さない');

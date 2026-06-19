@@ -62,8 +62,8 @@ disallowed-tools: Bash(rm *)
 **MCP 経路 (主):** MCP ツールを**完全修飾名**で呼ぶ。`$ARGUMENTS` を `urlContains` に渡して、自分のプロジェクトのお描きだけに絞る (共有 inbox `~/Downloads/ai-inbox` は他プロジェクトの直近キャプチャを返しうる)。
 
 - まず `bag_visual_feedback:get_latest_visual_feedback_context({ urlContains: "<$ARGUMENTS>" })` — 最新のお描きを **画像なしの軽量 context** で取得。`@agent:` (`dataAgentId`) / selector / testid / anchorLabel で対象を特定できるか見る。
-- context だけで十分なら画像は読まない。曖昧、または見た目の判断が必要な時だけ `bag_visual_feedback:get_latest_visual_feedback({ urlContains })` / `bag_visual_feedback:get_visual_feedback({ id })` で **注釈付きPNG (vision) ＋ 絶対パス file_path** を取得する。
-- 候補が複数/古いものを指す時は `bag_visual_feedback:list_visual_feedback({ urlContains })` → `bag_visual_feedback:get_visual_feedback_context({ id })` → 必要時のみ `bag_visual_feedback:get_visual_feedback({ id })`
+- context だけで十分なら画像は読まない。曖昧、または見た目の判断が必要な時だけ `bag_visual_feedback:get_latest_visual_feedback({ urlContains, contextId: "<context.id>", imageReason: "<なぜvisionが必要か>" })` / `bag_visual_feedback:get_visual_feedback({ id, contextId: id, imageReason })` で **注釈付きPNG (vision) ＋ 絶対パス file_path** を取得する。
+- 候補が複数/古いものを指す時は `bag_visual_feedback:list_visual_feedback({ urlContains })` → `bag_visual_feedback:get_visual_feedback_context({ id })` → 必要時のみ `bag_visual_feedback:get_visual_feedback({ id, contextId: id, imageReason })`
 
 **FILE 経路 (救済):** preflight の `latest=` が指す `~/Downloads/ai-inbox/<slug>/` を直接読む。
 - `shot.png` (注釈入り画像 / vision で見る)、`raw.png` (注釈なし＝before)、`annotation.json` (構造化メタ)、`memo.md` (人間可読)
