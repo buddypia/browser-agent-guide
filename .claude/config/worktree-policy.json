@@ -1,0 +1,44 @@
+{
+  "version": "1.4.0",
+  "updated_at": "2026-06-04",
+  "description": "main 브랜치 직접 작업 Tier 정책 SSOT (R-CM-008 + R-CM-034 Worktree 작업 규칙). Tier 분류 기준 (2026-06-04 재정의 — split-brain 제거): Tier 1 = git-ignored 런타임 산출물 (brief2dev 파이프라인이 AI Write tool 로 main 에서 생성, PR 대상 아님) + settings.json (hook codegen 산출물 특수). Tier 3 = git-tracked 모든 자산 (worktree 강제 — PR 원자적 머지 보장). 근거: git-tracked 자산을 Tier 1 로 두면 main 직접 수정 변경이 worktree PR 과 따로 머지되는 split-brain 발생 — commit-guard 가 main commit 을 차단하므로 main 의 uncommitted 변경은 ship 시 stash 보존만 되고 PR 에 들어가지 않는다. hook 의 fs.writeFileSync 는 Edit/Write tool 이 아니라 worktree-policy-guard 검사 대상이 아니므로 governance/wisdom 자동 write 는 Tier 3 이동 후에도 계속 작동한다. 100% Worktree Paradigm — Tier 2(hook 허용) 폐지.",
+  "tiers": {
+    "tier1_main_allowed": {
+      "description": "main 직접 Edit/Write 허용. git-ignored 런타임 산출물 한정 — PR 대상이 아니므로 split-brain 무관: ① brief2dev 파이프라인 run-scoped 산출물 (.brief2dev/runs/<run_id>/** — AI 가 8 stage 실행 중 Write tool 로 생성, R-CM-026 run_scoped, git-ignored) ② scaffold 결과물 (output/<slug>/** — Stage 7 생성, R-CM-028 boundary-divergent, git-ignored) ③ 시스템 영속 상태 (.brief2dev/system/**, .brief2dev/session-history/** — hook 이 fs 로 write, git-ignored) ④ 임시 (.tmp/**, git-ignored). 추가 특수: .claude/settings.json (hook codegen 산출물 — regen-hooks-settings.mjs 가 fs.writeFileSync 로 생성하고 settings-codegen-guard 가 hooks 섹션 직접 편집을 별도 차단) + .claude/settings.local.json (git-ignored).",
+      "patterns": [
+        ".claude/settings.json",
+        ".claude/settings.local.json",
+        ".brief2dev/system/**",
+        ".brief2dev/session-history/**",
+        ".brief2dev/runs/**",
+        ".tmp/**",
+        "output/**"
+      ]
+    }
+  },
+  "escape_hatch": {
+    "branch_patterns": ["hotfix/*", "hotfix-*"],
+    "description": "긴급 수정 또는 hook/worktree 자체 망가짐 시 비상구"
+  },
+  "tier_classification_guide": {
+    "description": "신규 파일/패턴 추가 시 분류 기준. 1차 기준은 'git-tracked (PR 대상) 인가?' — git-tracked 면 Tier 3 (worktree 강제, split-brain 회피). git-ignored 런타임 산출물 + settings.json(codegen 특수) 만 Tier 1.",
+    "tier1_examples": [
+      "run-scoped 산출물 (.brief2dev/runs/<run_id>/**) — brief2dev 파이프라인 실행 데이터 (stage-output/handoff/reports). AI 가 main 에서 Write tool 로 생성. git-ignored (.gitignore: .brief2dev/runs/brief2dev-*). R-CM-026 lifecycle=run_scoped. 실행 코드 아님",
+      "scaffold 산출물 (output/<slug>/**) — Stage 7 project-scaffolder 생성 결과물. 새 프로젝트 디렉토리 자체이지 brief2dev 시스템 코드 아님. git-ignored. R-CM-028 boundary-divergent",
+      "시스템 영속 상태 (.brief2dev/system/**, .brief2dev/session-history/**) — pipeline-memory/learnings/registry 등 hook 이 fs 로 write. git-ignored (.gitignore: .brief2dev/system). R-CM-026 lifecycle=system_persistent",
+      "임시 (.tmp/**) — worktree PLAN/마커 등. git-ignored",
+      "settings.json (특수, git-tracked 예외) — hook codegen 산출물. regen-hooks-settings.mjs 가 fs.writeFileSync 로 생성 (tool 우회) + settings-codegen-guard 가 hooks 섹션 직접 편집 차단. codegen 관리라 Tier 1 유지. 단 env/permissions/statusLine 등 비-hooks 섹션은 codegen 보호 밖이라 main 직접 편집 시 split-brain 잔여 가능성 있음 — 변경 빈도 낮아 운영상 허용"
+    ],
+    "tier3_default": [
+      "git-tracked 모든 자산 — worktree 강제로 PR 원자적 머지 보장 (split-brain 회피). 아래는 2026-06-04 Tier 1→3 이동 + 기존 Tier 3 예시:",
+      "데이터 SSOT (data/registry/**, data/personas/**, data/process-contracts/**) — git-tracked JSON/Markdown. schema 검증으로 보호되나 PR 대상이므로 worktree 경유 (2026-06-04 Tier 1→3 이동: split-brain 제거)",
+      "거버넌스 메타 (.brief2dev/governance/**) — audit/retrospective. git-tracked. hook 의 fs write 는 guard 우회로 계속 작동, AI 의 Edit/Write tool 직접 작성만 worktree 강제 (2026-06-04 Tier 1→3 이동)",
+      "wisdom 데이터 (.claude/wisdom/**) — git-tracked. hook fs write 우회, AI Edit 만 worktree 강제 (2026-06-04 Tier 1→3 이동)",
+      "config/SSOT (.claude/config/** — worktree-policy.json 자신 포함) — git-tracked. corrupt 시 isPolicyUsable=false fail-open 으로 복구 가능, 정상 변경은 worktree 경유 (2026-06-04 Tier 1→3 이동)",
+      "repo 메타 (.github/**, .gitignore) — git-tracked (2026-06-04 Tier 1→3 이동)",
+      "표시 스크립트 (.claude/scripts/statusline*.mjs) — git-tracked (2026-06-04 Tier 1→3 이동)",
+      "런타임 동작 코드 (.claude/scripts/*.mjs, hook 포함), 스킬 정의 (.claude/skills/**), 데이터 스키마 (data/schemas/**), predicate 코드 (data/rules-as-code/**), 문서 (docs/**)",
+      "기타 모든 git-tracked 코드 자산"
+    ]
+  }
+}
