@@ -30,9 +30,23 @@ coverage/
 # ──────────────────────────────────────────────────────────────
 # Scratch / temporary working dirs
 # ──────────────────────────────────────────────────────────────
+.worktrees/
 .tmp/
 tmp/
 *.tmp
+.tmp/.worktree_status.md
+.tmp/worktree-guard-ledger/
+.tmp/.agent_worktree_owner.json
+
+# Worktree ecosystem shared/runtime state
+.brief2dev/system/
+.brief2dev/session-history/
+.brief2dev/run/
+.brief2dev/runs/
+
+# Codex project hooks are tracked; machine-local config is not
+.codex/*
+!.codex/hooks.json
 
 # AI 画像生成ツール (nanobanana) の出力スクラッチ — アイコンは icons/ に採用済み
 nanobanana-output/

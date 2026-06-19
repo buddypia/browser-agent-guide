@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+
+CLI = Path(__file__).with_name("agent-worktree-guard")
+SESSION = "test-session"
+PROMPT = (
+    "すべてのworktreeの作業が完了しました。PR（プルリクエスト）を作成しますか？\n"
+    "(모든 worktree 작업이 완료되었습니다. PR(풀 리퀘스트)을 생성하시겠습니까?)"
+)
+
+
+def run(args: list[str], cwd: Path, *, stdin: str | None = None, check: bool = True):
+    result = subprocess.run(
+        [str(CLI), "--session-id", SESSION, *args],
+        cwd=cwd,
+        input=stdin,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if check and result.returncode != 0:
+        raise AssertionError(f"{args} failed\nstdout={result.stdout}\nstderr={result.stderr}")
+    return result
+
+
+class AgentWorktreeGuardTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="awtg-"))
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        subprocess.run(["git", "init"], cwd=self.repo, check=True, stdout=subprocess.PIPE)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=self.repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=self.repo, check=True)
+        (self.repo / "README.md").write_text("test\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=self.repo, check=True)
+        subprocess.run(["git", "commit", "-m", "initial"], cwd=self.repo, check=True, stdout=subprocess.PIPE)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp)
+
+    def test_lifecycle_and_hooks(self) -> None:
+        wt = self.repo / ".worktrees" / "feature" / "sample"
+
+        run(["init"], self.repo)
+        self.assertTrue((self.repo / ".tmp/.worktree_status.md").exists())
+        gitignore = (self.repo / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn(".tmp/.worktree_status.md", gitignore)
+        self.assertIn(".tmp/worktree-guard-ledger/", gitignore)
+        self.assertIn(".tmp/.agent_worktree_owner.json", gitignore)
+
+        run(["add", str(wt)], self.repo)
+        ledger = json.loads((self.repo / ".tmp/worktree-guard-ledger/test-session.json").read_text())
+        self.assertEqual(len(ledger["worktrees"]), 1)
+        self.assertTrue((wt / ".tmp/.agent_worktree_owner.json").exists())
+        self.assertIn("- [ ]", (self.repo / ".tmp/.worktree_status.md").read_text(encoding="utf-8"))
+
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=wt, text=True, stdout=subprocess.PIPE, check=True).stdout.strip()
+        pre_push = run(
+            ["git-hook", "pre-push"],
+            wt,
+            stdin=f"refs/heads/feature/sample {head} refs/heads/feature/sample {'0' * 40}\n",
+            check=False,
+        )
+        self.assertNotEqual(pre_push.returncode, 0)
+        self.assertIn("incomplete Agent Worktree Guard entry", pre_push.stderr)
+
+        raw_payload = json.dumps(
+            {
+                "session_id": SESSION,
+                "cwd": str(self.repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "git worktree add ../raw"},
+            }
+        )
+        denied = run(["hook", "pre-tool"], self.repo, stdin=raw_payload)
+        self.assertIn("permissionDecision", denied.stdout)
+        self.assertIn("deny", denied.stdout)
+
+        run(["mark-done", str(wt), "--reason", "manual"], self.repo)
+        status = (self.repo / ".tmp/.worktree_status.md").read_text(encoding="utf-8")
+        self.assertIn("- [x]", status)
+
+        audit = run(["audit"], self.repo)
+        self.assertIn(PROMPT, audit.stdout)
+
+        outside = self.repo / ".worktrees" / "feature" / "outside"
+        subprocess.run(["git", "worktree", "add", str(outside), "-b", "feature/outside"], cwd=self.repo, check=True)
+        cleanup = run(["cleanup", "--confirmed"], self.repo)
+        self.assertIn("cleaned 1 worktree", cleanup.stdout)
+        self.assertFalse(wt.exists())
+        self.assertTrue(outside.exists())
+        subprocess.run(["git", "worktree", "remove", str(outside), "--force"], cwd=self.repo, check=True)
+
+
+if __name__ == "__main__":
+    unittest.main()
