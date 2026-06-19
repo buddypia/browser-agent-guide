@@ -6,7 +6,8 @@
   トークン認証のうえ inbox に書き出す（原子的書き込み・0600・slug 採番はサーバ側）。
 - **公開（MCP / Streamable HTTP / `/mcp`）**: AI コーディング CLI はまず `get_latest_visual_feedback_context`
   で **画像なしの軽量メタ**を読み、必要な時だけ `get_latest_visual_feedback` で
-  **image(PNG) + ファイルパスの両方**を受け取って vision 解釈できる。
+  **image(PNG) + ファイルパスの両方**を受け取って vision 解釈できる。image ツールは
+  context で確認した `contextId` と `imageReason` がないと画像を返さない。
 
 受信と公開は**同一ポート**に同居（HTTP は `/mcp`、WebSocket upgrade は `/ws`）。
 
@@ -20,9 +21,11 @@
   - `bag_visual_feedback:list_visual_feedback` — 一覧（id・取得元 url/title 付き）
   - `bag_visual_feedback:get_latest_visual_feedback_context` — 最新を image なしの text/structured context で返す（主用途）
   - `bag_visual_feedback:get_visual_feedback_context` — id 指定で image なし context を返す
-  - `bag_visual_feedback:get_latest_visual_feedback` — 最新を image+パスで返す（必要時の vision）
-  - `bag_visual_feedback:get_visual_feedback` — id 指定で image+パスを返す
+  - `bag_visual_feedback:get_latest_visual_feedback` — context 確認後のみ最新を image+パスで返す（必要時の vision）
+  - `bag_visual_feedback:get_visual_feedback` — context 確認後のみ id 指定で image+パスを返す
 - image ツールでは、image を読めない CLI 向けに `file_path` テキストを併走させる（fallback 内蔵）。
+- context 出力は `dataAgentId` (`@agent:`) を最優先にし、`selector` / `testid` / `anchorLabel`
+  で足りる時は image を取得しない。
 
 ### 複数プロジェクトの絞り込み（urlContains / titleContains）
 
@@ -39,7 +42,8 @@ bag_visual_feedback:list_visual_feedback({ titleContains: "ダッシュボード
 条件に一致しない場合は image を返さず案内テキストを返す（誤って別プロジェクトの画像を掴ませない）。
 CLI への運用ヒント: 作業中ページの URL 断片を `urlContains` に渡すよう AGENTS.md / CLAUDE.md に書いておくとよい。
 
-> 動作確認: `node scripts/probe.mjs ~/Downloads/ai-inbox --url <部分一致>`
+> 動作確認: `node scripts/probe.mjs ~/Downloads/ai-inbox --url <部分一致>` は context-only。
+> image 経路を明示的に試す時だけ `--image` を足す。
 
 ## 起動
 
@@ -131,7 +135,8 @@ url = "http://127.0.0.1:8765/mcp"
 3. CLI に MCP を登録して、こう頼む:
    「ブラウザで指示した視覚フィードバックを見て直して」
    → CLI が `bag_visual_feedback:get_latest_visual_feedback_context` を呼び、`@agent:` / selector / testid を先に読む。
-   → 画像が必要な時だけ `bag_visual_feedback:get_latest_visual_feedback` を呼び、返った image を vision 解釈する。
+   → 画像が必要な時だけ、context の `id` を `contextId` に入れ、理由を `imageReason` に書いて
+   `bag_visual_feedback:get_latest_visual_feedback` を呼び、返った image を vision 解釈する。
    - **(検証済)** Claude Code / Codex が MCP image を実際に vision として読む（handoff §2.2）。
 
 ## テスト
@@ -139,7 +144,8 @@ url = "http://127.0.0.1:8765/mcp"
 ```bash
 npm test                      # inbox 単体 + MCP(Streamable HTTP) 統合 + WS 受信 統合
 node scripts/e2e-smoke.mjs    # 実バイナリで「WS push → 書き込み → MCP 取得」を通しで確認
-node scripts/probe.mjs ~/Downloads/ai-inbox [--url <部分一致>]   # 手元 inbox の MCP 出力を確認
+node scripts/probe.mjs ~/Downloads/ai-inbox [--url <部分一致>]   # 手元 inbox の context 出力を確認
+node scripts/probe.mjs ~/Downloads/ai-inbox --image             # 必要時のみ image 経路も確認
 ```
 
 ## セキュリティ
