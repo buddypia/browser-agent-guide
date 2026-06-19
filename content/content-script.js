@@ -1817,8 +1817,8 @@
   let drawToolbar = null;
   // 永続レイヤ
   let drawLayer = null; // svg(pointer-events:none)。確定済みお描きとコネクタ線を描く
-  let drawPinHost = null; // AIメモカード/畳んだバッジのホスト(DOMオーバーレイ)
-  let drawRegistry = []; // {anno, el, elems:[{node,shape}], memo, connector, collapsed, bbox} 再配置対象
+  let drawPinHost = null; // AIメモカード/番号バッジのホスト(DOMオーバーレイ)
+  let drawRegistry = []; // {anno, el, elems:[{node,shape}], memo, connector, bbox} 再配置対象
   let drawRepositionSetup = false;
   let drawRaf = 0;
 
@@ -2399,7 +2399,7 @@
     connector.style.setProperty('--bag-pair', color);
     drawLayer.appendChild(connector);
 
-    // 図形のとなりに置く通し番号バッジ(色=図形色)。畳んでも対象を指し示し続ける。
+    // 図形のとなりに置く通し番号バッジ(色=図形色)。メモと対象を対応づける。
     const numEl = document.createElement('div');
     numEl.className = 'bag-anno-num';
     numEl.setAttribute(ATTR.anno, a.id);
@@ -2410,10 +2410,6 @@
 
     const memo = buildMemoCard(a);
     memo.style.setProperty('--bag-pair', color);
-    if (memo._bagBadge) {
-      memo._bagBadge.textContent = String(num);
-      memo._bagBadge.style.setProperty('--bag-pair', color);
-    }
 
     const entry = {
       anno: a,
@@ -2423,7 +2419,6 @@
       memo,
       connector,
       numEl,
-      collapsed: false,
       bbox: shapesBBoxFrac(a.shapes),
     };
     drawRegistry.push(entry);
@@ -2439,7 +2434,7 @@
   }
 
   // お描きの隣に置く編集可能なAIメモカードを作る。
-  // 構成: ヘッダ(ラベル＋畳む)、編集テキスト、フッタ(forAIトグル＋削除)。
+  // 構成: ヘッダ(番号＋ラベル)、編集テキスト、フッタ(forAIトグル＋削除)。
   function buildMemoCard(a) {
     const card = document.createElement('div');
     card.className = 'bag-memo';
@@ -2456,13 +2451,7 @@
     const tag = document.createElement('span');
     tag.className = 'bag-memo-tag';
     tag.textContent = t('cs.memo.tag');
-    const collapseBtn = document.createElement('button');
-    collapseBtn.type = 'button';
-    collapseBtn.className = 'bag-memo-collapse';
-    collapseBtn.title = t('cs.memo.collapseTitle');
-    collapseBtn.setAttribute('aria-label', t('cs.memo.collapseAria'));
-    collapseBtn.textContent = '–';
-    head.append(numChip, tag, collapseBtn);
+    head.append(numChip, tag);
 
     const ta = document.createElement('textarea');
     ta.className = 'bag-memo-text';
@@ -2558,29 +2547,8 @@
       e.preventDefault();
       deleteAnnotation(a.id);
     });
-    collapseBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      toggleMemoCollapse(a.id);
-    });
-    // 畳んだバッジ(密集時のクリック/ホバー展開用)。
-    const badge = document.createElement('button');
-    badge.type = 'button';
-    badge.className = 'bag-memo-badge';
-    badge.setAttribute(ATTR.anno, a.id);
-    badge.setAttribute(ATTR.ui, '1');
-    badge.title = a.note || t('cs.memo.tag');
-    badge.setAttribute('aria-label', t('cs.memo.expandAria'));
-    badge.textContent = 'AI';
-    badge.hidden = true;
-    badge.addEventListener('click', (e) => {
-      e.preventDefault();
-      toggleMemoCollapse(a.id);
-    });
-
     if (!cb.checked) card.classList.add('bag-memo--off');
-    drawPinHost.append(card, badge);
-    // バッジは card と対で扱えるよう参照を持たせる。
-    card._bagBadge = badge;
+    drawPinHost.append(card);
     setupMemoDrag(card, head, a); // ヘッダをハンドルにドラッグ移動できるようにする
     return card;
   }
@@ -2591,7 +2559,6 @@
     let drag = null;
     head.addEventListener('pointerdown', (ev) => {
       if (ev.button != null && ev.button !== 0) return;
-      if (ev.target.closest('.bag-memo-collapse')) return; // 畳むボタンは自身の操作なのでドラッグ開始しない
       const entry = drawRegistry.find((x) => x.anno?.id === a.id);
       if (!entry) return;
       const rect = card.getBoundingClientRect();
@@ -2651,7 +2618,6 @@
     head.addEventListener('pointercancel', end);
     // ヘッダのダブルクリックで「覚えた位置」を破棄し、自動配置へ戻す。
     head.addEventListener('dblclick', (ev) => {
-      if (ev.target.closest('.bag-memo-collapse')) return;
       if (!a.memoPos) return;
       ev.preventDefault();
       const entry = drawRegistry.find((x) => x.anno?.id === a.id);
@@ -2712,22 +2678,6 @@
       e.numEl?.classList.toggle('bag-anno-num--active', active);
       e.numEl?.classList.toggle('bag-anno-num--dim', dim);
     }
-  }
-
-  // メモの畳み/展開を切り替える(密集回避)。再描画はせず表示だけ切り替える。
-  function toggleMemoCollapse(id) {
-    const entry = drawRegistry.find((e) => e.anno?.id === id);
-    if (!entry || !entry.memo) return;
-    entry.collapsed = !entry.collapsed;
-    applyMemoCollapsed(entry);
-    repositionDrawings(); // 畳み/展開で空きが変わるため全メモを再パッキング
-  }
-
-  function applyMemoCollapsed(entry) {
-    const badge = entry.memo?._bagBadge;
-    if (!entry.memo) return;
-    entry.memo.hidden = entry.collapsed;
-    if (badge) badge.hidden = !entry.collapsed;
   }
 
   function shapesBBoxFrac(shapes) {
@@ -2798,14 +2748,9 @@
       B: fy(entry.bbox.maxY),
     };
     if (entry.numEl) {
-      // 畳んでいる時は畳みバッジ(番号入り)が同役を果たすので、図形角の番号バッジは隠す。
-      if (entry.collapsed) {
-        entry.numEl.style.display = 'none';
-      } else {
-        entry.numEl.style.display = '';
-        entry.numEl.style.left = `${entry._box.L}px`;
-        entry.numEl.style.top = `${entry._box.T}px`;
-      }
+      entry.numEl.style.display = '';
+      entry.numEl.style.left = `${entry._box.L}px`;
+      entry.numEl.style.top = `${entry._box.T}px`;
     }
   }
 
@@ -2820,11 +2765,7 @@
     // ドラッグ操作中(_dragging)のメモは触らない: 手で動かしている最中に自動配置で位置を奪わない。
     const live = drawRegistry.filter((e) => e.memo && e.el?.isConnected && e._box && !e._dragging);
 
-    // 畳んだメモはバッジだけ図形の右上に置き、パッキング対象から外す。
-    for (const e of live) {
-      if (e.collapsed) positionCollapsedBadge(e);
-    }
-    const open = live.filter((e) => !e.collapsed);
+    const open = live;
     if (!open.length) return;
     // 視覚順(上→下)に並べると番号順に読み下せ、パッキングも安定する。
     open.sort((a, b) => (a._box.T + a._box.B) / 2 - (b._box.T + b._box.B) / 2);
@@ -2958,20 +2899,6 @@
     const side = manualSide(box, left, top, mw, mh);
     memo.dataset.side = side;
     drawMemoConnector(e, box, left, top, mw, mh, side, (box.T + box.B) / 2);
-  }
-
-  // 畳んだメモのバッジを図形の右上(無理なら左上)に置き、引き出し線を隠す。
-  function positionCollapsedBadge(entry) {
-    const box = entry._box;
-    const badge = entry.memo?._bagBadge;
-    if (badge && box) {
-      const bw = badge.offsetWidth || 22;
-      let bx = box.R + 6;
-      if (bx + bw > window.innerWidth - 4) bx = box.L - bw - 6;
-      badge.style.left = `${clamp(bx, 4, window.innerWidth - bw - 4)}px`;
-      badge.style.top = `${clamp(box.T - 6, 4, window.innerHeight - 30)}px`;
-    }
-    if (entry.connector) entry.connector.style.display = 'none';
   }
 
   function clamp(v, lo, hi) {
@@ -3290,15 +3217,21 @@
         inViewport = bboxPx.maxX > 0 && bboxPx.minX < vw && bboxPx.maxY > 0 && bboxPx.minY < vh;
       }
       const firstColor = (a.shapes && a.shapes[0] && a.shapes[0].color) || '#ef4444';
+      const anchor = a.anchor || {};
       items.push({
         id: a.id,
         color: firstColor,
         note: a.note || '',
         intent: a.intent || '',
         shapeText: describeShapes(a.shapes),
-        anchorLabel: target ? truncate(labelOf(target), 60) : truncate(a.anchor?.text || a.anchor?.tag || '', 60),
-        selector: a.anchor?.selector || '',
-        testid: a.anchor?.testid || '',
+        anchorLabel: target ? truncate(labelOf(target), 60) : truncate(anchor.text || anchor.tag || '', 60),
+        selector: anchor.selector || '',
+        dataAgentId: target?.getAttribute?.('data-agent-id') || anchor.dataAgentId || '',
+        testid: anchor.testid || '',
+        dataAsin: target?.getAttribute?.('data-asin') || anchor.dataAsin || '',
+        href: target ? normalizedLinkHref(target) : anchor.href || '',
+        tag: target?.tagName?.toLowerCase?.() || anchor.tag || '',
+        role: target ? roleOf(target) : anchor.role || '',
         resolved,
         inViewport,
         shapesPx,
@@ -3561,8 +3494,6 @@
             // お描きはページ上のメモで編集する。メモが表示中ならそこへスクロール＋フォーカス。
             const onPage = drawPinHost?.querySelector(`.bag-memo[${ATTR.anno}="${cssEscape(msg.id)}"]`);
             if (onPage) {
-              const entry = drawRegistry.find((e) => e.anno?.id === msg.id);
-              if (entry?.collapsed) toggleMemoCollapse(msg.id);
               const target = a.anchor ? resolveAnchor(a.anchor) : null;
               target?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
               focusMemo(msg.id);

@@ -21,7 +21,7 @@
       "type": "callout",
       "variant": "tldr",
       "title": "一言でいうと",
-      "body": "MCP daemon は、Chrome拡張が作った注釈付きスクリーンショットをローカルに受け取り、AI CLI が MCP ツールとして取得できるようにする橋渡しです。なくてもファイル保存で使えますが、あると「画像を探して貼る」作業が消え、AI が最新のお描きを image + file_path として自動取得できます。"
+      "body": "MCP daemon は、Chrome拡張が作った注釈付きスクリーンショットをローカルに受け取り、AI CLI が MCP ツールとして取得できるようにする橋渡しです。なくてもファイル保存で使えますが、あると「画像を探して貼る」作業が消え、AI が最新のお描きをまず軽量 context として、必要時だけ image + file_path として自動取得できます。"
     },
     {
       "type": "diagram",
@@ -39,8 +39,8 @@
         { "id": "ws", "label": "WebSocket /ws", "sub": "token付きで push", "zone": "Local daemon", "group": 2 },
         { "id": "daemon", "label": "MCP daemon", "sub": "受信・保存・公開を1プロセスで担当", "zone": "Local daemon", "group": 2 },
         { "id": "inbox", "label": "inbox", "sub": "shot.png / raw.png / annotation.json / memo.md", "zone": "Local daemon", "group": 2 },
-        { "id": "mcp", "label": "MCP /mcp", "sub": "bag_visual_feedback:get_latest_visual_feedback", "zone": "AI CLI / Workspace", "group": 3 },
-        { "id": "ai", "label": "AIコーディングCLI", "sub": "画像を vision で読み、対象を特定", "zone": "AI CLI / Workspace", "group": 3 },
+        { "id": "mcp", "label": "MCP /mcp", "sub": "bag_visual_feedback:get_latest_visual_feedback_context", "zone": "AI CLI / Workspace", "group": 3 },
+        { "id": "ai", "label": "AIコーディングCLI", "sub": "@agent: / selector を先に読む", "zone": "AI CLI / Workspace", "group": 3 },
         { "id": "repo", "label": "コード・ブラウザ検証", "sub": "修正して before / after を確認", "zone": "AI CLI / Workspace", "group": 3 }
       ],
       "edges": [
@@ -50,7 +50,7 @@
         { "from": "daemon", "to": "inbox", "label": "原子的に保存" },
         { "from": "ai", "to": "mcp", "label": "MCP tool call" },
         { "from": "mcp", "to": "daemon", "label": "Streamable HTTP" },
-        { "from": "daemon", "to": "ai", "label": "image + file_path" },
+        { "from": "daemon", "to": "ai", "label": "context → 必要時 image" },
         { "from": "ai", "to": "repo", "label": "実装・検証" }
       ]
     },
@@ -80,8 +80,8 @@
         },
         {
           "icon": "code",
-          "title": "画像とパスを両方返す",
-          "body": "vision 対応 CLI には image を渡し、画像を直接読めない環境には file_path を渡します。この二重返却がフォールバックになります。",
+          "title": "まず軽量 context を返す",
+          "body": "@agent: / selector / testid / anchorLabel で対象特定できる時は image を送らず、必要時だけ vision 対応 CLI に image + file_path を渡します。",
           "tag": "互換性"
         }
       ]
@@ -141,12 +141,12 @@
           "n": 5,
           "title": "AI CLI が MCP ツールで読む",
           "event": "MCP /mcp",
-          "fn": "bag_visual_feedback:get_latest_visual_feedback({ urlContains })",
-          "desc": "daemon は新しい順に inbox をスキャンし、条件に合う最新エントリを image(PNG) + file_path テキストとして返す。",
+          "fn": "bag_visual_feedback:get_latest_visual_feedback_context({ urlContains })",
+          "desc": "daemon は新しい順に inbox をスキャンし、条件に合う最新エントリを image なしの text/structured context として返す。",
           "level": "critical",
           "branches": [
-            { "label": "画像あり", "desc": "モデルが注釈画像を vision で読む", "kind": "go" },
-            { "label": "画像不可", "desc": "file_path から PNG と annotation.json を読む", "kind": "warn" }
+            { "label": "@agentあり", "desc": "画像なしで対象を特定する", "kind": "go" },
+            { "label": "曖昧", "desc": "必要時だけ image + file_path を取得する", "kind": "warn" }
           ]
         },
         {
@@ -194,7 +194,8 @@
           ],
           "pros": [
             "拡張から WebSocket で直接 push できる",
-            "AI CLI が bag_visual_feedback:get_latest_visual_feedback で image + file_path を取得できる",
+            "AI CLI が bag_visual_feedback:get_latest_visual_feedback_context で軽量メタを先に取得できる",
+            "必要な時だけ image + file_path を取得できる",
             "urlContains / titleContains で別案件のキャプチャを避けられる"
           ],
           "cons": [
@@ -216,8 +217,10 @@
         { "k": "Health check", "v": "/healthz", "note": "daemon が読んでいる現在の inboxDir を返す。保存先確認の権威。" },
         { "k": "保存ファイル", "v": "shot / raw / json / memo", "note": "注釈入り画像、元画像、構造化メタ、読みやすいメモを同じ slug 配下へ保存。" },
         { "k": "MCP tool", "v": "bag_visual_feedback:list_visual_feedback", "note": "候補を新しい順に一覧。url/title フィルタ対応。" },
-        { "k": "MCP tool", "v": "bag_visual_feedback:get_latest_visual_feedback", "note": "主用途。最新の一致エントリを image + file_path で返す。" },
-        { "k": "MCP tool", "v": "bag_visual_feedback:get_visual_feedback", "note": "id 指定で特定の注釈を取得する。" },
+        { "k": "MCP tool", "v": "bag_visual_feedback:get_latest_visual_feedback_context", "note": "主用途。最新の一致エントリを image なし context で返す。" },
+        { "k": "MCP tool", "v": "bag_visual_feedback:get_visual_feedback_context", "note": "id 指定で特定の注釈 context を取得する。" },
+        { "k": "MCP tool", "v": "bag_visual_feedback:get_latest_visual_feedback", "note": "必要時のみ image + file_path で返す。" },
+        { "k": "MCP tool", "v": "bag_visual_feedback:get_visual_feedback", "note": "id 指定で image + file_path を取得する。" },
         { "k": "保存先追従", "v": "downloadsDir handshake", "note": "拡張が実ダウンロード先を報告すると、daemon が inbox を <downloadsDir>/ai-inbox に合わせる。" }
       ]
     },

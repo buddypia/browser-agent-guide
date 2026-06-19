@@ -3,7 +3,17 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
-import { listEntries, findEntry, buildEntryContent, buildEntryText, readAnnotation, matchesFilter, queryEntries } from '../src/inbox.js';
+import {
+  listEntries,
+  findEntry,
+  buildEntryContent,
+  buildEntryContext,
+  buildEntryContextText,
+  buildEntryText,
+  readAnnotation,
+  matchesFilter,
+  queryEntries,
+} from '../src/inbox.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const INBOX = resolve(here, 'fixtures/inbox');
@@ -53,6 +63,18 @@ test('buildEntryContent: includeImage=false なら text のみ', () => {
   assert.equal(content[0].type, 'text');
 });
 
+test('buildEntryContext: image 無しの軽量文脈に @agent と selector を含む', () => {
+  const entry = findEntry(INBOX, NEWER);
+  const context = buildEntryContext(entry);
+  assert.equal(context.id, NEWER);
+  assert.equal(context.annotations[0].dataAgentId, '@agent:docs/api-list');
+  assert.equal(context.annotations[0].selector, 'main h2');
+  const text = buildEntryContextText(context);
+  assert.ok(text.includes('visual_feedback_context: image omitted'));
+  assert.ok(text.includes('agent="@agent:docs/api-list"'));
+  assert.ok(text.includes('selector="main h2"'));
+});
+
 test('matchesFilter: url/title の部分一致（大文字小文字無視）。未指定は素通し', () => {
   const ann = { url: 'https://example.com/API', title: 'API ダッシュボード' };
   assert.equal(matchesFilter(ann, {}), true);
@@ -77,6 +99,7 @@ test('buildEntryText: 指示一覧（番号/メモ/intent/selector）を含む',
   const text = buildEntryText(entry, readAnnotation(entry.dir));
   assert.ok(text.includes('1. ここをAIにマークダウンで出力'));
   assert.ok(text.includes('intent: API一覧を構造化して抽出'));
+  assert.ok(text.includes('agent="@agent:docs/api-list"'));
   assert.ok(text.includes('selector="main h2"'));
   assert.ok(text.includes('vision'), 'vision で見るよう指示');
 });

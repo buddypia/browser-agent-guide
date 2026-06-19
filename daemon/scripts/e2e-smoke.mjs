@@ -58,16 +58,20 @@ try {
   if (ack.type !== 'ack') fail(`ack ではない: ${JSON.stringify(ack)}`);
   console.log('OK push → ack id =', ack.id);
 
-  // 2) CLI役: MCP get_latest
+  // 2) CLI役: MCP context-first → 必要時 image get_latest
   const client = new Client({ name: 'e2e', version: '0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`)));
+  const ctx = await client.callTool({ name: 'get_latest_visual_feedback_context', arguments: { urlContains: 'e2e' } });
   const res = await client.callTool({ name: 'get_latest_visual_feedback', arguments: { urlContains: 'e2e' } });
   await client.close();
+  const ctxTxt = ctx.content.find((c) => c.type === 'text');
+  if (!ctxTxt?.text.includes(ack.id)) fail('context が push したエントリを返さない');
   const img = res.content.find((c) => c.type === 'image');
   const txt = res.content.find((c) => c.type === 'text');
   if (!img) fail('MCP が image を返さない');
   if (!txt.text.includes(ack.id)) fail('get_latest が push したエントリを返さない');
-  console.log('OK MCP get_latest → image', Buffer.from(img.data, 'base64').length, 'bytes, path に', ack.id, 'を含む');
+  console.log('OK MCP context-first → context と image の両方が path に', ack.id, 'を含む');
+  console.log('OK MCP get_latest → image', Buffer.from(img.data, 'base64').length, 'bytes');
 
   console.log('\nE2E OK: 拡張(WS push) → デーモン → CLI(MCP) が一連で通った');
   proc.kill();

@@ -3,25 +3,27 @@
 お描き (visual feedback) を Claude に届ける常駐 daemon (`bag-visual-feedback`) と、その MCP ツールの使い方。
 ライブの一次情報: `daemon/src/server.js`, `daemon/src/inbox.js`, `daemon/README.md`。
 
-## MCP ツール (3つ) — 完全修飾名で呼ぶ
+## MCP ツール (5つ) — 完全修飾名で呼ぶ
 
 エンドポイント `http://127.0.0.1:8765/mcp`。Claude Code 上では `bag_visual_feedback:` 接頭辞付きで呼ぶ。
-いずれも **注釈付きPNG を vision content として返し、かつ絶対 `file_path` テキストを必ず併走**させる
-(画像を読めない CLI 向けの fallback が内蔵されている＝この二重返却が設計上の不変条件)。
+通常は **画像なし context** から始める。`@agent:` / selector / testid / anchorLabel で対象を特定できる時は vision を使わない。
+image ツールは **注釈付きPNG を vision content として返し、かつ絶対 `file_path` テキストを必ず併走**させる。
 
 | ツール | 入力 | 返り値 | 用途 |
 |---|---|---|---|
-| `bag_visual_feedback:get_latest_visual_feedback` | `{ urlContains?, titleContains? }` | image(PNG) + text(file_path, url, title, capturedAt, annotations) | **主用途**。最新のお描きを取得 |
 | `bag_visual_feedback:list_visual_feedback` | `{ limit?, urlContains?, titleContains? }` | text 一覧 (id・url・title・時刻) | 候補を新しい順に列挙 |
-| `bag_visual_feedback:get_visual_feedback` | `{ id }` | image + text | id 指定で取得 |
+| `bag_visual_feedback:get_latest_visual_feedback_context` | `{ urlContains?, titleContains? }` | text + structuredContent (imageなし) | **主用途**。最新のお描きメタを軽量取得 |
+| `bag_visual_feedback:get_visual_feedback_context` | `{ id }` | text + structuredContent (imageなし) | id 指定でメタを軽量取得 |
+| `bag_visual_feedback:get_latest_visual_feedback` | `{ urlContains?, titleContains? }` | image(PNG) + text(file_path, url, title, capturedAt, annotations) | 必要時のみ vision 用に取得 |
+| `bag_visual_feedback:get_visual_feedback` | `{ id }` | image + text | id 指定で vision 用に取得 |
 
 ### 共有 inbox のスコープ (重要)
 
-`~/Downloads/ai-inbox` は**全プロジェクト共有**。素で `bag_visual_feedback:get_latest_visual_feedback` を呼ぶと別プロジェクトの直近キャプチャが返りうる。
+`~/Downloads/ai-inbox` は**全プロジェクト共有**。素で `bag_visual_feedback:get_latest_visual_feedback_context` を呼ぶと別プロジェクトの直近キャプチャが返りうる。
 作業中ページの URL 断片を `urlContains` に渡して絞る (部分一致・大小無視)。
 
 ```
-bag_visual_feedback:get_latest_visual_feedback({ urlContains: "example.com" })
+bag_visual_feedback:get_latest_visual_feedback_context({ urlContains: "example.com" })
 bag_visual_feedback:list_visual_feedback({ titleContains: "ダッシュボード" })
 ```
 条件に一致しないと **image を返さず案内テキスト**を返す (誤って別プロジェクトの画像を掴ませない仕様)。

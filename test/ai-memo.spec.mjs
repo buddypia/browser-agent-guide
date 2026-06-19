@@ -207,6 +207,21 @@ test.describe('お描き連動のAIメモ', () => {
     expect(summary.forAI).toBe(false);
   });
 
+  test('PREPARE_CAPTURE が data-agent-id を軽量文脈用メタとして含める', async ({ page }) => {
+    await page.locator('#target').evaluate((el) => {
+      el.setAttribute('data-agent-id', '@agent:test/cta');
+    });
+    await drawRectAndFinish(page, 'このCTAを調整');
+
+    const vf = await page.evaluate(
+      () => new Promise((r) => window.__bagListener({ type: 'PREPARE_CAPTURE' }, {}, r))
+    );
+    expect(vf.items[0].dataAgentId).toBe('@agent:test/cta');
+    expect(vf.items[0].selector).toBe('[data-agent-id="@agent:test/cta"]');
+    expect(vf.items[0].role).toBe('button');
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'FINISH_CAPTURE' }, {}, r)));
+  });
+
   test('削除でメモと図形が消え、保存からも除かれる', async ({ page }) => {
     await drawRectAndFinish(page);
     await expect(page.locator('.bag-memo')).toHaveCount(1);
@@ -237,14 +252,12 @@ test.describe('お描き連動のAIメモ', () => {
     expect(remaining).toBe(0);
   });
 
-  test('畳むとバッジになり、再度クリックで展開する(密集回避)', async ({ page }) => {
+  test('AIメモ生成時に折り畳み用の余分なボタンを作らない', async ({ page }) => {
     await drawRectAndFinish(page);
     const memo = page.locator('.bag-memo');
-    await memo.locator('.bag-memo-collapse').click();
-    await expect(memo).toBeHidden();
-    await expect(page.locator('.bag-memo-badge')).toBeVisible();
-    await page.locator('.bag-memo-badge').click();
     await expect(memo).toBeVisible();
+    await expect(page.locator('.bag-memo-collapse')).toHaveCount(0);
+    await expect(page.locator('.bag-memo-badge')).toHaveCount(0);
   });
 
   test('forAI未設定の旧レコードもメモとして復元され既定でAIに渡る(後方互換)', async ({ page }) => {
@@ -564,7 +577,7 @@ test.describe('お描き連動のAIメモ', () => {
     await page.mouse.move(960, 740); // 生成直後の境界イベント対策で十分離す
 
     const before = await memo.boundingBox();
-    // 畳むボタン(ヘッダ右端)を避け、'AIメモ'タグを掴んでドラッグする。
+    // 'AIメモ'タグを掴んでドラッグする。
     const tag = memo.locator('.bag-memo-tag');
     const tb = await tag.boundingBox();
     const sx = tb.x + tb.width / 2;

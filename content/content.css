@@ -418,19 +418,6 @@ html.bag-drawing .bag-draw-overlay {
   border-radius: 999px;
   padding: 2px 8px;
 }
-.bag-memo-collapse {
-  border: none;
-  background: transparent;
-  color: var(--bag-muted);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 2px;
-  margin-left: auto;
-}
-.bag-memo-collapse:hover {
-  color: var(--bag-text);
-}
 .bag-memo-text {
   width: 100%;
   box-sizing: border-box;
@@ -507,28 +494,6 @@ html.bag-drawing .bag-draw-overlay {
 .bag-memo-del:hover {
   border-color: #dc2626;
   color: #dc2626;
-}
-
-/* 密集時に畳んだメモのバッジ(クリック/ホバーで展開)。色=お描きの色・文字=通し番号 */
-.bag-memo-badge {
-  position: fixed;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font: 800 12px/1 system-ui, -apple-system, sans-serif;
-  color: #fff;
-  background: var(--bag-pair, var(--bag-accent));
-  border: 2px solid #fff;
-  border-radius: 50%;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
-  cursor: pointer;
-  pointer-events: auto;
-}
-.bag-memo-badge:hover {
-  filter: brightness(0.92);
 }
 
 /* 図形のとなりに置く通し番号バッジ(色=お描きの色)。

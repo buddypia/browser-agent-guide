@@ -54,8 +54,9 @@
 ## Phase 1（消費側 MCP）— 手で渡さず CLI に自動取得させる
 
 `../daemon/` に **常駐デーモン**を実装済み。これを起動して CLI に MCP 登録すると、
-`shot.png` のパスを手で貼らずとも、CLI が `get_latest_visual_feedback` を呼んで
-最新のお描き注釈を **image+パス**で取得する（既定 inbox は MVP の保存先 `~/Downloads/ai-inbox`）。
+`shot.png` のパスを手で貼らずとも、CLI が `get_latest_visual_feedback_context` で
+最新のお描き注釈メタを **画像なし**で先に取得する。見た目の判断が必要な時だけ
+`get_latest_visual_feedback` で **image+パス**を取得する（既定 inbox は MVP の保存先 `~/Downloads/ai-inbox`）。
 
 ```bash
 cd daemon && npm install && npm start   # http://127.0.0.1:8765/mcp
