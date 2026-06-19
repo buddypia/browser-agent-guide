@@ -70,8 +70,13 @@ test('buildEntryContext: image 無しの軽量文脈に @agent と selector を�
   assert.equal(context.annotations[0].dataAgentId, '@agent:docs/api-list');
   assert.equal(context.annotations[0].selector, 'main h2');
   assert.equal(context.annotations[0].targetCandidates[0].href, 'https://example.com/dp/B012345678');
+  assert.equal(context.agentLookup.priority[0], 'dataAgentId');
+  assert.equal(context.agentLookup.imageGate.contextId, NEWER);
   const text = buildEntryContextText(context);
   assert.ok(text.includes('visual_feedback_context: image omitted'));
+  assert.ok(text.includes('agent_lookup:'));
+  assert.ok(text.includes("source_search: rg -n 'data-agent-id=\"@agent:'"));
+  assert.ok(text.includes(`image_gate: pass contextId="${NEWER}"`));
   assert.ok(text.includes('agent="@agent:docs/api-list"'));
   assert.ok(text.includes('selector="main h2"'));
   assert.ok(text.includes('candidate: source=nearest-link'));

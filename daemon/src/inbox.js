@@ -232,6 +232,14 @@ export function buildEntryContext(entry) {
       inViewport: it.inViewport !== false,
       bboxPx: it.bboxPx || null,
     })),
+    agentLookup: {
+      priority: ['dataAgentId', 'selector', 'testid', 'anchorLabel', 'targetCandidates', 'image'],
+      sourceSearch: 'rg -n \'data-agent-id="@agent:\' -g \'!*.md\' -g \'!.claude\'',
+      imageGate: {
+        requiredArgs: ['contextId', 'imageReason'],
+        contextId: entry.id,
+      },
+    },
   };
 }
 
@@ -248,6 +256,10 @@ export function buildEntryContextText(context) {
   if (context.title) lines.push(`title: ${context.title}`);
   if (context.capturedAt) lines.push(`captured_at: ${context.capturedAt}`);
   if (context.viewport) lines.push(`viewport: ${context.viewport.width}x${context.viewport.height}`);
+  lines.push('agent_lookup:');
+  lines.push('  priority: dataAgentId -> selector -> testid -> anchorLabel -> targetCandidates -> image');
+  lines.push('  source_search: rg -n \'data-agent-id="@agent:\' -g \'!*.md\' -g \'!.claude\'');
+  lines.push(`  image_gate: pass contextId="${context.id}" and imageReason only when vision is truly needed`);
   if (context.annotations.length) {
     lines.push('annotations:');
     for (const it of context.annotations) {
@@ -282,8 +294,10 @@ export function buildEntryContextText(context) {
   }
   lines.push('');
   lines.push(
-    'まず agent / selector / testid / anchorLabel で対象を特定してください。' +
-      ' それでも曖昧、または見た目の判断が必要な時だけ get_visual_feedback / get_latest_visual_feedback で image を取得してください。'
+    'まず dataAgentId(@agent:) を最優先し、属性名込み rg でソースを探してください。' +
+      '次に selector / testid / anchorLabel / targetCandidates を使います。' +
+      'それでも曖昧、または見た目の判断が必要な時だけ contextId と imageReason を渡して ' +
+      'get_visual_feedback / get_latest_visual_feedback で image を取得してください。'
   );
   return lines.join('\n');
 }

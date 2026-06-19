@@ -48,6 +48,9 @@ test('tools/list が 5 ツールを公開する', async () => {
       'get_visual_feedback_context',
       'list_visual_feedback',
     ]);
+    const latestImage = tools.find((t) => t.name === 'get_latest_visual_feedback');
+    assert.ok(latestImage.inputSchema.required.includes('contextId'), 'image tool は contextId が必須');
+    assert.ok(latestImage.inputSchema.required.includes('imageReason'), 'image tool は imageReason が必須');
   });
 });
 
@@ -63,7 +66,13 @@ test('list_visual_feedback が新しい順に id を返す', async () => {
 
 test('get_latest_visual_feedback が image(PNG) + file_path を返す', async () => {
   await withClient(async (client) => {
-    const res = await client.callTool({ name: 'get_latest_visual_feedback', arguments: {} });
+    const res = await client.callTool({
+      name: 'get_latest_visual_feedback',
+      arguments: {
+        contextId: NEWER,
+        imageReason: 'test intentionally verifies the high-cost vision transport path',
+      },
+    });
     const img = res.content.find((c) => c.type === 'image');
     const txt = res.content.find((c) => c.type === 'text');
     assert.ok(img, 'image content がある（vision 経路）');
@@ -72,6 +81,22 @@ test('get_latest_visual_feedback が image(PNG) + file_path を返す', async ()
     assert.deepEqual([...head], [137, 80, 78, 71, 13, 10, 26, 10], '有効な PNG');
     assert.ok(txt.text.includes('file_path: '), 'パス fallback がある');
     assert.ok(txt.text.includes(NEWER), '最新エントリのパス');
+  });
+});
+
+test('get_latest_visual_feedback は contextId が一致しない時 image を返さない', async () => {
+  await withClient(async (client) => {
+    const res = await client.callTool({
+      name: 'get_latest_visual_feedback',
+      arguments: {
+        contextId: 'stale-context',
+        imageReason: 'test verifies stale context guard before vision transport',
+      },
+    });
+    assert.ok(!res.content.some((c) => c.type === 'image'), 'stale context では image を返さない');
+    const txt = res.content.find((c) => c.type === 'text').text;
+    assert.ok(txt.includes('image omitted by context-first guard'));
+    assert.ok(txt.includes(`current_id: ${NEWER}`));
   });
 });
 
@@ -84,9 +109,12 @@ test('get_latest_visual_feedback_context が image 無しで @agent と selector
     assert.ok(txt.text.includes('agent="@agent:docs/api-list"'));
     assert.ok(txt.text.includes('selector="main h2"'));
     assert.ok(txt.text.includes('candidate: source=nearest-link'));
+    assert.ok(txt.text.includes('agent_lookup:'));
+    assert.ok(txt.text.includes('image_gate: pass contextId='));
     assert.equal(res.structuredContent.id, NEWER);
     assert.equal(res.structuredContent.annotations[0].dataAgentId, '@agent:docs/api-list');
     assert.equal(res.structuredContent.annotations[0].targetCandidates[0].dataAsin, 'B012345678');
+    assert.equal(res.structuredContent.agentLookup.imageGate.contextId, NEWER);
   });
 });
 
@@ -100,7 +128,14 @@ test('get_visual_feedback_context が id 指定で image 無し context を返�
 
 test('get_visual_feedback: 不明 id は isError', async () => {
   await withClient(async (client) => {
-    const res = await client.callTool({ name: 'get_visual_feedback', arguments: { id: 'nope' } });
+    const res = await client.callTool({
+      name: 'get_visual_feedback',
+      arguments: {
+        id: 'nope',
+        contextId: 'nope',
+        imageReason: 'test verifies unknown id still returns an MCP error',
+      },
+    });
     assert.equal(res.isError, true);
   });
 });
@@ -125,7 +160,14 @@ test('list_visual_feedback: titleContains で該当のみ（OLD で古い方だ�
 
 test('get_latest_visual_feedback: urlContains で絞った最新を image で返す', async () => {
   await withClient(async (client) => {
-    const res = await client.callTool({ name: 'get_latest_visual_feedback', arguments: { urlContains: 'example.com' } });
+    const res = await client.callTool({
+      name: 'get_latest_visual_feedback',
+      arguments: {
+        urlContains: 'example.com',
+        contextId: NEWER,
+        imageReason: 'test intentionally verifies filtered high-cost vision transport',
+      },
+    });
     const img = res.content.find((c) => c.type === 'image');
     const txt = res.content.find((c) => c.type === 'text');
     assert.ok(img, 'image を返す');
@@ -135,7 +177,14 @@ test('get_latest_visual_feedback: urlContains で絞った最新を image で返
 
 test('get_latest_visual_feedback: 不一致フィルタは image 無しの案内テキスト', async () => {
   await withClient(async (client) => {
-    const res = await client.callTool({ name: 'get_latest_visual_feedback', arguments: { urlContains: 'no-such-project' } });
+    const res = await client.callTool({
+      name: 'get_latest_visual_feedback',
+      arguments: {
+        urlContains: 'no-such-project',
+        contextId: NEWER,
+        imageReason: 'test verifies no image is returned when the filter has no matching entry',
+      },
+    });
     assert.ok(!res.content.some((c) => c.type === 'image'), '誤って別プロジェクトの image を返さない');
     const txt = res.content.find((c) => c.type === 'text').text;
     assert.ok(txt.includes('no-such-project'), '条件を案内');
