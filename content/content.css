@@ -476,6 +476,13 @@ html.bag-drawing .bag-draw-overlay {
   accent-color: var(--bag-accent);
   cursor: pointer;
 }
+.bag-memo-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.bag-memo-save,
 .bag-memo-del {
   border: 1px solid var(--bag-border);
   background: #ffffff;
@@ -485,6 +492,17 @@ html.bag-drawing .bag-draw-overlay {
   line-height: 1;
   padding: 4px 7px;
   cursor: pointer;
+}
+.bag-memo-save {
+  color: #fff;
+  background: var(--bag-accent);
+  border-color: var(--bag-accent);
+  font-weight: 700;
+  padding-inline: 9px;
+}
+.bag-memo-save:hover {
+  background: var(--bag-accent-hover);
+  border-color: var(--bag-accent-hover);
 }
 .bag-memo-del:hover {
   border-color: #dc2626;

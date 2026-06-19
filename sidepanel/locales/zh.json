@@ -126,6 +126,7 @@
   "cs.memo.tag": "AI 备忘",
   "cs.memo.placeholder": "写给 AI 的指示（例如：把标题改短）",
   "cs.memo.toAI": "发送给 AI",
+  "cs.memo.save": "保存",
   "cs.memo.collapseTitle": "折叠 / 展开",
   "cs.memo.collapseAria": "折叠",
   "cs.memo.deleteTitle": "删除此备忘和涂画",

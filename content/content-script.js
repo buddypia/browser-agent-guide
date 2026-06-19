@@ -2480,13 +2480,20 @@
     const toggleText = document.createElement('span');
     toggleText.textContent = t('cs.memo.toAI');
     toggle.append(cb, toggleText);
+    const actions = document.createElement('div');
+    actions.className = 'bag-memo-actions';
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'bag-memo-save';
+    saveBtn.textContent = t('cs.memo.save');
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'bag-memo-del';
     del.title = t('cs.memo.deleteTitle');
     del.setAttribute('aria-label', t('cs.memo.deleteAria'));
     del.textContent = '🗑';
-    foot.append(toggle, del);
+    actions.append(saveBtn, del);
+    foot.append(toggle, actions);
 
     card.append(head, ta, foot);
 
@@ -2494,6 +2501,13 @@
     // 保存は storage 書き込み→(サイドパネル経由で)再描画要求につながるため、編集中の
     // フォーカス/IME変換を守る仕組み(isMemoEditing / pendingMemoRender)と必ず併用する。
     let saveTimer = null;
+    const saveMemoNow = async () => {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = null;
+      memoComposing = false;
+      await updateMemoFields(a.id, { note: ta.value.trim() });
+      toast(t('cs.toast.memoSaved'), 'success');
+    };
     const scheduleSave = () => {
       if (saveTimer) clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
@@ -2529,6 +2543,10 @@
       entry?.connector?.classList.toggle('bag-memo-connector--off', off);
       entry?.numEl?.classList.toggle('bag-anno-num--off', off);
       updateMemoFields(a.id, { forAI: cb.checked });
+    });
+    saveBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      saveMemoNow();
     });
     // メモ⇄図形の相互ハイライト(マウスホバーで対象ペアを強調し、他ペアを減光)。
     // mouseenter ではなく mousemove で起動する: 描画直後に新規メモがカーソル下へ現れて
