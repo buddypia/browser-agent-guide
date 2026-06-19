@@ -1740,6 +1740,7 @@
       </div>`;
     document.documentElement.appendChild(wrap);
     positionAuthoring(wrap, el);
+    setupAuthoringDrag(wrap);
     authoringEl = wrap;
 
     const kindSel = wrap.querySelector('[data-f="kind"]');
@@ -1748,6 +1749,7 @@
       wrap.querySelectorAll('[data-for]').forEach((row) => {
         row.style.display = row.getAttribute('data-for').split(' ').includes(k) ? '' : 'none';
       });
+      requestAnimationFrame(() => clampAuthoringIntoViewport(wrap));
     };
     if (existing) {
       kindSel.value = existing.kind;
@@ -1781,12 +1783,86 @@
 
   function positionAuthoring(wrap, el) {
     const r = el?.getBoundingClientRect?.();
-    const w = 320;
+    const w = wrap.offsetWidth || 320;
     let left = r ? Math.min(r.left, window.innerWidth - w - 16) : window.innerWidth - w - 16;
     let top = r ? r.bottom + 8 : 80;
-    if (top + 260 > window.innerHeight) top = Math.max(16, window.innerHeight - 280);
     wrap.style.left = `${Math.max(8, left)}px`;
     wrap.style.top = `${Math.max(8, top)}px`;
+    clampAuthoringIntoViewport(wrap);
+  }
+
+  function clampAuthoringIntoViewport(wrap) {
+    if (!wrap?.isConnected) return;
+    const pad = 8;
+    const w = wrap.offsetWidth || 320;
+    const h = Math.min(wrap.offsetHeight || 280, Math.max(1, window.innerHeight - pad * 2));
+    const maxLeft = Math.max(pad, window.innerWidth - w - pad);
+    const maxTop = Math.max(pad, window.innerHeight - h - pad);
+    const left = parseFloat(wrap.style.left) || pad;
+    const top = parseFloat(wrap.style.top) || pad;
+    wrap.style.left = `${clamp(left, pad, maxLeft)}px`;
+    wrap.style.top = `${clamp(top, pad, maxTop)}px`;
+  }
+
+  function setupAuthoringDrag(wrap) {
+    const head = wrap.querySelector('.bag-author-head');
+    if (!head) return;
+    let drag = null;
+    const move = (ev) => {
+      if (!drag) return;
+      if (!drag.moved && Math.hypot(ev.clientX - drag.startX, ev.clientY - drag.startY) < 3) return;
+      if (!drag.moved) {
+        drag.moved = true;
+        wrap.classList.add('bag-author--dragging');
+      }
+      const w = wrap.offsetWidth || 320;
+      const h = Math.min(wrap.offsetHeight || 280, Math.max(1, window.innerHeight - 8));
+      const left = clamp(ev.clientX - drag.offX, 4, Math.max(4, window.innerWidth - w - 4));
+      const top = clamp(ev.clientY - drag.offY, 4, Math.max(4, window.innerHeight - h - 4));
+      wrap.style.left = `${left}px`;
+      wrap.style.top = `${top}px`;
+      ev.preventDefault();
+      ev.stopPropagation();
+    };
+    const end = (ev) => {
+      if (!drag) return;
+      try {
+        head.releasePointerCapture(ev.pointerId);
+      } catch {
+        /* noop */
+      }
+      wrap.classList.remove('bag-author--dragging');
+      drag = null;
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', end, true);
+      window.removeEventListener('pointercancel', end, true);
+      ev.preventDefault();
+      ev.stopPropagation();
+    };
+    head.addEventListener('pointerdown', (ev) => {
+      if (ev.button != null && ev.button !== 0) return;
+      const rect = wrap.getBoundingClientRect();
+      drag = {
+        startX: ev.clientX,
+        startY: ev.clientY,
+        offX: ev.clientX - rect.left,
+        offY: ev.clientY - rect.top,
+        moved: false,
+      };
+      window.addEventListener('pointermove', move, { capture: true, passive: false });
+      window.addEventListener('pointerup', end, { capture: true, passive: false });
+      window.addEventListener('pointercancel', end, { capture: true, passive: false });
+      try {
+        head.setPointerCapture(ev.pointerId);
+      } catch {
+        /* 一部環境ではキャプチャ不可 */
+      }
+      ev.preventDefault();
+      ev.stopPropagation();
+    });
+    head.addEventListener('pointermove', move);
+    head.addEventListener('pointerup', end);
+    head.addEventListener('pointercancel', end);
   }
 
   function closeAuthoring() {
@@ -3292,6 +3368,7 @@
     document.documentElement.appendChild(wrap);
     const target = anchor ? resolveAnchor(anchor) : null;
     positionAuthoring(wrap, target);
+    setupAuthoringDrag(wrap);
     authoringEl = wrap;
     if (draft.note) wrap.querySelector('[data-f="note"]').value = draft.note;
     if (draft.intent) wrap.querySelector('[data-f="intent"]').value = draft.intent;
