@@ -152,8 +152,10 @@ test.describe('お描き連動のAIメモ', () => {
     await expect(memo).toHaveCount(1);
 
     const box = await memo.boundingBox();
-    // #target は左側(~60-220px)。右側に余白があるので、メモは図形の右隣に出る。
-    expect(box.x).toBeGreaterThan(220);
+    const target = await page.locator('#target').boundingBox();
+    // #target は左側(~60-220px)。右側に余白があっても画面端へ飛ばず、図形のすぐ右隣に出る。
+    expect(box.x).toBeGreaterThanOrEqual(target.x + target.width - 16);
+    expect(box.x).toBeLessThanOrEqual(target.x + target.width + 28);
     await expect(memo).toHaveAttribute('data-side', 'right');
     // コネクタ(引き出し線)が描かれている。
     await expect(page.locator('.bag-draw-layer .bag-memo-connector')).toHaveCount(1);
@@ -472,8 +474,8 @@ test.describe('お描き連動のAIメモ', () => {
     await expect(memos.nth(1)).not.toHaveClass(/bag-memo--dim/);
   });
 
-  // 左側に複数の図形があり右側に余白がある時、メモは右レール(右ガター)に縦整列し重ならない。
-  test('右ガター整列: 右に余白があれば複数メモが右レールに縦整列し、互いに重ならない', async ({ page }) => {
+  // 左側に複数の図形があり右側に余白がある時も、各メモは画面端ではなく図形の隣に出て重ならない。
+  test('複数メモも各図形のすぐ隣に配置され、互いに重ならない', async ({ page }) => {
     await page.setViewportSize({ width: 1100, height: 820 });
     await page.evaluate(() => {
       for (const [id, top] of [
@@ -512,10 +514,11 @@ test.describe('お描き連動のAIメモ', () => {
       await expect(memos.nth(i)).toHaveAttribute('data-side', 'right');
       boxes.push(await memos.nth(i).boundingBox());
     }
-    // 全メモが同じ左端(右レール)に整列し、右側に寄っている。
+    // 各図形(右端およそ205px)の近くに出て、画面右端の遠いレールへ飛ばない。
     const lefts = boxes.map((b) => Math.round(b.x));
     expect(Math.max(...lefts) - Math.min(...lefts)).toBeLessThanOrEqual(1);
-    expect(Math.min(...lefts)).toBeGreaterThan(600);
+    expect(Math.min(...lefts)).toBeGreaterThanOrEqual(205);
+    expect(Math.max(...lefts)).toBeLessThanOrEqual(260);
     // メモ同士が縦に重ならない(上から順に、次のtop >= 前のbottom)。
     const sorted = boxes.slice().sort((a, b) => a.y - b.y);
     for (let i = 1; i < sorted.length; i += 1) {
@@ -523,8 +526,8 @@ test.describe('お描き連動のAIメモ', () => {
     }
   });
 
-  // 図形が画面右まで広がり右レールと重なる場合は、ガターを使わず図形のとなりへ退避する。
-  test('図形が画面右に寄っている場合は右ガターを使わず図形のとなりへ退避する', async ({ page }) => {
+  // 図形が画面右に寄っている場合は、画面外へ出さず左/下へ退避する。
+  test('図形が画面右に寄っている場合は画面内の左/下へ退避する', async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 760 });
     await page.evaluate(() => {
       const b = document.createElement('button');
@@ -546,7 +549,6 @@ test.describe('お描き連動のAIメモ', () => {
 
     const memo = page.locator('.bag-memo');
     await expect(memo).toHaveCount(1);
-    // 右レール(644〜)は図形右端(~760)と重なるため、右ガターは無効 → 左/下へ退避。
     const side = await memo.getAttribute('data-side');
     expect(['left', 'bottom']).toContain(side);
   });

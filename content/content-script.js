@@ -2792,12 +2792,10 @@
   }
 
   const MEMO_GAP = 12; // 図形とメモの間隔(px)
-  const GUTTER_MARGIN = 16; // 右ガター(レール)と画面右端の間隔(px)
   const MEMO_STACK_GAP = 10; // メモ同士の最小縦間隔(px)
 
-  // 全メモを一括配置する。右側に十分な余白があれば「右ガター整列」(メモを右レールに縦整列)、
-  // 無ければ従来どおり「図形のとなり」(右→左→下)。いずれもメモ同士が重ならないよう縦方向に
-  // パッキングし、図形→メモを引き出し線で結ぶ。各 entry._box は redrawEntry が更新済みであること。
+  // 全メモを一括配置する。各メモは自分のお描き図形のすぐ隣(右→左→下)へ置き、
+  // メモ同士が重なる時だけ縦方向にパッキングする。各 entry._box は redrawEntry が更新済みであること。
   function layoutMemos() {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
@@ -2822,14 +2820,6 @@
     for (const e of manual) placeManualMemo(e, placed, vw, vh);
     if (!auto.length) return;
 
-    // メモ幅は固定240(狭幅では画面内に収める)。右レールの左端を決める。
-    const memoW = Math.min(auto[0].memo.offsetWidth || 240, vw - 16);
-    const gutterLeft = vw - memoW - GUTTER_MARGIN;
-    const maxShapeR = auto.reduce((m, e) => Math.max(m, e._box.R), -Infinity);
-    // 右レールが全図形の右端より右にあり、画面内に収まる時だけ「右ガター」を使う。
-    // 図形が画面右まで広がるページでは自動的に「図形のとなり」へ退避する。
-    const useGutter = gutterLeft >= 4 && gutterLeft - MEMO_GAP > maxShapeR;
-
     for (const e of auto) {
       const box = e._box;
       const memo = e.memo;
@@ -2840,21 +2830,17 @@
       let left;
       let top = cy - mh / 2;
 
-      if (useGutter) {
-        left = gutterLeft;
-      } else {
-        left = box.R + MEMO_GAP;
-        if (left + mw > vw - 4) {
-          // 右に収まらない → 左へ反転、それも無理なら下へ。
-          const leftCandidate = box.L - MEMO_GAP - mw;
-          if (leftCandidate >= 4) {
-            side = 'left';
-            left = leftCandidate;
-          } else {
-            side = 'bottom';
-            left = clamp(box.L, 4, vw - mw - 4);
-            top = box.B + MEMO_GAP;
-          }
+      left = box.R + MEMO_GAP;
+      if (left + mw > vw - 4) {
+        // 右に収まらない → 左へ反転、それも無理なら下へ。
+        const leftCandidate = box.L - MEMO_GAP - mw;
+        if (leftCandidate >= 4) {
+          side = 'left';
+          left = leftCandidate;
+        } else {
+          side = 'bottom';
+          left = clamp(box.L, 4, vw - mw - 4);
+          top = box.B + MEMO_GAP;
         }
       }
       left = clamp(left, 4, vw - mw - 4);
@@ -2905,7 +2891,7 @@
       mx = clamp(left + mw / 2, left, left + mw);
       my = top;
     } else {
-      // right(図形のとなり右 / 右ガター 共通): 図形右辺 → メモ左辺。
+      // right: 図形右辺 → メモ左辺。
       sx = box.R;
       mx = left;
     }
