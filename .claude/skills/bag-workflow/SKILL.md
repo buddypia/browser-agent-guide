@@ -84,12 +84,17 @@ disallowed-tools: Bash(rm *)
 
 **主: playwright-cli (追加設定ゼロ・ただの Bash)。** 詳細は `references/browser-tools.md`。
 ```bash
-playwright-cli open "<お描きしたURL>"
-playwright-cli snapshot                       # アクセシビリティツリー (要素ref e1,e2…)
+BAG_SESSION="bag-target"                   # 例: bag-amazon。ワークフローごとに専用セッションを使う
+playwright-cli -s="$BAG_SESSION" open "<お描きしたURL>"
+playwright-cli -s="$BAG_SESSION" --raw eval "location.href"  # 期待URL/hostか確認してから続行
+playwright-cli -s="$BAG_SESSION" snapshot     # アクセシビリティツリー (要素ref e1,e2…)
 # data-bag-id (拡張の目印) と data-agent-id (@agent:マーカー) を両方読む:
-playwright-cli --raw eval "JSON.stringify([...document.querySelectorAll('[data-bag-id],[data-agent-id]')].map(e=>({tag:e.tagName,bag:e.getAttribute('data-bag-id'),agent:e.getAttribute('data-agent-id'),text:e.textContent.trim().slice(0,40)})))"
-playwright-cli screenshot --filename=before.png
+playwright-cli -s="$BAG_SESSION" --raw eval "JSON.stringify([...document.querySelectorAll('[data-bag-id],[data-agent-id]')].map(e=>({tag:e.tagName,bag:e.getAttribute('data-bag-id'),agent:e.getAttribute('data-agent-id'),text:e.textContent.trim().slice(0,40)})))"
+playwright-cli -s="$BAG_SESSION" screenshot --filename=before.png
 ```
+- **セッション安全ルール**: `playwright-cli` は必ず `-s="$BAG_SESSION"` 付きで操作し、既存の `default` セッションに混ざらないようにする。
+- `snapshot` の `e123` のような ref は**そのセッション・そのページ・その時点だけ**の一時ID。別セッション/別ページ/遷移後に持ち越さない。クリック直前に同じ `BAG_SESSION` で URL 確認と fresh snapshot を取り直す。
+- Amazon など動的な外部サイトや副作用のある操作では、可能な限り商品名・`href`・安定 selector/locator を使い、古い ref 番号だけでクリックしない。
 - ページが **ログイン必須** で使い捨てブラウザでは入れない → ネイティブ `claude --chrome` / `/chrome` (ユーザーのログイン済み Chrome を使う)。`references/browser-tools.md` 参照。
 - お描きの `url` が **`file://`** の静的HTML → **playwright-cli は `file:` をブロックする（実測）**ので、ブラウザを開かずそのファイルを直接 Read する（どうしてもライブで見たいなら `python3 -m http.server --directory <dir>` で配信して `http://localhost:…` を開く）。
 
@@ -130,7 +135,7 @@ rg -n 'data-agent-id="@agent:' -g '!*.md' -g '!.claude'
 
 ## ステップ 5 — 直ったか検証する (= PROVE)
 
-- ブラウザで再確認: `playwright-cli reload` → `snapshot` / `eval` / `screenshot --filename=after.png`。`before.png` と見比べ、お描きの意図どおりか判定。
+- ブラウザで再確認: `playwright-cli -s="$BAG_SESSION" --raw eval "location.href"` で対象ページ/hostを確認 → `reload` → `snapshot` / `eval` / `screenshot --filename=after.png`。`before.png` と見比べ、お描きの意図どおりか判定。
 - コードだけの変更は、リポジトリ自身のゲート `npm run check` を回す (daemon は対象外なので必要なら `cd daemon && npm test`)。
 - **before / after の違いを日本語で平易に報告**。期待とずれていれば、ユーザーは「もう少し大きく」等と追加で頼める (ステップ1へ戻る)。
 
