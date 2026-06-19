@@ -83,8 +83,10 @@ test('get_latest_visual_feedback_context が image 無しで @agent と selector
     assert.ok(txt.text.includes('visual_feedback_context: image omitted'));
     assert.ok(txt.text.includes('agent="@agent:docs/api-list"'));
     assert.ok(txt.text.includes('selector="main h2"'));
+    assert.ok(txt.text.includes('candidate: source=nearest-link'));
     assert.equal(res.structuredContent.id, NEWER);
     assert.equal(res.structuredContent.annotations[0].dataAgentId, '@agent:docs/api-list');
+    assert.equal(res.structuredContent.annotations[0].targetCandidates[0].dataAsin, 'B012345678');
   });
 });
 
