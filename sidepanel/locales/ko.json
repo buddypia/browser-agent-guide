@@ -126,6 +126,7 @@
   "cs.memo.tag": "AI 메모",
   "cs.memo.placeholder": "AI에게 보낼 지시를 작성 (예: 제목을 더 짧게)",
   "cs.memo.toAI": "AI에 전달",
+  "cs.memo.save": "저장",
   "cs.memo.collapseTitle": "접기 / 펼치기",
   "cs.memo.collapseAria": "접기",
   "cs.memo.deleteTitle": "이 메모와 그림 삭제",
