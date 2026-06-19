@@ -198,6 +198,10 @@ html.bag-picking * {
   position: fixed;
   z-index: 2147483647;
   width: 320px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  box-sizing: border-box;
+  overflow: auto;
   background: var(--bag-surface);
   color: var(--bag-text);
   border: 1px solid var(--bag-border);
@@ -210,6 +214,17 @@ html.bag-picking * {
   font-weight: 700;
   font-size: 14px;
   margin-bottom: 6px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.bag-author--dragging {
+  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.34);
+  user-select: none;
+}
+.bag-author--dragging,
+.bag-author--dragging .bag-author-head {
+  cursor: grabbing;
 }
 .bag-author-target {
   font-size: 12px;
