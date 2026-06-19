@@ -18,25 +18,34 @@
 `data-bag-id`(拡張の目印) も `data-agent-id`(@agent:マーカー) も `eval` で読める。
 
 ```bash
-playwright-cli open "<url>"            # ブラウザを開いて遷移 (open https://… でも可)
-playwright-cli goto "<url>"
-playwright-cli snapshot                # アクセシビリティツリー (要素ref e1,e2…)。--boxes で座標も
-playwright-cli screenshot --filename=before.png
-playwright-cli eval "document.title"
-playwright-cli eval "el => el.getAttribute('data-agent-id')" e7   # 特定要素の属性
-playwright-cli console                 # console ログ
-playwright-cli requests                # ネットワーク一覧
-playwright-cli request 5               # 個別リクエストの中身
-playwright-cli reload                  # 検証時に再読込
-playwright-cli show --annotate         # ★ 画面に描いて指示する組み込みレビュー (お描きと類似)
-playwright-cli close
+BAG_SESSION="bag-target"              # 例: bag-amazon / bag-localhost。ワークフローごとの専用セッション
+playwright-cli -s="$BAG_SESSION" open "<url>"    # ブラウザを開いて遷移 (open https://… でも可)
+playwright-cli -s="$BAG_SESSION" goto "<url>"
+playwright-cli -s="$BAG_SESSION" --raw eval "location.href"  # 期待URL/hostのガード
+playwright-cli -s="$BAG_SESSION" snapshot        # アクセシビリティツリー (要素ref e1,e2…)。--boxes で座標も
+playwright-cli -s="$BAG_SESSION" screenshot --filename=before.png
+playwright-cli -s="$BAG_SESSION" eval "document.title"
+playwright-cli -s="$BAG_SESSION" eval "el => el.getAttribute('data-agent-id')" e7   # 特定要素の属性
+playwright-cli -s="$BAG_SESSION" console         # console ログ
+playwright-cli -s="$BAG_SESSION" requests        # ネットワーク一覧
+playwright-cli -s="$BAG_SESSION" request 5       # 個別リクエストの中身
+playwright-cli -s="$BAG_SESSION" reload          # 検証時に再読込
+playwright-cli -s="$BAG_SESSION" show --annotate # ★ 画面に描いて指示する組み込みレビュー (お描きと類似)
+playwright-cli -s="$BAG_SESSION" close
 ```
 
 > ⚠️ **playwright-cli は `file:` プロトコルをブロックする（実測: `Access to "file:" protocol is blocked`）。** お描きの url が `file://` のローカルHTMLなら、ブラウザでなく Read で読む。どうしてもライブDOM/eval したいときは `python3 -m http.server --directory <dir>` で配信して `http://localhost:<port>/…` を開く（この経路で eval が data-agent-id / data-bag-id を取得できることは実測済み）。
 
+### セッションと ref の安全ルール
+
+- `bag-workflow` では、必ず `-s="$BAG_SESSION"` 付きの名前付きセッションを使う。既存の `default` セッションや他タブの状態に混ざると、snapshot の ref が別ページに対して解決されることがある。
+- `snapshot` に出る `e1`, `e2` などの ref は、**同じセッション・同じページ・同じ時点**でだけ使う一時参照。遷移後、reload後、別セッションでは再利用しない。
+- クリック/入力/フォーム送信の直前に `playwright-cli -s="$BAG_SESSION" --raw eval "location.href"` で期待する URL/host か確認する。外れていたら操作せず、対象 URL を開き直して fresh snapshot を取る。
+- Amazon などの動的な外部サイトや副作用のある操作では、可能なら ref 番号ではなく、商品名、`href`、`data-*`、role locator、安定 selector を使う。ref を使う場合も直前に同じセッションで取り直したものだけにする。
+
 **お描き対象を画面で特定する一発 eval** (`--raw` で素の出力にして JSON を取り出す):
 ```bash
-playwright-cli --raw eval "JSON.stringify([...document.querySelectorAll('[data-bag-id],[data-agent-id]')].map(e=>({tag:e.tagName,bag:e.getAttribute('data-bag-id'),agent:e.getAttribute('data-agent-id'),text:e.textContent.trim().slice(0,40)})))"
+playwright-cli -s="$BAG_SESSION" --raw eval "JSON.stringify([...document.querySelectorAll('[data-bag-id],[data-agent-id]')].map(e=>({tag:e.tagName,bag:e.getAttribute('data-bag-id'),agent:e.getAttribute('data-agent-id'),text:e.textContent.trim().slice(0,40)})))"
 ```
 
 **ユーザーのログイン済み Chrome に繋ぐ** (使い捨てブラウザで入れないページ。**要セットアップ**):
