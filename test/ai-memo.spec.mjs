@@ -1,4 +1,4 @@
-// お描き完了で、図形のすぐ隣に編集可能な「AIメモ」がページ上に生成され、
+// お描き完了後に「メモを残す」を押すと、図形のすぐ隣に編集可能な「AIメモ」がページ上に生成され、
 // 本文編集・forAIトグル・削除・件数・再配置・forAIによる文脈除外が正しく働くことを検証する。
 // content/content-script.js を chrome スタブ付きで直接注入して実ブラウザDOMで確認する。
 import { expect, test } from '@playwright/test';
@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const contentScript = fs.readFileSync(path.join(projectRoot, 'content/content-script.js'), 'utf8');
 const contentCss = fs.readFileSync(path.join(projectRoot, 'content/content.css'), 'utf8');
+// content-script は SW から GET_I18N でロケール辞書を受け取る。テストでは日本語辞書を供給する。
+const jaLocaleJson = fs.readFileSync(path.join(projectRoot, 'sidepanel/locales/ja.json'), 'utf8');
 
 // 左側に明確な対象要素(#target)を置き、その上にお描きする。
 const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"></head>
@@ -20,11 +22,22 @@ const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"></head>
 const CHROME_STUB = `
   window.__bagListener = null;
   window.__store = {};
+  window.__bagI18n = ${jaLocaleJson};
+  window.__runtimeMessages = [];
   const __clone = (v) => (v === undefined ? undefined : structuredClone(v));
   window.chrome = {
     runtime: {
       onMessage: { addListener: (fn) => { window.__bagListener = fn; } },
-      sendMessage: (_msg, cb) => { if (typeof cb === 'function') cb({ ok: true }); },
+      sendMessage: (msg, cb) => {
+        if (msg && msg.type === 'GET_I18N') {
+          const r = { ok: true, result: { locale: 'ja', messages: window.__bagI18n, fallback: window.__bagI18n } };
+          if (typeof cb === 'function') { cb(r); return; }
+          return Promise.resolve(r);
+        }
+        window.__runtimeMessages.push(__clone(msg));
+        if (typeof cb === 'function') { cb({ ok: true }); return; }
+        return Promise.resolve({ ok: true });
+      },
       get lastError() { return null; },
     },
     storage: {
@@ -37,7 +50,7 @@ const CHROME_STUB = `
   };
 `;
 
-async function drawRectAndFinish(page) {
+async function drawRectDraft(page) {
   await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'START_DRAWING' }, {}, r)));
   await expect(page.locator('.bag-draw-overlay')).toHaveCount(1);
   await page.locator('.bag-draw-tool[data-tool="rect"]').click();
@@ -48,6 +61,19 @@ async function drawRectAndFinish(page) {
   await page.mouse.move(210, 342, { steps: 6 });
   await page.mouse.up();
   await page.locator('.bag-draw-op[data-op="done"]').click();
+  await expect(page.locator('.bag-author')).toBeVisible();
+}
+
+async function saveDrawingMemo(page, note) {
+  if (note !== undefined) await page.locator('.bag-author [data-f="note"]').fill(note);
+  await expect(page.locator('.bag-author [data-f="save"]')).toHaveText('メモを残す');
+  await page.locator('.bag-author [data-f="save"]').click();
+  await expect(page.locator('.bag-author')).toHaveCount(0);
+}
+
+async function drawRectAndFinish(page, note = '') {
+  await drawRectDraft(page);
+  await saveDrawingMemo(page, note);
 }
 
 test.describe('お描き連動のAIメモ', () => {
@@ -58,17 +84,30 @@ test.describe('お描き連動のAIメモ', () => {
     await page.addScriptTag({ content: contentScript });
   });
 
-  test('お描き完了で図形の隣に編集可能なAIメモが生成され保存される', async ({ page }) => {
-    await drawRectAndFinish(page);
+  test('お描き完了後、保存ボタンで図形の隣に編集可能なAIメモが生成される', async ({ page }) => {
+    await drawRectDraft(page);
+    await expect(page.locator('.bag-memo')).toHaveCount(0);
+    await page.locator('.bag-author [data-f="note"]').fill('最初の指示');
+    await saveDrawingMemo(page);
 
     const memo = page.locator('.bag-memo');
     await expect(memo).toHaveCount(1);
     // メモは編集用テキストとforAIトグルを持つ。
     await expect(memo.locator('.bag-memo-text')).toBeVisible();
+    await expect(memo.locator('.bag-memo-text')).toHaveValue('最初の指示');
     await expect(memo.locator('.bag-memo-toggle input')).toBeChecked(); // forAI 既定ON
 
     // 図形(SVG)も永続レイヤに描かれている。
     await expect(page.locator('.bag-draw-layer .bag-draw-g rect')).toHaveCount(1);
+
+    // サイドパネルのAI送信トレイ用に、LIST_ANNOTATIONS summary へ小さな図形プレビューが含まれる。
+    const listed = await page.evaluate(
+      () => new Promise((r) => window.__bagListener({ type: 'LIST_ANNOTATIONS' }, {}, r))
+    );
+    const summary = listed.annotations.find((a) => a.kind === 'drawing');
+    expect(summary.shapePreview.color).toBe('#ef4444');
+    expect(summary.shapePreview.shapes.length).toBeGreaterThan(0);
+    expect(summary.shapePreview.shapes[0].type).toBe('rect');
 
     // 本文を編集すると storage(aiAdvisorAnnotations)へ保存される。
     await memo.locator('.bag-memo-text').fill('見出しをもっと短く');
@@ -84,6 +123,25 @@ test.describe('お描き連動のAIメモ', () => {
         });
       })
       .toBe('見出しをもっと短く');
+  });
+
+  test('AIメモ保存とforAI切替で自動同期用の変更通知を送る', async ({ page }) => {
+    await drawRectAndFinish(page, '自動同期して');
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.__runtimeMessages.filter((m) => m?.type === 'VISUAL_FEEDBACK_CHANGED').at(-1)?.sendCount)
+      )
+      .toBe(1);
+
+    await page.locator('.bag-memo-toggle input').uncheck();
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const events = window.__runtimeMessages.filter((m) => m?.type === 'VISUAL_FEEDBACK_CHANGED');
+          return events.at(-1);
+        })
+      )
+      .toMatchObject({ type: 'VISUAL_FEEDBACK_CHANGED', reason: 'update', sendCount: 0 });
   });
 
   test('メモは図形の隣(右既定)に置かれ、引き出し線で結ばれる', async ({ page }) => {
@@ -149,10 +207,25 @@ test.describe('お描き連動のAIメモ', () => {
   test('削除でメモと図形が消え、保存からも除かれる', async ({ page }) => {
     await drawRectAndFinish(page);
     await expect(page.locator('.bag-memo')).toHaveCount(1);
+    await page.evaluate(() => {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'bag-draw-layer');
+      svg.setAttribute('data-bag-ui', '1');
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('class', 'bag-memo-connector');
+      line.setAttribute('x1', '10');
+      line.setAttribute('y1', '10');
+      line.setAttribute('x2', '120');
+      line.setAttribute('y2', '60');
+      svg.appendChild(line);
+      document.documentElement.appendChild(svg);
+    });
+    await expect(page.locator('.bag-memo-connector')).toHaveCount(2);
     await page.locator('.bag-memo .bag-memo-del').click();
 
     await expect(page.locator('.bag-memo')).toHaveCount(0);
     await expect(page.locator('.bag-draw-layer .bag-draw-g')).toHaveCount(0);
+    await expect(page.locator('.bag-memo-connector')).toHaveCount(0);
     const remaining = await page.evaluate(() => {
       const map = window.__store.aiAdvisorAnnotations || {};
       const scope = location.origin + location.pathname;
@@ -198,6 +271,147 @@ test.describe('お描き連動のAIメモ', () => {
     await expect(memo.locator('.bag-memo-text')).toHaveValue('旧メモ本文');
   });
 
+  test('Amazon風の商品カードDOMが差し替わってもdata-asinでAIメモを再解決する', async ({ page }) => {
+    await page.setViewportSize({ width: 1000, height: 820 });
+    await page.evaluate(() => {
+      document.body.innerHTML = `
+        <main>
+          <section>
+            <div class="s-result-item" data-asin="B012345678" style="position:fixed;left:60px;top:120px;width:420px;height:260px;border:1px solid #ddd;background:#fff">
+              <div class="a-section" style="position:absolute;inset:0">
+                <div class="image-shell" style="position:absolute;left:24px;top:42px;width:156px;height:156px;background:#eef2f7"></div>
+                <div style="position:absolute;left:210px;top:54px;width:170px">Amazon dynamic card</div>
+              </div>
+            </div>
+          </section>
+        </main>`;
+    });
+
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'START_DRAWING' }, {}, r)));
+    await page.locator('.bag-draw-tool[data-tool="rect"]').click();
+    await page.mouse.move(78, 174);
+    await page.mouse.down();
+    await page.mouse.move(150, 232, { steps: 5 });
+    await page.mouse.move(205, 268, { steps: 5 });
+    await page.mouse.up();
+    await page.locator('.bag-draw-op[data-op="done"]').click();
+    await saveDrawingMemo(page, 'この商品画像を確認');
+    await expect(page.locator('.bag-memo')).toHaveCount(1);
+    await page.locator('.bag-memo-text').blur();
+
+    const savedAnchor = await page.evaluate(() => {
+      const map = window.__store.aiAdvisorAnnotations || {};
+      const scope = location.origin + location.pathname;
+      return (map[scope] || []).find((a) => a.kind === 'drawing')?.anchor;
+    });
+    expect(savedAnchor.dataAsin).toBe('B012345678');
+    expect(savedAnchor.selector).toBe('[data-asin="B012345678"]');
+
+    await page.evaluate(() => {
+      document.querySelector('[data-asin="B012345678"]').remove();
+      const article = document.createElement('article');
+      article.className = 's-result-item hydrated';
+      article.setAttribute('data-asin', 'B012345678');
+      article.style.cssText = 'position:fixed;left:60px;top:430px;width:420px;height:260px;border:1px solid #ddd;background:#fff';
+      article.innerHTML = `
+        <a href="/dp/B012345678" style="position:absolute;left:20px;top:34px;width:170px;height:170px;background:#e2e8f0;display:block"></a>
+        <div style="position:absolute;left:220px;top:60px;width:170px">Rehydrated card</div>`;
+      document.body.appendChild(article);
+    });
+
+    await expect
+      .poll(async () => {
+        const box = await page.locator('.bag-memo').boundingBox();
+        return Math.round(box?.y || 0);
+      })
+      .toBeGreaterThan(360);
+
+    const vf = await page.evaluate(
+      () => new Promise((r) => window.__bagListener({ type: 'PREPARE_CAPTURE' }, {}, r))
+    );
+    expect(vf.items[0].resolved).toBe(true);
+    expect(vf.items[0].anchorLabel).toContain('Rehydrated card');
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'FINISH_CAPTURE' }, {}, r)));
+  });
+
+  test('Amazonの旧商品URLキーに保存済みのAIメモをASIN正規化キーへ移行する', async ({ page }) => {
+    const oldKey = 'https://www.amazon.com/Some-Product-Name/dp/B012345678';
+    const canonicalKey = 'https://www.amazon.com/dp/B012345678';
+    await page.route(`${canonicalKey}**`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html; charset=utf-8',
+        body: `<!doctype html><html><head><meta charset="utf-8"></head><body>
+          <div data-asin="B012345678" style="position:fixed;left:60px;top:120px;width:420px;height:220px">
+            Amazon migrated card
+          </div>
+        </body></html>`,
+      })
+    );
+    await page.goto(canonicalKey);
+    await page.addScriptTag({ content: CHROME_STUB });
+    await page.evaluate(
+      ({ oldKey }) => {
+        window.__store.aiAdvisorAnnotations = {
+          [oldKey]: [
+            {
+              id: 'legacy-amazon',
+              kind: 'drawing',
+              createdAt: new Date().toISOString(),
+              note: '旧URLで保存されたメモ',
+              anchor: {
+                selector: '[data-asin="B012345678"]',
+                tag: 'div',
+                role: 'div',
+                text: 'Amazon migrated card',
+                dataAsin: 'B012345678',
+              },
+              shapes: [{ type: 'rect', x: 0.02, y: 0.08, w: 0.4, h: 0.5, color: '#ef4444', width: 3 }],
+            },
+          ],
+        };
+      },
+      { oldKey }
+    );
+    await page.addStyleTag({ content: contentCss });
+    await page.addScriptTag({ content: contentScript });
+
+    const memo = page.locator('.bag-memo');
+    await expect(memo).toHaveCount(1);
+    await expect(memo.locator('.bag-memo-text')).toHaveValue('旧URLで保存されたメモ');
+    expect(
+      await page.evaluate(
+        ({ oldKey, canonicalKey }) => {
+          const map = window.__store.aiAdvisorAnnotations || {};
+          return {
+            hasOld: Object.prototype.hasOwnProperty.call(map, oldKey),
+            hasCanonical: Object.prototype.hasOwnProperty.call(map, canonicalKey),
+            note: map[canonicalKey]?.[0]?.note,
+          };
+        },
+        { oldKey, canonicalKey }
+      )
+    ).toEqual({ hasOld: false, hasCanonical: true, note: '旧URLで保存されたメモ' });
+
+    await memo.locator('.bag-memo-text').fill('正規キーへ移行したメモ');
+    await memo.locator('.bag-memo-text').blur();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          ({ oldKey, canonicalKey }) => {
+            const map = window.__store.aiAdvisorAnnotations || {};
+            return {
+              hasOld: Object.prototype.hasOwnProperty.call(map, oldKey),
+              hasCanonical: Object.prototype.hasOwnProperty.call(map, canonicalKey),
+              note: map[canonicalKey]?.[0]?.note,
+            };
+          },
+          { oldKey, canonicalKey }
+        )
+      )
+      .toEqual({ hasOld: false, hasCanonical: true, note: '正規キーへ移行したメモ' });
+  });
+
   // 同じ#target上に2つ別色で描き、番号バッジ/引き出し線/メモ枠が図形色で束ねられること、
   // 生成直後にホバー無しで他メモが減光しないこと、ホバーで対象ペアが強調・他が減光することを検証する。
   test('番号と図形色でペアが束ねられ、生成直後に減光が残らずホバーで相互ハイライトする', async ({ page }) => {
@@ -222,6 +436,7 @@ test.describe('お描き連動のAIメモ', () => {
     await page.mouse.move(205, 540, { steps: 5 });
     await page.mouse.up();
     await page.locator('.bag-draw-op[data-op="done"]').click();
+    await saveDrawingMemo(page);
     // 生成直後の境界イベント対策でマウスを十分離す。
     await page.mouse.move(960, 760);
 
@@ -282,6 +497,7 @@ test.describe('お描き連動のAIメモ', () => {
       await page.mouse.move(205, y + 38, { steps: 5 });
       await page.mouse.up();
       await page.locator('.bag-draw-op[data-op="done"]').click();
+      await saveDrawingMemo(page);
       await page.mouse.move(1040, 780); // メモから離す
     };
     await drawOver(120);
@@ -325,6 +541,7 @@ test.describe('お描き連動のAIメモ', () => {
     await page.mouse.move(755, 340, { steps: 5 });
     await page.mouse.up();
     await page.locator('.bag-draw-op[data-op="done"]').click();
+    await saveDrawingMemo(page);
     await page.mouse.move(850, 720);
 
     const memo = page.locator('.bag-memo');

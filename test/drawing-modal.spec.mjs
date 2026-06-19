@@ -10,6 +10,9 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const contentScript = fs.readFileSync(path.join(projectRoot, 'content/content-script.js'), 'utf8');
 const contentCss = fs.readFileSync(path.join(projectRoot, 'content/content.css'), 'utf8');
+// content-script は SW から GET_I18N でロケール辞書を受け取る。テストでは日本語辞書を供給して
+// ツールバー等が実文言(短い)で描画されるようにする(キー文字列のままだと寸法がズレる)。
+const jaLocaleJson = fs.readFileSync(path.join(projectRoot, 'sidepanel/locales/ja.json'), 'utf8');
 
 // 「モーダル外をクリックで閉じる」を capture/bubble の両段で実装したテストページ。
 // 実サイトでよくある実装(pointerdown/mousedown/click のいずれか)を網羅する。
@@ -34,13 +37,22 @@ test.describe('お描き中のモーダル保護', () => {
     await page.addScriptTag({
       content: `
         window.__bagListener = null;
+        window.__bagI18n = ${jaLocaleJson};
         window.chrome = {
           runtime: {
             onMessage: { addListener: (fn) => { window.__bagListener = fn; } },
-            sendMessage: (_msg, cb) => { if (typeof cb === 'function') cb({ ok: true }); },
+            sendMessage: (msg, cb) => {
+              if (msg && msg.type === 'GET_I18N') {
+                const r = { ok: true, result: { locale: 'ja', messages: window.__bagI18n, fallback: window.__bagI18n } };
+                if (typeof cb === 'function') { cb(r); return; }
+                return Promise.resolve(r);
+              }
+              if (typeof cb === 'function') { cb({ ok: true }); return; }
+              return Promise.resolve({ ok: true });
+            },
             get lastError() { return null; },
           },
-          storage: { local: { get: async () => ({}), set: async () => {} } },
+          storage: { local: { get: async () => ({}), set: async () => {} }, onChanged: { addListener() {} } },
         };
       `,
     });

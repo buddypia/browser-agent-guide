@@ -5,24 +5,24 @@
 
 ## MCP ツール (3つ) — 完全修飾名で呼ぶ
 
-エンドポイント `http://127.0.0.1:8765/mcp`。Claude Code 上では `visual_feedback:` 接頭辞付きで呼ぶ。
+エンドポイント `http://127.0.0.1:8765/mcp`。Claude Code 上では `bag_visual_feedback:` 接頭辞付きで呼ぶ。
 いずれも **注釈付きPNG を vision content として返し、かつ絶対 `file_path` テキストを必ず併走**させる
 (画像を読めない CLI 向けの fallback が内蔵されている＝この二重返却が設計上の不変条件)。
 
 | ツール | 入力 | 返り値 | 用途 |
 |---|---|---|---|
-| `visual_feedback:get_latest_visual_feedback` | `{ urlContains?, titleContains? }` | image(PNG) + text(file_path, url, title, capturedAt, annotations) | **主用途**。最新のお描きを取得 |
-| `visual_feedback:list_visual_feedback` | `{ limit?, urlContains?, titleContains? }` | text 一覧 (id・url・title・時刻) | 候補を新しい順に列挙 |
-| `visual_feedback:get_visual_feedback` | `{ id }` | image + text | id 指定で取得 |
+| `bag_visual_feedback:get_latest_visual_feedback` | `{ urlContains?, titleContains? }` | image(PNG) + text(file_path, url, title, capturedAt, annotations) | **主用途**。最新のお描きを取得 |
+| `bag_visual_feedback:list_visual_feedback` | `{ limit?, urlContains?, titleContains? }` | text 一覧 (id・url・title・時刻) | 候補を新しい順に列挙 |
+| `bag_visual_feedback:get_visual_feedback` | `{ id }` | image + text | id 指定で取得 |
 
 ### 共有 inbox のスコープ (重要)
 
-`~/Downloads/ai-inbox` は**全プロジェクト共有**。素で `visual_feedback:get_latest_visual_feedback` を呼ぶと別プロジェクトの直近キャプチャが返りうる。
+`~/Downloads/ai-inbox` は**全プロジェクト共有**。素で `bag_visual_feedback:get_latest_visual_feedback` を呼ぶと別プロジェクトの直近キャプチャが返りうる。
 作業中ページの URL 断片を `urlContains` に渡して絞る (部分一致・大小無視)。
 
 ```
-visual_feedback:get_latest_visual_feedback({ urlContains: "example.com" })
-visual_feedback:list_visual_feedback({ titleContains: "ダッシュボード" })
+bag_visual_feedback:get_latest_visual_feedback({ urlContains: "example.com" })
+bag_visual_feedback:list_visual_feedback({ titleContains: "ダッシュボード" })
 ```
 条件に一致しないと **image を返さず案内テキスト**を返す (誤って別プロジェクトの画像を掴ませない仕様)。
 
@@ -32,14 +32,15 @@ visual_feedback:list_visual_feedback({ titleContains: "ダッシュボード" })
 Run this once so Claude can auto-fetch drawings. Copy it exactly — don't change the flags or URL.
 
 ```bash
-claude mcp add --transport http visual_feedback http://127.0.0.1:8765/mcp
-claude mcp list   # visual_feedback が出れば登録済み
+claude mcp add --transport http bag_visual_feedback http://127.0.0.1:8765/mcp
+claude mcp list   # bag_visual_feedback が出れば登録済み
 ```
 または `.mcp.json` (リポジトリ直下、チーム共有可):
 ```json
-{ "mcpServers": { "visual_feedback": { "type": "http", "url": "http://127.0.0.1:8765/mcp" } } }
+{ "mcpServers": { "bag_visual_feedback": { "type": "http", "url": "http://127.0.0.1:8765/mcp" } } }
 ```
-> Codex CLI は `~/.codex/config.toml` の `url`、Antigravity は `serverUrl` キー。いずれも同じ `…/mcp` を指す。
+> Codex CLI は `codex mcp add bag_visual_feedback --url http://127.0.0.1:8765/mcp`、
+> または `~/.codex/config.toml` の `url`。Antigravity は `serverUrl` キー。いずれも同じ `…/mcp` を指す。
 
 ## daemon を起動する
 
