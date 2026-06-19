@@ -1,10 +1,13 @@
 export const DEFAULT_LOCALE = 'en';
 
+// 言語設定が未指定(初回 or 'auto')のとき、ブラウザ言語に合わせる。
+export const AUTO_LOCALE = 'auto';
+
 export const LANGUAGE_OPTIONS = [
-  { value: 'en', label: 'English', shortLabel: 'EN', intlLocale: 'en-US' },
-  { value: 'ko', label: '한국어', shortLabel: 'KO', intlLocale: 'ko-KR' },
-  { value: 'ja', label: '日本語', shortLabel: 'JA', intlLocale: 'ja-JP' },
-  { value: 'zh', label: '中文', shortLabel: 'ZH', intlLocale: 'zh-CN' },
+  { value: 'en', label: 'English', shortLabel: 'EN', flag: '🇺🇸', intlLocale: 'en-US' },
+  { value: 'ko', label: '한국어', shortLabel: 'KO', flag: '🇰🇷', intlLocale: 'ko-KR' },
+  { value: 'ja', label: '日本語', shortLabel: 'JA', flag: '🇯🇵', intlLocale: 'ja-JP' },
+  { value: 'zh', label: '中文', shortLabel: 'ZH', flag: '🇨🇳', intlLocale: 'zh-CN' },
 ];
 
 const SUPPORTED_LOCALES = new Set(LANGUAGE_OPTIONS.map((language) => language.value));
@@ -15,6 +18,26 @@ export function normalizeLocale(locale) {
   if (SUPPORTED_LOCALES.has(value)) return value;
   const base = value.split('-')[0];
   return SUPPORTED_LOCALES.has(base) ? base : DEFAULT_LOCALE;
+}
+
+// ブラウザのUI言語を対応ロケールへ正規化する(非対応は英語)。
+export function detectBrowserLocale() {
+  let raw = '';
+  try {
+    raw = chrome?.i18n?.getUILanguage?.() || '';
+  } catch {
+    raw = '';
+  }
+  if (!raw && typeof navigator !== 'undefined') {
+    raw = navigator.language || (navigator.languages && navigator.languages[0]) || '';
+  }
+  return normalizeLocale(raw);
+}
+
+// 保存値を実ロケールへ解決する。未指定/'auto' はブラウザ言語に合わせる。
+export function resolveLocale(stored) {
+  if (!stored || stored === AUTO_LOCALE) return detectBrowserLocale();
+  return normalizeLocale(stored);
 }
 
 export function localeToIntl(locale) {
