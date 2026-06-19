@@ -19,7 +19,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 async function composite({ screenshotDataUrl, data }) {
-  if (!screenshotDataUrl) throw new Error('スクリーンショットがありません。');
+  // エラーは i18n キーで投げる。SW 側が受け取った res.error を t() でユーザー言語へ翻訳する
+  // (offscreen はロケール設定を持たないため、文言の解決は SW に委ねる)。
+  if (!screenshotDataUrl) throw new Error('errors.offscreen.noScreenshot');
   const blob = await (await fetch(screenshotDataUrl)).blob();
   const bitmap = await createImageBitmap(blob);
   const rawWidth = bitmap.width;
@@ -63,7 +65,7 @@ function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error || new Error('PNG の data URL 変換に失敗しました。'));
+    reader.onerror = () => reject(reader.error || new Error('errors.offscreen.pngConvertFailed'));
     reader.readAsDataURL(blob);
   });
 }

@@ -171,11 +171,11 @@ test.describe('UI quality gates', () => {
   test('side panel exposes frequent actions and passes axe', async ({ page }) => {
     await page.goto(pageUrl('sidepanel/sidepanel.html'));
 
-    await expect(page.getByRole('heading', { name: 'Page Operation Rails' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Start by typing an instruction' })).toBeVisible();
     await expect(page.getByLabel('Language')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Add context' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Copy context' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Show clues' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Add note' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Copy for AI' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'List elements' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open prompt history' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'New chat' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open settings' })).toBeVisible();
@@ -191,26 +191,31 @@ test.describe('UI quality gates', () => {
   test('side panel changes language from the top control', async ({ page }) => {
     await page.goto(pageUrl('sidepanel/sidepanel.html'));
 
+    // ブランド名/ロゴはトップバーから削除済み(Chromeのサイドパネルヘッダーと重複するため)。
+    await expect(page.locator('.brand')).toHaveCount(0);
+    await expect(page.locator('.brand-name')).toHaveCount(0);
+
     const language = page.getByLabel('Language');
     await expect(language).toBeVisible();
     await expect(language).toHaveValue('en');
     await expect(language.locator('option')).toHaveCount(4);
-    await expect(language.locator('option')).toHaveText(['EN', 'KO', 'JA', 'ZH']);
+    // ラベルは国旗表示(EN/KO/JA/ZH をやめた)。
+    await expect(language.locator('option')).toHaveText(['🇺🇸', '🇰🇷', '🇯🇵', '🇨🇳']);
 
     await language.selectOption('ja');
-    await expect(page.getByRole('heading', { name: 'ページ操作のレール' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'まずは指示を入力' })).toBeVisible();
     await expect(page.getByRole('button', { name: '補足を付ける' })).toBeVisible();
 
     await page.getByLabel('言語').selectOption('ko');
-    await expect(page.getByRole('heading', { name: '페이지 작업 레일' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '맥락 추가' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '먼저 지시를 입력하세요' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '메모 추가' })).toBeVisible();
 
     await page.getByLabel('언어').selectOption('zh');
-    await expect(page.getByRole('heading', { name: '页面操作轨道' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '添加上下文' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '先输入指令' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '添加批注' })).toBeVisible();
 
     await page.getByLabel('语言').selectOption('en');
-    await expect(page.getByRole('heading', { name: 'Page Operation Rails' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Start by typing an instruction' })).toBeVisible();
   });
 
   test('side panel can send a mocked prompt', async ({ page }) => {
@@ -224,6 +229,9 @@ test.describe('UI quality gates', () => {
 
   test('options page passes axe on the default settings state', async ({ page }) => {
     await page.goto(pageUrl('options/options.html'));
+
+    // 既定の言語はブラウザ UI 言語依存。テストを決定的にするため日本語へ切り替えて検証する。
+    await page.locator('#ui-language').selectOption('ja');
 
     await expect(page.getByRole('heading', { name: 'Browser Agent Guide 設定' })).toBeVisible();
     await expect(page.getByLabel('プロバイダ')).toBeVisible();

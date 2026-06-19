@@ -32,6 +32,27 @@ body {
   margin-bottom: 20px;
 }
 
+.page-head-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.lang-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.lang-field select {
+  width: auto;
+}
+
 h1 {
   margin: 0;
   font-size: 24px;

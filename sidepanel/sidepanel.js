@@ -1,5 +1,5 @@
 import { getSettings, patchSettings } from '../lib/storage.js';
-import { createI18n, DEFAULT_LOCALE, LANGUAGE_OPTIONS, languageName, localeToIntl, normalizeLocale } from './i18n.js';
+import { createI18n, DEFAULT_LOCALE, LANGUAGE_OPTIONS, languageName, localeToIntl, normalizeLocale, resolveLocale } from './i18n.js';
 
 // サイドパネルのチャットUI。background経由でAI呼び出しと動詞実行を行う。
 
@@ -66,8 +66,10 @@ function renderLanguageOptions() {
   LANGUAGE_OPTIONS.forEach((language) => {
     const opt = document.createElement('option');
     opt.value = language.value;
-    opt.textContent = language.shortLabel;
+    // 国旗で表示(Windows は国旗フォント非搭載のため文字ペアにフォールバック)。
+    opt.textContent = language.flag;
     opt.title = language.label;
+    opt.setAttribute('aria-label', language.label);
     els.languageSelect.appendChild(opt);
   });
   els.languageSelect.value = state.language;
@@ -127,7 +129,7 @@ async function changeLanguage(nextLanguage) {
 
 async function handleSettingsChanged(settings) {
   if (!i18n) return;
-  const nextLanguage = normalizeLocale(settings?.ui?.language || DEFAULT_LOCALE);
+  const nextLanguage = resolveLocale(settings?.ui?.language);
   if (nextLanguage !== state.language) {
     await i18n.setLocale(nextLanguage);
     state.language = i18n.locale;
@@ -325,28 +327,41 @@ function renderEmptyHint() {
 
   const title = document.createElement('h1');
   title.textContent = t('empty.title');
+
   const description = document.createElement('p');
+  description.className = 'empty-desc';
   description.textContent = t('empty.description');
-  const list = document.createElement('ol');
-  list.className = 'rail-list';
-  list.setAttribute('aria-label', t('empty.railsLabel'));
 
-  [
-    ['empty.goalLabel', 'empty.goalText'],
-    ['empty.contextLabel', 'empty.contextText'],
-    ['empty.verifyLabel', 'empty.verifyText'],
-  ].forEach(([labelKey, textKey]) => {
-    const item = document.createElement('li');
-    const label = document.createElement('span');
-    label.className = 'rail-step';
-    label.textContent = t(labelKey);
-    const text = document.createElement('span');
-    text.textContent = t(textKey);
-    item.append(label, text);
-    list.appendChild(item);
+  // タップで composer を埋めるサンプル指示チップ(既存の usePrompt を再利用)。
+  const chips = document.createElement('div');
+  chips.className = 'starter-chips';
+  ['empty.chipShorten', 'empty.chipEmphasize'].forEach((key) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'starter-chip';
+    chip.textContent = t(key);
+    chip.addEventListener('click', () => usePrompt(t(key)));
+    chips.appendChild(chip);
   });
+  // 「まず目印を付ける」は composer ではなく Mark 行(補足を付ける)へ誘導する。
+  const markChip = document.createElement('button');
+  markChip.type = 'button';
+  markChip.className = 'starter-chip meta';
+  markChip.textContent = t('empty.chipMark');
+  markChip.addEventListener('click', () => els.btnPick.focus());
+  chips.appendChild(markChip);
 
-  hint.append(title, description, list);
+  const pointer = document.createElement('p');
+  pointer.className = 'start-pointer';
+  pointer.textContent = t('empty.startPointer');
+
+  // 3手順レールはコンパクトな副次ヒントへ降格(目的・手がかり・検証)。
+  const rail = document.createElement('p');
+  rail.className = 'rail-mini';
+  rail.setAttribute('aria-label', t('empty.railsLabel'));
+  rail.textContent = [t('empty.goalLabel'), t('empty.contextLabel'), t('empty.verifyLabel')].join(' · ');
+
+  hint.append(title, description, chips, pointer, rail);
   els.messages.appendChild(hint);
 }
 
@@ -750,21 +765,23 @@ function rememberScopeLabel(scope) {
 }
 
 function updateMemoCountBadge(list) {
-  const count = list.filter((a) => a.kind === 'drawing').length;
+  const drawings = list.filter((a) => a.kind === 'drawing');
+  const count = drawings.length;
+  const sendCount = drawings.filter((a) => a.forAI !== false).length;
   if (els.memoCountBadge) {
     if (count > 0) {
       els.memoCountBadge.hidden = false;
       els.memoCountBadge.textContent = String(count);
-      els.memoCountBadge.title = t('annotations.memoCountTitle', { count });
+      els.memoCountBadge.title = t('annotations.memoCountTitle', { count, send: sendCount });
     } else {
       els.memoCountBadge.hidden = true;
       els.memoCountBadge.textContent = '';
       els.memoCountBadge.removeAttribute('title');
     }
   }
-  // 「お描きを画像でAIへ」はお描きが1件以上ある時だけ出す(独立機能ではなくお描きの一部)。
-  if (els.annoFoot) els.annoFoot.hidden = count === 0;
-  if (els.captureCount) els.captureCount.textContent = count > 0 ? String(count) : '';
+  // 「AI送信トレイ」を画像化するCTA。forAI OFF のお描きだけなら capture 側も空なので出さない。
+  if (els.annoFoot) els.annoFoot.hidden = sendCount === 0;
+  if (els.captureCount) els.captureCount.textContent = sendCount > 0 ? String(sendCount) : '';
 }
 
 function renderAnnotationList(list) {
@@ -776,50 +793,257 @@ function renderAnnotationList(list) {
     return;
   }
   els.annoPanel.hidden = false;
-  state.annotations.forEach((a) => {
-    const row = document.createElement('div');
-    row.className = 'anno-item' + (a.resolved ? '' : ' unresolved');
-    const title =
-      a.kind === 'note'
-        ? a.note
-        : a.kind === 'marker'
-          ? a.name
-          : a.kind === 'drawing'
-            ? a.note || a.shapeText || t('annotations.kind.drawing')
-            : a.label;
-    const sub =
-      a.kind === 'drawing'
-        ? a.intent || a.shapeText || ''
-        : a.intent || (a.kind === 'note' ? '' : a.note) || '';
-    // お描きメモは forAI(AIに渡す)の状態を小さく表示する。
-    const memoFlag =
-      a.kind === 'drawing'
-        ? a.forAI === false
-          ? `<span class="anno-flag off">${escapeHtml(t('annotations.forAIOff'))}</span>`
-          : `<span class="anno-flag on">${escapeHtml(t('annotations.forAIOn'))}</span>`
-        : '';
-    row.innerHTML = `
-      <span class="anno-kind">${escapeHtml(kindLabel(a.kind))}</span>
-      <span class="anno-body">
-        <span class="anno-title">${escapeHtml(title || t('annotations.noTitle'))}</span>
-        ${sub ? `<span class="anno-sub">${escapeHtml(sub)}</span>` : ''}
-        ${memoFlag}
-        ${a.target ? `<span class="anno-target">${escapeHtml(t('annotations.target', { target: a.target }))}</span>` : ''}
-        ${a.resolved ? '' : `<span class="anno-warn">${escapeHtml(t('annotations.unresolved'))}</span>`}
-      </span>
-      <span class="anno-actions">
-        <button data-act="edit" title="${escapeHtml(t('annotations.edit'))}">${escapeHtml(t('annotations.edit'))}</button>
-        <button data-act="del" title="${escapeHtml(t('annotations.delete'))}">${escapeHtml(t('annotations.delete'))}</button>
-      </span>`;
-    row.querySelector('[data-act="edit"]').addEventListener('click', async () => {
-      await send({ type: 'EDIT_ANNOTATION', tabId: state.tabId, id: a.id });
-    });
-    row.querySelector('[data-act="del"]').addEventListener('click', async () => {
-      await send({ type: 'REMOVE_ANNOTATION', tabId: state.tabId, id: a.id });
-      refreshAnnotations();
-    });
-    els.annoList.appendChild(row);
+  const drawings = state.annotations.filter((a) => a.kind === 'drawing');
+  if (drawings.length) renderSendTray(drawings);
+
+  const supporting = state.annotations.filter((a) => a.kind !== 'drawing');
+  if (supporting.length) {
+    const group = document.createElement('div');
+    group.className = 'anno-support';
+    const title = document.createElement('div');
+    title.className = 'anno-support-title';
+    title.textContent = t('annotations.otherNotes');
+    group.appendChild(title);
+    supporting.forEach((a) => group.appendChild(renderSupportAnnotationItem(a)));
+    els.annoList.appendChild(group);
+  }
+}
+
+function renderSendTray(drawings) {
+  const sendCount = drawings.filter((a) => a.forAI !== false).length;
+  const savedOnly = drawings.length - sendCount;
+  const unresolved = drawings.filter((a) => !a.resolved).length;
+
+  const summary = document.createElement('div');
+  summary.className = 'anno-tray-summary';
+  summary.append(
+    buildTrayMetric(sendCount, t('annotations.sendCount'), 'send'),
+    buildTrayMetric(savedOnly, t('annotations.savedOnlyCount'), 'saved'),
+    buildTrayMetric(unresolved, t('annotations.needsCheckCount'), unresolved ? 'warn' : '')
+  );
+  els.annoList.appendChild(summary);
+
+  if (!sendCount) {
+    const empty = document.createElement('div');
+    empty.className = 'anno-tray-empty';
+    empty.textContent = t('annotations.trayEmpty');
+    els.annoList.appendChild(empty);
+  }
+
+  drawings.forEach((a, index) => {
+    els.annoList.appendChild(renderDrawingTrayItem(a, index + 1));
   });
+}
+
+function buildTrayMetric(value, label, tone) {
+  const cell = document.createElement('div');
+  cell.className = `anno-tray-metric ${tone || ''}`.trim();
+  const num = document.createElement('b');
+  num.textContent = String(value);
+  const text = document.createElement('span');
+  text.textContent = label;
+  cell.append(num, text);
+  return cell;
+}
+
+function renderDrawingTrayItem(a, index) {
+  const row = document.createElement('div');
+  row.className = `anno-tray-item${a.resolved ? '' : ' unresolved'}${a.forAI === false ? ' off' : ''}`;
+  row.appendChild(renderDrawingPreview(a, index));
+
+  const body = document.createElement('div');
+  body.className = 'anno-tray-body';
+
+  const head = document.createElement('div');
+  head.className = 'anno-tray-title-row';
+  const num = document.createElement('span');
+  num.className = 'anno-tray-num';
+  num.textContent = String(index);
+  const title = document.createElement('span');
+  title.className = 'anno-tray-title';
+  title.textContent = a.note || a.shapeText || t('annotations.kind.drawing');
+  const flag = document.createElement('span');
+  flag.className = `anno-flag ${a.forAI === false ? 'off' : 'on'}`;
+  flag.textContent = a.forAI === false ? t('annotations.forAIOff') : t('annotations.forAIOn');
+  head.append(num, title, flag);
+
+  const sub = document.createElement('div');
+  sub.className = 'anno-sub';
+  sub.textContent = a.intent || a.shapeText || t('annotations.visualIncluded');
+
+  const meta = document.createElement('div');
+  meta.className = 'anno-tray-meta';
+  const target = document.createElement('span');
+  target.textContent = a.target ? t('annotations.target', { target: a.target }) : t('annotations.targetUnknown');
+  meta.appendChild(target);
+  if (!a.resolved) {
+    const warn = document.createElement('span');
+    warn.className = 'anno-warn';
+    warn.textContent = t('annotations.unresolved');
+    meta.appendChild(warn);
+  }
+  if (a.forAI === false) {
+    const off = document.createElement('span');
+    off.textContent = t('annotations.visualExcluded');
+    meta.appendChild(off);
+  }
+
+  if (!a.resolved) {
+    const hint = document.createElement('div');
+    hint.className = 'anno-tray-hint';
+    hint.textContent = t('annotations.unresolvedHint');
+    body.append(head, sub, meta, hint, buildAnnotationActions(a, true));
+  } else {
+    body.append(head, sub, meta, buildAnnotationActions(a, true));
+  }
+  row.appendChild(body);
+  return row;
+}
+
+function renderSupportAnnotationItem(a) {
+  const row = document.createElement('div');
+  row.className = 'anno-item' + (a.resolved ? '' : ' unresolved');
+  const kind = document.createElement('span');
+  kind.className = 'anno-kind';
+  kind.textContent = kindLabel(a.kind);
+
+  const body = document.createElement('span');
+  body.className = 'anno-body';
+  const title = document.createElement('span');
+  title.className = 'anno-title';
+  title.textContent = annotationTitle(a);
+  body.appendChild(title);
+  const sub = annotationSub(a);
+  if (sub) {
+    const subEl = document.createElement('span');
+    subEl.className = 'anno-sub';
+    subEl.textContent = sub;
+    body.appendChild(subEl);
+  }
+  if (a.target) {
+    const target = document.createElement('span');
+    target.className = 'anno-target';
+    target.textContent = t('annotations.target', { target: a.target });
+    body.appendChild(target);
+  }
+  if (!a.resolved) {
+    const warn = document.createElement('span');
+    warn.className = 'anno-warn';
+    warn.textContent = t('annotations.unresolved');
+    body.appendChild(warn);
+  }
+
+  row.append(kind, body, buildAnnotationActions(a, false));
+  return row;
+}
+
+function annotationTitle(a) {
+  if (a.kind === 'note') return a.note || t('annotations.noTitle');
+  if (a.kind === 'marker') return a.name || t('annotations.noTitle');
+  if (a.kind === 'drawing') return a.note || a.shapeText || t('annotations.kind.drawing');
+  return a.label || t('annotations.noTitle');
+}
+
+function annotationSub(a) {
+  if (a.kind === 'drawing') return a.intent || a.shapeText || '';
+  return a.intent || (a.kind === 'note' ? '' : a.note) || '';
+}
+
+function buildAnnotationActions(a, onPageLabel) {
+  const actions = document.createElement('span');
+  actions.className = 'anno-actions';
+  const edit = document.createElement('button');
+  edit.type = 'button';
+  edit.dataset.act = 'edit';
+  edit.title = t('annotations.edit');
+  edit.textContent = onPageLabel ? t('annotations.openOnPage') : t('annotations.edit');
+  edit.addEventListener('click', async () => {
+    await send({ type: 'EDIT_ANNOTATION', tabId: state.tabId, id: a.id });
+  });
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.dataset.act = 'del';
+  del.title = t('annotations.delete');
+  del.textContent = t('annotations.delete');
+  del.addEventListener('click', async () => {
+    await send({ type: 'REMOVE_ANNOTATION', tabId: state.tabId, id: a.id });
+    refreshAnnotations();
+  });
+  actions.append(edit, del);
+  return actions;
+}
+
+function renderDrawingPreview(a, index) {
+  const wrap = document.createElement('div');
+  wrap.className = 'anno-preview';
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 120 72');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', t('annotations.trayPreviewLabel', { n: index }));
+  svg.appendChild(svgNode('rect', { x: 1, y: 1, width: 118, height: 70, rx: 7, class: 'anno-preview-bg' }));
+  svg.appendChild(svgNode('rect', { x: 11, y: 12, width: 68, height: 8, rx: 3, class: 'anno-preview-line strong' }));
+  svg.appendChild(svgNode('rect', { x: 11, y: 27, width: 94, height: 6, rx: 3, class: 'anno-preview-line' }));
+  svg.appendChild(svgNode('rect', { x: 11, y: 40, width: 58, height: 6, rx: 3, class: 'anno-preview-line' }));
+
+  const shapes = a.shapePreview?.shapes || [];
+  if (shapes.length) {
+    shapes.forEach((shape) => drawPreviewShape(svg, shape, a.shapePreview?.color));
+  } else {
+    drawPreviewShape(svg, { type: 'rect', x: 0.16, y: 0.26, w: 0.5, h: 0.42, color: a.shapePreview?.color }, a.shapePreview?.color);
+  }
+
+  const badge = svgNode('g', { class: 'anno-preview-badge' });
+  badge.appendChild(svgNode('circle', { cx: 104, cy: 17, r: 10 }));
+  const text = svgNode('text', { x: 104, y: 21, 'text-anchor': 'middle' });
+  text.textContent = String(index);
+  badge.appendChild(text);
+  svg.appendChild(badge);
+  wrap.appendChild(svg);
+  return wrap;
+}
+
+function drawPreviewShape(svg, shape, fallbackColor) {
+  const color = safePreviewColor(shape.color || fallbackColor);
+  const attrs = {
+    fill: 'none',
+    stroke: color,
+    'stroke-width': 3,
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round',
+  };
+  const px = (x) => 10 + Number(x || 0) * 100;
+  const py = (y) => 10 + Number(y || 0) * 52;
+  if (shape.type === 'rect') {
+    svg.appendChild(svgNode('rect', { ...attrs, x: px(shape.x), y: py(shape.y), width: Number(shape.w || 0) * 100, height: Number(shape.h || 0) * 52, rx: 4 }));
+  } else if (shape.type === 'ellipse') {
+    svg.appendChild(svgNode('ellipse', { ...attrs, cx: px(shape.cx), cy: py(shape.cy), rx: Math.abs(Number(shape.rx || 0) * 100), ry: Math.abs(Number(shape.ry || 0) * 52) }));
+  } else if (shape.type === 'arrow') {
+    svg.appendChild(svgNode('polyline', { ...attrs, points: previewArrowPoints(px(shape.x1), py(shape.y1), px(shape.x2), py(shape.y2)) }));
+  } else {
+    const pts = (shape.pts || []).map(([x, y]) => `${px(x)},${py(y)}`).join(' ');
+    svg.appendChild(svgNode('polyline', { ...attrs, points: pts }));
+  }
+}
+
+function svgNode(name, attrs) {
+  const node = document.createElementNS('http://www.w3.org/2000/svg', name);
+  for (const [key, value] of Object.entries(attrs || {})) node.setAttribute(key, value);
+  return node;
+}
+
+function safePreviewColor(color) {
+  return /^#[0-9a-fA-F]{3,8}$/.test(String(color || '')) ? color : '#ef4444';
+}
+
+function previewArrowPoints(x1, y1, x2, y2) {
+  const ang = Math.atan2(y2 - y1, x2 - x1);
+  const len = Math.min(10, Math.max(6, Math.hypot(x2 - x1, y2 - y1) * 0.22));
+  const spread = 0.48;
+  const hx1 = x2 - len * Math.cos(ang - spread);
+  const hy1 = y2 - len * Math.sin(ang - spread);
+  const hx2 = x2 - len * Math.cos(ang + spread);
+  const hy2 = y2 - len * Math.sin(ang + spread);
+  return `${x1},${y1} ${x2},${y2} ${hx1},${hy1} ${x2},${y2} ${hx2},${hy2}`;
 }
 
 // 注釈は content 側で保存されるため、storage変化を監視して一覧を更新する。
@@ -849,8 +1073,8 @@ chrome.tabs.onUpdated.addListener((_tabId, info) => {
 
 // 初期化
 async function init() {
-  const settings = await getSettings().catch(() => ({ ui: { language: DEFAULT_LOCALE } }));
-  i18n = await createI18n(settings.ui?.language || DEFAULT_LOCALE);
+  const settings = await getSettings().catch(() => ({ ui: { language: '' } }));
+  i18n = await createI18n(resolveLocale(settings.ui?.language));
   state.language = i18n.locale;
   renderLanguageOptions();
   applyI18n();

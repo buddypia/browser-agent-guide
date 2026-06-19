@@ -1,0 +1,237 @@
+{
+  "title": "MCP Daemon が Chrome 拡張連携で担う役割",
+  "eyebrow": "Browser Agent Guide / Visual Feedback",
+  "subtitle": "Chrome拡張のお描き注釈を、AIコーディングCLIが自動で読める形に変えるローカル中継プロセスの説明資料。",
+  "lang": "ja",
+  "target": "document",
+  "viewport": "desktop",
+  "theme": "forest",
+  "layout": "stack",
+  "header": "split",
+  "density": "comfortable",
+  "meta": [
+    { "k": "Daemon", "v": "bag-visual-feedback" },
+    { "k": "WS", "v": "ws://127.0.0.1:8765/ws" },
+    { "k": "MCP", "v": "http://127.0.0.1:8765/mcp" },
+    { "k": "Inbox", "v": "<Downloads>/ai-inbox" }
+  ],
+  "footer": "Sources: daemon/README.md, daemon/src/{index,ws,http,server,inbox,writer}.js, .claude/skills/bag-workflow/references/daemon-mcp.md",
+  "sections": [
+    {
+      "type": "callout",
+      "variant": "tldr",
+      "title": "一言でいうと",
+      "body": "MCP daemon は、Chrome拡張が作った注釈付きスクリーンショットをローカルに受け取り、AI CLI が MCP ツールとして取得できるようにする橋渡しです。なくてもファイル保存で使えますが、あると「画像を探して貼る」作業が消え、AI が最新のお描きを image + file_path として自動取得できます。"
+    },
+    {
+      "type": "diagram",
+      "title": "全体像: Chrome 拡張と AI CLI の間に daemon が入る",
+      "layout": "layered",
+      "zones": ["Browser", "Local daemon", "AI CLI / Workspace"],
+      "groupLabels": {
+        "1": "ブラウザ側",
+        "2": "ローカル中継",
+        "3": "AI消費側"
+      },
+      "nodes": [
+        { "id": "user", "label": "ユーザー", "sub": "画面に丸・矢印・メモを残す", "zone": "Browser", "group": 1 },
+        { "id": "extension", "label": "Chrome拡張", "sub": "お描き + 可視タブを合成", "zone": "Browser", "group": 1 },
+        { "id": "ws", "label": "WebSocket /ws", "sub": "token付きで push", "zone": "Local daemon", "group": 2 },
+        { "id": "daemon", "label": "MCP daemon", "sub": "受信・保存・公開を1プロセスで担当", "zone": "Local daemon", "group": 2 },
+        { "id": "inbox", "label": "inbox", "sub": "shot.png / raw.png / annotation.json / memo.md", "zone": "Local daemon", "group": 2 },
+        { "id": "mcp", "label": "MCP /mcp", "sub": "bag_visual_feedback:get_latest_visual_feedback", "zone": "AI CLI / Workspace", "group": 3 },
+        { "id": "ai", "label": "AIコーディングCLI", "sub": "画像を vision で読み、対象を特定", "zone": "AI CLI / Workspace", "group": 3 },
+        { "id": "repo", "label": "コード・ブラウザ検証", "sub": "修正して before / after を確認", "zone": "AI CLI / Workspace", "group": 3 }
+      ],
+      "edges": [
+        { "from": "user", "to": "extension", "label": "お描き" },
+        { "from": "extension", "to": "ws", "label": "PNG + 注釈" },
+        { "from": "ws", "to": "daemon", "label": "認証後に受信" },
+        { "from": "daemon", "to": "inbox", "label": "原子的に保存" },
+        { "from": "ai", "to": "mcp", "label": "MCP tool call" },
+        { "from": "mcp", "to": "daemon", "label": "Streamable HTTP" },
+        { "from": "daemon", "to": "ai", "label": "image + file_path" },
+        { "from": "ai", "to": "repo", "label": "実装・検証" }
+      ]
+    },
+    {
+      "type": "features",
+      "title": "なぜ必要なのか",
+      "desc": "問題は「Chrome拡張で見えているもの」と「AI CLI が読めるもの」の境界にあります。",
+      "columns": 4,
+      "items": [
+        {
+          "icon": "layers",
+          "title": "拡張とCLIは別世界",
+          "body": "Chrome拡張はブラウザ内で動き、AI CLI はターミナル側で動きます。お描き画像を直接 CLI に渡す標準経路がありません。",
+          "tag": "境界"
+        },
+        {
+          "icon": "rocket",
+          "title": "手渡しをなくす",
+          "body": "daemon があれば、ユーザーが shot.png の場所を探して貼る代わりに、CLI が最新の注釈を MCP で取りに行けます。",
+          "tag": "自動化"
+        },
+        {
+          "icon": "shield",
+          "title": "取り違えを減らす",
+          "body": "urlContains / titleContains で共有 inbox を絞り込み、別プロジェクトの直近キャプチャを誤って読む事故を避けます。",
+          "tag": "スコープ"
+        },
+        {
+          "icon": "code",
+          "title": "画像とパスを両方返す",
+          "body": "vision 対応 CLI には image を渡し、画像を直接読めない環境には file_path を渡します。この二重返却がフォールバックになります。",
+          "tag": "互換性"
+        }
+      ]
+    },
+    {
+      "type": "stepper",
+      "title": "daemon ありの通常フロー",
+      "desc": "Chrome拡張から AI CLI まで、どの瞬間に何が起きるか。",
+      "steps": [
+        {
+          "n": 1,
+          "title": "ユーザーがお描きを残す",
+          "event": "Draw",
+          "fn": "content/content-script.js",
+          "desc": "対象UIを丸・四角・矢印・ペンで囲み、メモを書く。注釈は後で番号順の手順として扱われる。",
+          "level": "info",
+          "branches": [
+            { "label": "次へ", "desc": "拡張が可視タブの capture を準備", "kind": "go" }
+          ]
+        },
+        {
+          "n": 2,
+          "title": "拡張がスクリーンショットを合成する",
+          "event": "Capture",
+          "fn": "chrome.tabs.captureVisibleTab + offscreen canvas",
+          "desc": "raw.png 相当の画面に注釈を焼き込み、shot.png 相当の画像と annotation.json / memo.md を作る。",
+          "level": "info",
+          "branches": [
+            { "label": "daemon有効", "desc": "WebSocket push へ進む", "kind": "go" },
+            { "label": "daemon無効", "desc": "chrome.downloads フォールバック", "kind": "warn" }
+          ]
+        },
+        {
+          "n": 3,
+          "title": "拡張が daemon に WebSocket push する",
+          "event": "WS /ws",
+          "fn": "ws://127.0.0.1:8765/ws?token=...",
+          "desc": "ブラウザ WebSocket はカスタムヘッダを付けられないため、token をクエリで渡す。失敗時は downloads 保存に戻る。",
+          "level": "block",
+          "branches": [
+            { "label": "ack", "desc": "daemon が id / dir / files を返す", "kind": "go" },
+            { "label": "error", "desc": "自動でファイル保存へフォールバック", "kind": "warn" }
+          ]
+        },
+        {
+          "n": 4,
+          "title": "daemon が inbox に保存する",
+          "event": "Write",
+          "fn": "writer.writeEntry",
+          "desc": "slug をサーバ側で採番し、shot.png / raw.png / annotation.json / memo.md を 0600 で原子的に書き込む。",
+          "level": "info",
+          "branches": [
+            { "label": "保存成功", "desc": "MCP から取得可能になる", "kind": "go" }
+          ]
+        },
+        {
+          "n": 5,
+          "title": "AI CLI が MCP ツールで読む",
+          "event": "MCP /mcp",
+          "fn": "bag_visual_feedback:get_latest_visual_feedback({ urlContains })",
+          "desc": "daemon は新しい順に inbox をスキャンし、条件に合う最新エントリを image(PNG) + file_path テキストとして返す。",
+          "level": "critical",
+          "branches": [
+            { "label": "画像あり", "desc": "モデルが注釈画像を vision で読む", "kind": "go" },
+            { "label": "画像不可", "desc": "file_path から PNG と annotation.json を読む", "kind": "warn" }
+          ]
+        },
+        {
+          "n": 6,
+          "title": "AI が対象を特定して修正・検証する",
+          "event": "Act",
+          "fn": "playwright-cli / rg / tests",
+          "desc": "画像と annotation.json の anchorLabel / selector / testid を使ってコード箇所を探し、修正後にブラウザやテストで確認する。",
+          "level": "neutral",
+          "branches": [
+            { "label": "完了", "desc": "before / after と実行結果を報告", "kind": "go" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "comparison",
+      "label": "daemonなし / あり の違い",
+      "options": [
+        {
+          "name": "daemon なし",
+          "metrics": [
+            { "k": "保存先", "v": "chrome.downloads" },
+            { "k": "受け渡し", "v": "人がパスを渡す" },
+            { "k": "MCP", "v": "使わない" }
+          ],
+          "pros": [
+            "常駐プロセスなしで動く",
+            "Chrome拡張単体のフォールバックとして堅い",
+            "shot.png / annotation.json は残るので後から読める"
+          ],
+          "cons": [
+            "AI CLI へ画像パスを手渡ししがち",
+            "ブラウザの実ダウンロード先に依存する",
+            "通知やファイル探索が増え、ワークフローが途切れる"
+          ]
+        },
+        {
+          "name": "daemon あり",
+          "recommended": true,
+          "metrics": [
+            { "k": "保存先", "v": "daemon 管理 inbox" },
+            { "k": "受け渡し", "v": "MCP 自動取得" },
+            { "k": "MCP", "v": "/mcp で公開" }
+          ],
+          "pros": [
+            "拡張から WebSocket で直接 push できる",
+            "AI CLI が bag_visual_feedback:get_latest_visual_feedback で image + file_path を取得できる",
+            "urlContains / titleContains で別案件のキャプチャを避けられる"
+          ],
+          "cons": [
+            "daemon 起動と token 設定が必要",
+            "CLI 側に MCP 登録が必要",
+            "loopback でも WS token 管理を怠れない"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "statlist",
+      "title": "daemon が実際に公開・処理しているもの",
+      "desc": "実装上の責務を、入口・保存・公開・安全策に分けて見る。",
+      "columns": 2,
+      "items": [
+        { "k": "WebSocket endpoint", "v": "/ws", "note": "Chrome拡張から type=visual_feedback のペイロードを受け取る。token が不一致なら 401 で拒否。" },
+        { "k": "MCP endpoint", "v": "/mcp", "note": "Streamable HTTP。AI CLI が MCP tool call でアクセスする。" },
+        { "k": "Health check", "v": "/healthz", "note": "daemon が読んでいる現在の inboxDir を返す。保存先確認の権威。" },
+        { "k": "保存ファイル", "v": "shot / raw / json / memo", "note": "注釈入り画像、元画像、構造化メタ、読みやすいメモを同じ slug 配下へ保存。" },
+        { "k": "MCP tool", "v": "bag_visual_feedback:list_visual_feedback", "note": "候補を新しい順に一覧。url/title フィルタ対応。" },
+        { "k": "MCP tool", "v": "bag_visual_feedback:get_latest_visual_feedback", "note": "主用途。最新の一致エントリを image + file_path で返す。" },
+        { "k": "MCP tool", "v": "bag_visual_feedback:get_visual_feedback", "note": "id 指定で特定の注釈を取得する。" },
+        { "k": "保存先追従", "v": "downloadsDir handshake", "note": "拡張が実ダウンロード先を報告すると、daemon が inbox を <downloadsDir>/ai-inbox に合わせる。" }
+      ]
+    },
+    {
+      "type": "callout",
+      "variant": "warning",
+      "title": "注意点",
+      "body": "inbox は共有されるため、AI CLI が最新を読む時は urlContains または titleContains で作業中ページに絞るのが基本です。また /mcp は loopback 前提、/ws は token 認証付きですが、localhost は完全な隔離境界ではないため token を安全に扱う必要があります。"
+    },
+    {
+      "type": "callout",
+      "variant": "success",
+      "title": "導入後の使い方",
+      "body": "daemon を起動して token を拡張オプションへ貼り、CLI に http://127.0.0.1:8765/mcp を登録します。その後はブラウザでお描きして送るだけで、AI に「最新の視覚フィードバックを見て直して」と頼めるようになります。"
+    }
+  ]
+}

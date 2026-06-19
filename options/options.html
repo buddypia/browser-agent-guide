@@ -9,41 +9,53 @@
   <body>
     <main class="container">
       <header class="page-head">
-        <h1>Browser Agent Guide 設定</h1>
-        <p>AI接続、保存範囲、ページごとの記憶ルールを管理します。</p>
+        <div class="page-head-row">
+          <h1 data-i18n="opt.docTitle">Browser Agent Guide 設定</h1>
+          <label class="lang-field">
+            <span data-i18n="language.label">言語</span>
+            <select id="ui-language" aria-label="Language" data-i18n-aria-label="language.label">
+              <option value="auto" data-i18n="language.auto">自動（ブラウザ）</option>
+              <option value="en">English</option>
+              <option value="ko">한국어</option>
+              <option value="ja">日本語</option>
+              <option value="zh">中文</option>
+            </select>
+          </label>
+        </div>
+        <p data-i18n="opt.head.desc">AI接続、保存範囲、ページごとの記憶ルールを管理します。</p>
       </header>
 
       <!-- AI接続設定 -->
       <section class="card">
-        <h2>AI 接続</h2>
+        <h2 data-i18n="opt.ai.h2">AI 接続</h2>
         <div class="grid">
           <label>
-            プロバイダ
+            <span data-i18n="opt.ai.provider">プロバイダ</span>
             <select id="provider">
               <option value="openai">OpenAI</option>
               <option value="anthropic">Anthropic (Claude)</option>
               <option value="gemini">Gemini</option>
-              <option value="custom">カスタム (OpenAI互換)</option>
+              <option value="custom" data-i18n="opt.ai.providerCustom">カスタム (OpenAI互換)</option>
             </select>
           </label>
           <label>
-            APIキー
-            <input id="apiKey" type="password" placeholder="APIキー / ローカルにのみ保存" autocomplete="off" />
+            <span data-i18n="opt.ai.apiKey">APIキー</span>
+            <input id="apiKey" type="password" placeholder="APIキー / ローカルにのみ保存" data-i18n-placeholder="opt.ai.apiKeyPlaceholder" autocomplete="off" />
           </label>
           <label class="oai-field">
             Base URL
             <input id="baseUrl" type="text" placeholder="https://api.openai.com/v1" />
           </label>
           <label class="oai-field">
-            モデル
+            <span data-i18n="opt.ai.model">モデル</span>
             <input id="model" type="text" placeholder="gpt-4o-mini" />
           </label>
           <label class="anthropic-field">
-            Anthropic モデル
+            <span data-i18n="opt.ai.anthropicModel">Anthropic モデル</span>
             <input id="anthropicModel" type="text" placeholder="claude-sonnet-4-6" />
           </label>
           <label class="gemini-field">
-            Gemini モデル
+            <span data-i18n="opt.ai.geminiModel">Gemini モデル</span>
             <input id="geminiModel" type="text" placeholder="gemini-3.5-flash" />
           </label>
           <label>
@@ -52,32 +64,32 @@
           </label>
         </div>
         <div class="row">
-          <button id="save-ai" class="primary" data-agent-id="@agent:options.ai.save" data-agent-action="submit">保存</button>
+          <button id="save-ai" class="primary" data-agent-id="@agent:options.ai.save" data-agent-action="submit" data-i18n="opt.common.save">保存</button>
           <span id="ai-status" class="status"></span>
         </div>
-        <p class="hint">
+        <p class="hint" data-i18n-html="opt.ai.keyHint">
           APIキーは <code>chrome.storage.local</code> にのみ保存され、外部送信は選択したAI APIへのリクエスト時のみです。
         </p>
       </section>
 
       <!-- 自動保存 -->
       <section class="card">
-        <h2>自動保存</h2>
+        <h2 data-i18n="opt.memory.h2">自動保存</h2>
         <div class="grid">
           <label>
-            既定の保存範囲
+            <span data-i18n="opt.memory.defaultScope">既定の保存範囲</span>
             <select id="default-scope">
-              <option value="page">このURLだけ</option>
-              <option value="domain">このドメイン全体</option>
-              <option value="all">すべてのサイト</option>
+              <option value="page" data-i18n="opt.memory.scopePage">このURLだけ</option>
+              <option value="domain" data-i18n="opt.memory.scopeDomain">このドメイン全体</option>
+              <option value="all" data-i18n="opt.memory.scopeAll">すべてのサイト</option>
             </select>
           </label>
         </div>
         <div class="row">
-          <button id="save-memory" class="primary" data-agent-id="@agent:options.memory.save" data-agent-action="submit">保存</button>
+          <button id="save-memory" class="primary" data-agent-id="@agent:options.memory.save" data-agent-action="submit" data-i18n="opt.common.save">保存</button>
           <span id="memory-status" class="status"></span>
         </div>
-        <p class="hint">
+        <p class="hint" data-i18n-html="opt.memory.hint">
           サイドバーのチャットで <code>injectHtml</code> / <code>injectCss</code> / <code>injectScript</code> などが成功したとき、
           ここで選んだ範囲の再訪時ルールに自動保存されます。個別ルールは下の一覧で後から変更できます。
         </p>
@@ -85,49 +97,56 @@
 
       <!-- 視覚フィードバック デーモン -->
       <section class="card">
-        <h2>視覚フィードバック デーモン</h2>
-        <p class="hint">
+        <h2 data-i18n="opt.daemon.h2">視覚フィードバック デーモン</h2>
+        <p class="hint" data-i18n-html="opt.daemon.intro">
           「お描きを画像でAIへ」を、ダウンロード保存ではなく常駐デーモンへ <code>WebSocket</code> で直接送ります（有効時）。
-          デーモンを起動し（<code>cd daemon && npm start</code>）、起動時に表示される <code>token</code> を下に貼ってください。
+          デーモンを起動し（<code>cd daemon &amp;&amp; npm start</code>）、起動時に表示される <code>token</code> を下に貼ってください。
           無効時や未到達時は従来どおり <code>chrome.downloads</code> に保存します。
         </p>
         <div class="grid">
           <label class="checkbox-row">
             <input id="daemon-enabled" type="checkbox" />
-            デーモンへ送る（WebSocket push を有効化）
+            <span data-i18n="opt.daemon.enable">デーモンへ送る（WebSocket push を有効化）</span>
+          </label>
+          <label class="checkbox-row">
+            <input id="vf-auto-sync" type="checkbox" />
+            <span data-i18n="opt.daemon.autoSync">AIトレイを自動同期（送信ボタン不要）</span>
           </label>
           <label>
             WebSocket URL
             <input id="daemon-url" type="text" placeholder="ws://127.0.0.1:8765/ws" />
           </label>
           <label>
-            トークン
-            <input id="daemon-token" type="password" placeholder="デーモン起動時に表示される token" autocomplete="off" />
+            <span data-i18n="opt.daemon.token">トークン</span>
+            <input id="daemon-token" type="password" placeholder="デーモン起動時に表示される token" data-i18n-placeholder="opt.daemon.tokenPlaceholder" autocomplete="off" />
           </label>
         </div>
         <div class="row">
-          <button id="save-daemon" class="primary" data-agent-id="@agent:options.daemon.save" data-agent-action="submit">保存</button>
-          <button id="test-daemon" class="secondary" data-agent-id="@agent:options.daemon.test" data-agent-action="submit">接続テスト</button>
+          <button id="save-daemon" class="primary" data-agent-id="@agent:options.daemon.save" data-agent-action="submit" data-i18n="opt.common.save">保存</button>
+          <button id="test-daemon" class="secondary" data-agent-id="@agent:options.daemon.test" data-agent-action="submit" data-i18n="opt.daemon.test">接続テスト</button>
           <span id="daemon-status" class="status"></span>
         </div>
-        <p class="hint">
+        <p class="hint" data-i18n-html="opt.daemon.hint">
           トークンはローカル WebSocket の認証用です（悪性Webページからの localhost 接続を防ぐ / CVE-2025-52882 対策）。
           <code>chrome.storage.local</code> にのみ保存されます。
+        </p>
+        <p class="hint" data-i18n="opt.daemon.autoSyncHint">
+          自動同期はデーモン到達時だけ送信し、失敗時に自動ダウンロードは行いません。
         </p>
       </section>
 
       <!-- サイトルール -->
       <section class="card">
-        <h2>記憶したURL / 有効化ルール</h2>
-        <p class="hint">
+        <h2 data-i18n="opt.rules.h2">記憶したURL / 有効化ルール</h2>
+        <p class="hint" data-i18n="opt.rules.hint">
           補足を保存したり、チャットでページに変更を加えたりすると、そのURLのルールが自動で追加されます。
           手動追加はドメイン全体など広い範囲に適用したい場合に使います。
         </p>
-        <div class="rules-wrap" tabindex="0" aria-label="記憶したURLルールの表">
+        <div class="rules-wrap" tabindex="0" aria-label="記憶したURLルールの表" data-i18n-aria-label="opt.rules.tableAria">
           <table class="rules">
             <thead>
               <tr>
-                <th>有効</th><th>ラベル</th><th>一致種別</th><th>パターン</th><th>操作</th>
+                <th data-i18n="opt.rules.thEnabled">有効</th><th data-i18n="opt.rules.thLabel">ラベル</th><th data-i18n="opt.rules.thMatch">一致種別</th><th data-i18n="opt.rules.thPattern">パターン</th><th data-i18n="opt.rules.thActions">操作</th>
               </tr>
             </thead>
             <tbody id="rules-body"></tbody>
@@ -135,57 +154,57 @@
         </div>
         <div class="add-rule">
           <label>
-            ラベル
-            <input id="new-label" placeholder="任意" />
+            <span data-i18n="opt.rules.addLabel">ラベル</span>
+            <input id="new-label" placeholder="任意" data-i18n-placeholder="opt.rules.addLabelPlaceholder" />
           </label>
           <label>
-            一致種別
+            <span data-i18n="opt.rules.addMatch">一致種別</span>
             <select id="new-type">
-              <option value="page">ページURL一致</option>
-              <option value="domain">ドメイン一致</option>
-              <option value="all">すべてのサイト</option>
-              <option value="prefix">URL前方一致</option>
-              <option value="regex">正規表現</option>
+              <option value="page" data-i18n="opt.match.pageFull">ページURL一致</option>
+              <option value="domain" data-i18n="opt.match.domainFull">ドメイン一致</option>
+              <option value="all" data-i18n="opt.match.allFull">すべてのサイト</option>
+              <option value="prefix" data-i18n="opt.match.prefixFull">URL前方一致</option>
+              <option value="regex" data-i18n="opt.match.regexFull">正規表現</option>
             </select>
           </label>
           <label>
-            パターン
-            <input id="new-pattern" placeholder="例: https://example.com/app / example.com / ^https://.*\\.example\\.com" />
+            <span data-i18n="opt.rules.addPattern">パターン</span>
+            <input id="new-pattern" placeholder="例: https://example.com/app / example.com / ^https://.*\\.example\\.com" data-i18n-placeholder="opt.rules.patternPlaceholder" />
           </label>
-          <button id="add-rule" class="primary" data-agent-id="@agent:options.rules.add" data-agent-action="submit">追加</button>
+          <button id="add-rule" class="primary" data-agent-id="@agent:options.rules.add" data-agent-action="submit" data-i18n="opt.rules.add">追加</button>
         </div>
       </section>
 
       <!-- レシピ -->
       <section class="card">
-        <h2>記憶ルール</h2>
-        <p class="hint">
+        <h2 data-i18n="opt.recipe.h2">記憶ルール</h2>
+        <p class="hint" data-i18n="opt.recipe.hint">
           選択したURL/ルールのページ読込時に毎回適用される動詞アクションのJSON配列です。
           チャットで追加された表示変更もここに保存されます。
         </p>
         <label>
-          対象URL / ルール
+          <span data-i18n="opt.recipe.targetUrl">対象URL / ルール</span>
           <select id="recipe-site"></select>
         </label>
         <label>
-          レシピJSON
+          <span data-i18n="opt.recipe.json">レシピJSON</span>
           <textarea id="recipe-json" rows="12" spellcheck="false" placeholder='[
     { "verb": "injectButton", "args": { "label": "要約", "intent": "このページの要約を依頼する手がかり" } }
   ]'></textarea>
         </label>
         <div class="row">
-          <button id="save-recipe" class="primary" data-agent-id="@agent:options.recipe.save" data-agent-action="submit">保存</button>
-          <button id="recipe-template" class="secondary">テンプレート</button>
+          <button id="save-recipe" class="primary" data-agent-id="@agent:options.recipe.save" data-agent-action="submit" data-i18n="opt.common.save">保存</button>
+          <button id="recipe-template" class="secondary" data-i18n="opt.recipe.template">テンプレート</button>
           <span id="recipe-status" class="status"></span>
         </div>
       </section>
 
       <!-- インポート/エクスポート -->
       <section class="card">
-        <h2>バックアップ</h2>
+        <h2 data-i18n="opt.backup.h2">バックアップ</h2>
         <div class="row">
-          <button id="export" class="secondary" data-agent-id="@agent:options.export" data-agent-action="submit">エクスポート</button>
-          <button id="import" class="secondary" data-agent-id="@agent:options.import" data-agent-action="submit">インポート</button>
+          <button id="export" class="secondary" data-agent-id="@agent:options.export" data-agent-action="submit" data-i18n="opt.backup.export">エクスポート</button>
+          <button id="import" class="secondary" data-agent-id="@agent:options.import" data-agent-action="submit" data-i18n="opt.backup.import">インポート</button>
           <input id="import-file" type="file" accept="application/json" hidden />
         </div>
       </section>

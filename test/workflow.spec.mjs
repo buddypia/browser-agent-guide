@@ -10,6 +10,9 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const contentScript = fs.readFileSync(path.join(projectRoot, 'content/content-script.js'), 'utf8');
 const contentCss = fs.readFileSync(path.join(projectRoot, 'content/content.css'), 'utf8');
+// content-script は SW から GET_I18N でロケール辞書を受け取る。テストでは日本語辞書を供給して
+// 既定言語のUI(「2手順」「AIメモ」等)を再現する。
+const jaLocaleJson = fs.readFileSync(path.join(projectRoot, 'sidepanel/locales/ja.json'), 'utf8');
 
 // 縦に並んだ3つの対象要素。t1,t2 にお描き(手順1,2)、t3 は addWorkflowStep の対象。
 const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"></head>
@@ -22,11 +25,20 @@ const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"></head>
 const CHROME_STUB = `
   window.__bagListener = null;
   window.__store = {};
+  window.__bagI18n = ${jaLocaleJson};
   const __clone = (v) => (v === undefined ? undefined : structuredClone(v));
   window.chrome = {
     runtime: {
       onMessage: { addListener: (fn) => { window.__bagListener = fn; } },
-      sendMessage: (_msg, cb) => { if (typeof cb === 'function') cb({ ok: true }); },
+      sendMessage: (msg, cb) => {
+        if (msg && msg.type === 'GET_I18N') {
+          const r = { ok: true, result: { locale: 'ja', messages: window.__bagI18n, fallback: window.__bagI18n } };
+          if (typeof cb === 'function') { cb(r); return; }
+          return Promise.resolve(r);
+        }
+        if (typeof cb === 'function') { cb({ ok: true }); return; }
+        return Promise.resolve({ ok: true });
+      },
       get lastError() { return null; },
     },
     storage: {
@@ -51,6 +63,9 @@ async function drawRectOver(page, topY) {
   await page.mouse.move(210, topY + 40, { steps: 5 });
   await page.mouse.up();
   await page.locator('.bag-draw-op[data-op="done"]').click();
+  await expect(page.locator('.bag-author [data-f="save"]')).toHaveText('メモを残す');
+  await page.locator('.bag-author [data-f="save"]').click();
+  await expect(page.locator('.bag-author')).toHaveCount(0);
   await page.mouse.move(960, 780); // メモ/パネルから離す
 }
 

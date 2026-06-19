@@ -1,5 +1,6 @@
 // 設定ページ。AI接続・サイトルール・レシピを編集して保存する。
 import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../lib/storage.js';
+import { createI18n, resolveLocale, normalizeLocale, languageName } from '../sidepanel/i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const SAFE_RECIPE_VERBS = new Set(['injectHtml', 'injectCss', 'injectScript', 'outlineElement', 'injectButton', 'injectPanel']);
@@ -7,9 +8,39 @@ const REMEMBER_SCOPES = new Set(['page', 'domain', 'all']);
 
 let settings = structuredClone(DEFAULT_SETTINGS);
 
+// ---- i18n（サイドパネルと同じ辞書を直接 import。options は ES module なので import 可能） ----
+let i18n = null;
+const t = (key, vars) => i18n?.t(key, vars) ?? key;
+
+// data-i18n* 属性を持つ要素へ翻訳を適用する（sidepanel.js と同じ規約 + data-i18n-html）。
+function applyI18n() {
+  if (!i18n) return;
+  document.documentElement.lang = i18n.locale;
+  document.title = t('opt.docTitle');
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  // 信頼できる静的文言のみ。<code> 等のインラインマークアップを含むヒントで使う。
+  document.querySelectorAll('[data-i18n-html]').forEach((el) => {
+    el.innerHTML = t(el.dataset.i18nHtml);
+  });
+  document.querySelectorAll('[data-i18n-title]').forEach((el) => {
+    el.setAttribute('title', t(el.dataset.i18nTitle));
+  });
+  document.querySelectorAll('[data-i18n-aria-label]').forEach((el) => {
+    el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel));
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+    el.setAttribute('placeholder', t(el.dataset.i18nPlaceholder));
+  });
+}
+
 // ---- 初期化 ----
 async function init() {
   settings = await getSettings();
+  i18n = await createI18n(resolveLocale(settings.ui?.language));
+  $('ui-language').value = normalizeRememberLanguage(settings.ui?.language);
+  applyI18n();
   fillAiForm();
   fillMemoryForm();
   fillDaemonForm();
@@ -19,10 +50,29 @@ async function init() {
   bindEvents();
 }
 
+// UI言語セレクタの値（保存値そのまま。未設定/不正は 'auto'）。
+function normalizeRememberLanguage(language) {
+  return ['auto', 'en', 'ko', 'ja', 'zh'].includes(language) ? language : 'auto';
+}
+
+// 言語セレクタ変更: 設定へ保存し、辞書を切り替えて画面を即再描画する。
+async function changeLanguage(nextLanguage) {
+  const language = normalizeRememberLanguage(nextLanguage);
+  settings.ui = { ...(settings.ui || {}), language };
+  await saveSettings(settings);
+  await i18n.setLocale(resolveLocale(language));
+  applyI18n();
+  // 動的に生成される一覧/ステータスも翻訳し直す。
+  renderRules();
+  renderRecipeSites();
+  setStatus('ai-status', t('language.changed', { language: languageName(i18n.locale) }), true);
+}
+
 // ---- 視覚フィードバック デーモン ----
 function fillDaemonForm() {
   const d = settings.daemon || {};
   $('daemon-enabled').checked = Boolean(d.enabled);
+  $('vf-auto-sync').checked = Boolean(settings.visualFeedback?.autoSync);
   $('daemon-url').value = d.url || DEFAULT_SETTINGS.daemon.url;
   $('daemon-token').value = d.token || '';
 }
@@ -34,8 +84,12 @@ async function saveDaemon() {
     url: $('daemon-url').value.trim() || DEFAULT_SETTINGS.daemon.url,
     token: $('daemon-token').value.trim(),
   };
+  settings.visualFeedback = {
+    ...(settings.visualFeedback || {}),
+    autoSync: $('vf-auto-sync').checked,
+  };
   await saveSettings(settings);
-  setStatus('daemon-status', '保存しました', true);
+  setStatus('daemon-status', t('opt.status.saved'), true);
 }
 
 // デーモンへ WebSocket 接続できるか（認証含む）を確認する。送信はしない。
@@ -43,15 +97,15 @@ function testDaemon() {
   const url = $('daemon-url').value.trim();
   const token = $('daemon-token').value.trim();
   if (!url) {
-    setStatus('daemon-status', 'URL を入力してください', false);
+    setStatus('daemon-status', t('opt.daemon.enterUrl'), false);
     return;
   }
-  setStatus('daemon-status', '接続中…', true);
+  setStatus('daemon-status', t('opt.daemon.connecting'), true);
   let ws;
   try {
     ws = new WebSocket(`${url}?token=${encodeURIComponent(token)}`);
   } catch (e) {
-    setStatus('daemon-status', `URL が不正です: ${e.message}`, false);
+    setStatus('daemon-status', t('opt.daemon.invalidUrl', { message: e.message }), false);
     return;
   }
   const timer = setTimeout(() => {
@@ -60,16 +114,16 @@ function testDaemon() {
     } catch {
       /* 既に閉じている */
     }
-    setStatus('daemon-status', 'タイムアウト（デーモン未起動かURL違い）', false);
+    setStatus('daemon-status', t('opt.daemon.timeout'), false);
   }, 4000);
   ws.onopen = () => {
     clearTimeout(timer);
-    setStatus('daemon-status', '接続OK（認証成功）', true);
+    setStatus('daemon-status', t('opt.daemon.testOk'), true);
     ws.close();
   };
   ws.onerror = () => {
     clearTimeout(timer);
-    setStatus('daemon-status', '接続失敗（未起動 / URL違い / トークン不一致）', false);
+    setStatus('daemon-status', t('opt.daemon.testFailed'), false);
   };
 }
 
@@ -107,7 +161,7 @@ async function saveAi() {
     temperature: Number($('temperature').value) || 0,
   };
   await saveSettings(settings);
-  setStatus('ai-status', '保存しました', true);
+  setStatus('ai-status', t('opt.status.saved'), true);
 }
 
 async function saveMemory() {
@@ -116,7 +170,7 @@ async function saveMemory() {
     defaultScope: normalizeRememberScope($('default-scope').value),
   };
   await saveSettings(settings);
-  setStatus('memory-status', '保存しました', true);
+  setStatus('memory-status', t('opt.status.saved'), true);
 }
 
 // ---- サイトルール ----
@@ -124,7 +178,7 @@ function renderRules() {
   const body = $('rules-body');
   body.innerHTML = '';
   if (!settings.sites.length) {
-    body.innerHTML = '<tr><td colspan="5" class="hint">まだ記憶したURLはありません。補足やチャットで変更すると自動で追加されます。</td></tr>';
+    body.innerHTML = `<tr><td colspan="5" class="hint">${escapeHtmlText(t('opt.rules.empty'))}</td></tr>`;
   }
   settings.sites.forEach((rule) => {
     const tr = document.createElement('tr');
@@ -133,15 +187,15 @@ function renderRules() {
       <td><input type="text" value="${escapeAttr(rule.label || '')}" data-act="label" /></td>
       <td>
         <select data-act="type">
-          <option value="page" ${rule.matchType === 'page' ? 'selected' : ''}>ページURL</option>
-          <option value="domain" ${rule.matchType === 'domain' ? 'selected' : ''}>ドメイン</option>
-          <option value="all" ${rule.matchType === 'all' ? 'selected' : ''}>すべて</option>
-          <option value="prefix" ${rule.matchType === 'prefix' ? 'selected' : ''}>前方一致</option>
-          <option value="regex" ${rule.matchType === 'regex' ? 'selected' : ''}>正規表現</option>
+          <option value="page" ${rule.matchType === 'page' ? 'selected' : ''}>${escapeHtmlText(t('opt.match.page'))}</option>
+          <option value="domain" ${rule.matchType === 'domain' ? 'selected' : ''}>${escapeHtmlText(t('opt.match.domain'))}</option>
+          <option value="all" ${rule.matchType === 'all' ? 'selected' : ''}>${escapeHtmlText(t('opt.match.all'))}</option>
+          <option value="prefix" ${rule.matchType === 'prefix' ? 'selected' : ''}>${escapeHtmlText(t('opt.match.prefix'))}</option>
+          <option value="regex" ${rule.matchType === 'regex' ? 'selected' : ''}>${escapeHtmlText(t('opt.match.regex'))}</option>
         </select>
       </td>
       <td><input type="text" class="pattern" value="${escapeAttr(rule.pattern || '')}" data-act="pattern" /></td>
-      <td><button class="danger" data-act="del">削除</button></td>`;
+      <td><button class="danger" data-act="del">${escapeHtmlText(t('opt.common.delete'))}</button></td>`;
     bindRuleRow(tr, rule);
     body.appendChild(tr);
   });
@@ -177,7 +231,7 @@ function addRule() {
   const matchType = $('new-type').value;
   const pattern = matchType === 'all' ? '*' : $('new-pattern').value.trim();
   if (!pattern) {
-    alert('パターンを入力してください。');
+    alert(t('opt.rules.enterPattern'));
     return;
   }
   settings.sites.push({
@@ -204,7 +258,7 @@ function renderRecipeSites() {
   const prev = sel.value;
   sel.innerHTML = '';
   if (!settings.sites.length) {
-    sel.innerHTML = '<option value="">(補足やチャット変更で自動追加)</option>';
+    sel.innerHTML = `<option value="">${escapeHtmlText(t('opt.recipe.autoAddOption'))}</option>`;
     $('recipe-json').value = '';
     return;
   }
@@ -230,20 +284,20 @@ async function saveRecipe() {
   let parsed;
   try {
     parsed = JSON.parse($('recipe-json').value || '[]');
-    if (!Array.isArray(parsed)) throw new Error('配列である必要があります。');
+    if (!Array.isArray(parsed)) throw new Error(t('opt.recipe.errArray'));
     for (const a of parsed) {
-      if (!a || typeof a.verb !== 'string') throw new Error('各要素は {verb, args} 形式です。');
+      if (!a || typeof a.verb !== 'string') throw new Error(t('opt.recipe.errShape'));
       if (!SAFE_RECIPE_VERBS.has(a.verb)) {
-        throw new Error(`レシピで使える動詞は ${Array.from(SAFE_RECIPE_VERBS).join(', ')} のみです: ${a.verb}`);
+        throw new Error(t('opt.recipe.errVerb', { verbs: Array.from(SAFE_RECIPE_VERBS).join(', '), verb: a.verb }));
       }
     }
   } catch (e) {
-    setStatus('recipe-status', `JSONエラー: ${e.message}`, false);
+    setStatus('recipe-status', t('opt.recipe.errJson', { message: e.message }), false);
     return;
   }
   settings.recipes[id] = parsed;
   await saveSettings(settings);
-  setStatus('recipe-status', '保存しました', true);
+  setStatus('recipe-status', t('opt.status.saved'), true);
 }
 
 function insertTemplate() {
@@ -303,17 +357,22 @@ function importSettings(file) {
       memory: { ...DEFAULT_SETTINGS.memory, ...(data.memory || {}) },
       ui: { ...DEFAULT_SETTINGS.ui, ...(data.ui || {}) },
       daemon: { ...DEFAULT_SETTINGS.daemon, ...(data.daemon || {}) },
+      visualFeedback: { ...DEFAULT_SETTINGS.visualFeedback, ...(data.visualFeedback || {}) },
     };
       await saveSettings(settings);
+      // インポートした言語設定を反映する。
+      $('ui-language').value = normalizeRememberLanguage(settings.ui?.language);
+      await i18n.setLocale(resolveLocale(settings.ui?.language));
+      applyI18n();
       fillAiForm();
       fillMemoryForm();
       fillDaemonForm();
       renderRules();
       renderRecipeSites();
       toggleProviderFields();
-      setStatus('ai-status', 'インポートしました', true);
+      setStatus('ai-status', t('opt.status.imported'), true);
     } catch (e) {
-      alert(`インポート失敗: ${e.message}`);
+      alert(t('opt.status.importFailed', { message: e.message }));
     }
   };
   reader.readAsText(file);
@@ -329,8 +388,17 @@ function setStatus(id, msg, ok) {
 function escapeAttr(s) {
   return String(s).replace(/"/g, '&quot;');
 }
+function escapeHtmlText(s) {
+  return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+}
 function matchTypeLabel(type) {
-  return { page: 'ページURL', domain: 'ドメイン', all: 'すべて', prefix: '前方一致', regex: '正規表現' }[type] || type;
+  return {
+    page: t('opt.match.page'),
+    domain: t('opt.match.domain'),
+    all: t('opt.match.all'),
+    prefix: t('opt.match.prefix'),
+    regex: t('opt.match.regex'),
+  }[type] || type;
 }
 function normalizeRememberScope(scope) {
   return REMEMBER_SCOPES.has(scope) ? scope : 'page';
@@ -338,6 +406,7 @@ function normalizeRememberScope(scope) {
 
 // ---- イベント結線 ----
 function bindEvents() {
+  $('ui-language').addEventListener('change', (e) => changeLanguage(e.target.value));
   $('provider').addEventListener('change', toggleProviderFields);
   $('save-ai').addEventListener('click', saveAi);
   $('save-memory').addEventListener('click', saveMemory);

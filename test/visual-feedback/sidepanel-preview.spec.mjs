@@ -53,6 +53,10 @@ test('preview: お描きがある時、注釈パネルに画像でAIへ渡すCTA
       forAI: true,
       target: '提供API一覧',
       resolved: true,
+      shapePreview: {
+        color: '#ef4444',
+        shapes: [{ type: 'rect', x: 0.18, y: 0.22, w: 0.62, h: 0.46, color: '#ef4444' }],
+      },
     };
     function result(message) {
       switch (message?.type) {
@@ -80,9 +84,11 @@ test('preview: お描きがある時、注釈パネルに画像でAIへ渡すCTA
   });
 
   await page.goto(`${origin}/sidepanel/sidepanel.html`);
+  await expect(page.getByText('AI send tray')).toBeVisible();
   const cta = page.locator('#btn-capture');
   await expect(cta).toBeVisible();
-  await expect(cta).toContainText('Send drawing to AI');
+  await expect(cta).toContainText('Send tray as image to AI');
+  await expect(page.getByLabel('Preview of drawing 1')).toBeVisible();
 
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   await page.locator('#anno-panel').screenshot({ path: outPath });

@@ -11,6 +11,30 @@
   // 同一ページ読込内でのレシピ二重適用を防ぐための署名
   let appliedRecipeSig = null;
 
+  // ---- i18n: ロケール辞書をサービスワーカー経由で受け取り、同期 t() で描画する ----
+  // content script は非モジュールIIFEで sidepanel/i18n.js を import できず、ページ由来の fetch は
+  // web_accessible_resources を要する。そこで拡張オリジンを持つ SW に辞書を要求し、ここでは同期解決する。
+  // ※ AI へ渡すテキスト(動詞カタログ・図形の説明・文脈エクスポート)は対象外で日本語のまま。
+  let i18nMessages = {};
+  let i18nFallback = {};
+  function t(key, vars) {
+    const tpl = i18nMessages[key] ?? i18nFallback[key] ?? key;
+    return String(tpl).replace(/\{(\w+)\}/g, (m, name) =>
+      vars && Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : m
+    );
+  }
+  async function loadI18n() {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'GET_I18N' });
+      if (res?.ok && res.result) {
+        i18nMessages = res.result.messages || {};
+        i18nFallback = res.result.fallback || {};
+      }
+    } catch {
+      /* SW未起動などはキー素通しで描画し、次回の更新で反映する */
+    }
+  }
+
   const ATTR = {
     id: 'data-bag-id',
     role: 'data-bag-role',
@@ -46,14 +70,18 @@
     return null;
   }
 
-  function requireEl(args, label = '対象要素') {
+  function requireEl(args) {
     const el = getEl(args);
-    if (!el) throw new Error(`${label}が見つかりません: ${JSON.stringify(args)}`);
+    if (!el) throw new Error(t('cs.err.elementNotFound', { args: JSON.stringify(args) }));
     return el;
   }
 
   function cssEscape(s) {
     return String(s).replace(/"/g, '\\"');
+  }
+
+  function cssAttr(s) {
+    return String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 
   // ---- affordance(操作可能要素)の決定的な注釈付け ----
@@ -349,7 +377,7 @@
       description: 'aiIdで指定した要素をクリックする(推奨)。',
       args: { aiId: '対象のaiId' },
       run: async (a) => {
-        const el = requireEl(a, 'クリック対象');
+        const el = requireEl(a);
         el.click();
         return { clicked: a.aiId || a.selector };
       },
@@ -358,29 +386,29 @@
       description: 'CSSセレクタで指定した要素をクリックする。',
       args: { selector: 'CSSセレクタ' },
       run: async (a) => {
-        requireEl(a, 'クリック対象').click();
+        requireEl(a).click();
         return { clicked: a.selector };
       },
     },
     fillAffordance: {
       description: 'aiIdの入力欄に値を入れinput/changeを発火する(推奨)。',
       args: { aiId: '対象のaiId', value: '入力値' },
-      run: async (a) => fillValue(requireEl(a, '入力欄'), a.value),
+      run: async (a) => fillValue(requireEl(a), a.value),
     },
     fillInput: {
       description: 'CSSセレクタの入力欄に値を入れる。',
       args: { selector: 'CSSセレクタ', value: '入力値' },
-      run: async (a) => fillValue(requireEl(a, '入力欄'), a.value),
+      run: async (a) => fillValue(requireEl(a), a.value),
     },
     selectOption: {
       description: 'select要素で指定値(value/ラベル)を選択する。',
       args: { aiId: 'aiId(任意)', selector: 'セレクタ(任意)', value: 'value または表示テキスト' },
       run: async (a) => {
-        const el = requireEl(a, 'select要素');
+        const el = requireEl(a);
         const opt = Array.from(el.options).find(
           (o) => o.value === a.value || o.text.trim() === String(a.value).trim()
         );
-        if (!opt) throw new Error(`選択肢が見つかりません: ${a.value}`);
+        if (!opt) throw new Error(t('cs.err.optionNotFound', { value: a.value }));
         el.value = opt.value;
         el.dispatchEvent(new Event('change', { bubbles: true }));
         return { selected: opt.value };
@@ -390,9 +418,9 @@
       description: '要素が属するフォームを送信する。',
       args: { aiId: 'aiId(任意)', selector: 'セレクタ(任意)' },
       run: async (a) => {
-        const el = requireEl(a, 'フォーム要素');
+        const el = requireEl(a);
         const form = el.tagName === 'FORM' ? el : el.closest('form');
-        if (!form) throw new Error('フォームが見つかりません。');
+        if (!form) throw new Error(t('cs.err.formNotFound'));
         form.requestSubmit ? form.requestSubmit() : form.submit();
         return { submitted: true };
       },
@@ -502,7 +530,7 @@
       recipeSafe: false,
       run: async (a) => {
         const el = document.querySelector(a.selector);
-        if (!el) throw new Error(`対象が見つかりません: ${a.selector}`);
+        if (!el) throw new Error(t('cs.err.markerTargetNotFound', { selector: a.selector }));
         if (a.aiId) el.setAttribute(ATTR.id, a.aiId);
         if (a.role) el.setAttribute(ATTR.role, a.role);
         if (a.intent) el.setAttribute(ATTR.intent, a.intent);
@@ -528,7 +556,7 @@
       exposeToAI: false,
       recipeSafe: false,
       run: async (a) => {
-        const el = requireEl(a, '削除対象');
+        const el = requireEl(a);
         el.remove();
         return { removed: true };
       },
@@ -577,7 +605,7 @@
       },
       run: async (a) => {
         const el = getEl(a);
-        if (!el) throw new Error('対象要素が見つかりません。');
+        if (!el) throw new Error(t('cs.err.targetNotFound'));
         return await upsertAnnotation({ kind: 'note', anchor: buildAnchor(el), note: a.note || '', intent: a.intent || '' });
       },
     },
@@ -592,7 +620,7 @@
       },
       run: async (a) => {
         const el = getEl(a);
-        if (!el) throw new Error('対象要素が見つかりません。');
+        if (!el) throw new Error(t('cs.err.targetNotFound'));
         return await upsertAnnotation({
           kind: 'marker',
           anchor: buildAnchor(el),
@@ -618,7 +646,7 @@
         return await upsertAnnotation({
           kind: 'button',
           anchor,
-          label: a.label || '合図',
+          label: a.label || t('cs.button.cueDefault'),
           intent: a.intent || '',
           placement: a.placement || (anchor ? 'after' : 'floating'),
         });
@@ -647,7 +675,7 @@
     },
     startDrawing: {
       description:
-        'ページ上に円/四角/矢印/フリーハンドで印を描く「お描きモード」を開始する。描き終えると図形のすぐ隣に編集可能な「AIメモ」が生成され、その場でAIへの指示を書ける。図形とメモは対象要素にアンカーされ永続保存され、再訪時に復元される。「AIに渡す」がONのメモだけがAIへの文脈に同梱される。',
+        'ページ上に円/四角/矢印/フリーハンドで印を描く「お描きモード」を開始する。描き終えたあと確認モーダルで「メモを残す」を押すと、図形のすぐ隣に編集可能な「AIメモ」が生成される。図形とメモは対象要素にアンカーされ永続保存され、再訪時に復元される。「AIに渡す」がONのメモだけがAIへの文脈に同梱される。',
       args: {},
       run: async () => startDrawing(),
     },
@@ -695,7 +723,7 @@
     const id = a.id || autoId('html');
     removeInjected(id);
     const anchor = a.anchorSelector ? document.querySelector(a.anchorSelector) : document.body;
-    if (!anchor) throw new Error(`基準要素が見つかりません: ${a.anchorSelector}`);
+    if (!anchor) throw new Error(t('cs.err.anchorNotFound', { selector: a.anchorSelector }));
     const wrapper = document.createElement('div');
     wrapper.setAttribute(ATTR.injected, id);
     wrapper.appendChild(sanitizeHtmlFragment(assertInjectedText(a.html || '', 'HTML')));
@@ -727,7 +755,7 @@
   function executeUserScript({ id, code }) {
     return new Promise((resolve, reject) => {
       if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
-        reject(new Error('JavaScript実行のバックグラウンド経路が利用できません。'));
+        reject(new Error(t('cs.err.scriptBgUnavailable')));
         return;
       }
       chrome.runtime.sendMessage({ type: 'EXECUTE_USER_SCRIPT', id, code }, (response) => {
@@ -737,7 +765,7 @@
           return;
         }
         if (!response?.ok) {
-          reject(new Error(response?.error || 'JavaScriptを実行できませんでした。'));
+          reject(new Error(response?.error || t('cs.err.scriptFailed')));
           return;
         }
         resolve(response.result || {});
@@ -788,9 +816,9 @@
 
   function assertInjectedText(value, label) {
     const text = String(value || '');
-    if (!text.trim()) throw new Error(`${label}が空です。`);
+    if (!text.trim()) throw new Error(t('cs.err.injectedEmpty', { label }));
     if (text.length > MAX_INJECTED_TEXT_CHARS) {
-      throw new Error(`${label}が長すぎます(${text.length}/${MAX_INJECTED_TEXT_CHARS}文字)。`);
+      throw new Error(t('cs.err.injectedTooLong', { label, len: text.length, max: MAX_INJECTED_TEXT_CHARS }));
     }
     return text;
   }
@@ -801,7 +829,7 @@
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'bag-injected-btn';
-    btn.textContent = a.label || '合図';
+    btn.textContent = a.label || t('cs.button.cueDefault');
     btn.setAttribute(ATTR.injected, id);
     btn.setAttribute(ATTR.id, `injected:${id}`);
     btn.setAttribute(ATTR.role, 'cue-button');
@@ -812,11 +840,11 @@
         intent: a.intent || a.label || id,
         at: new Date().toISOString(),
       });
-      toast(`シグナル記録: ${a.label || id}`, 'success');
+      toast(t('cs.toast.signalRecorded', { label: a.label || id }), 'success');
     });
     if (a.anchorSelector) {
       const anchor = document.querySelector(a.anchorSelector);
-      if (!anchor) throw new Error(`基準要素が見つかりません: ${a.anchorSelector}`);
+      if (!anchor) throw new Error(t('cs.err.anchorNotFound', { selector: a.anchorSelector }));
       anchor.insertAdjacentElement(a.position || 'afterend', btn);
     } else {
       btn.classList.add('bag-floating');
@@ -834,11 +862,11 @@
     const head = document.createElement('div');
     head.className = 'bag-panel-head';
     const title = document.createElement('span');
-    title.textContent = a.title || '補足';
+    title.textContent = a.title || t('cs.panel.defaultTitle');
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'bag-panel-close';
-    close.setAttribute('aria-label', '閉じる');
+    close.setAttribute('aria-label', t('cs.panel.closeAria'));
     close.textContent = '×';
     close.addEventListener('click', () => panel.remove());
     head.append(title, close);
@@ -999,15 +1027,88 @@
   let annotations = []; // 現在ページに適用中の注釈
   let lastUnresolved = 0; // 直近描画で未解決だった注釈数(再描画要否の判定に使用)
 
-  function scopeKey() {
+  function legacyScopeKey() {
     return location.origin + location.pathname;
+  }
+
+  function scopeKey() {
+    return annotationScopeKey(location.href);
+  }
+
+  function scopeKeysForCurrentPage(map) {
+    const key = scopeKey();
+    const legacy = legacyScopeKey();
+    const keys = [key];
+    if (legacy !== key) keys.push(legacy);
+    if (map && isAmazonHost(location.hostname)) {
+      for (const storedKey of Object.keys(map).sort()) {
+        if (storedKey === key || storedKey === legacy) continue;
+        if (annotationScopeKey(storedKey) === key) keys.push(storedKey);
+      }
+    }
+    return keys;
+  }
+
+  function annotationScopeKey(href) {
+    try {
+      const url = new URL(href);
+      return amazonScopeKey(url) || `${url.origin}${url.pathname}`;
+    } catch {
+      return legacyScopeKey();
+    }
+  }
+
+  function isAmazonHost(hostname) {
+    const h = String(hostname || '').toLowerCase();
+    return h === 'amazon.com' || h.includes('.amazon.');
+  }
+
+  function amazonScopeKey(url) {
+    if (!isAmazonHost(url.hostname)) return '';
+    const asin = amazonAsinFromPath(url.pathname);
+    if (asin) return `${url.origin}/dp/${asin}`;
+    if (url.pathname === '/s' || url.pathname.startsWith('/s/')) {
+      const keep = new URLSearchParams();
+      for (const key of ['i', 'k', 'rh', 'node', 'bbn', 'field-keywords']) {
+        const val = url.searchParams.get(key);
+        if (val) keep.set(key, val);
+      }
+      const qs = keep.toString();
+      return `${url.origin}${url.pathname}${qs ? `?${qs}` : ''}`;
+    }
+    return `${url.origin}${url.pathname}`;
+  }
+
+  function amazonAsinFromPath(pathname) {
+    const m = String(pathname || '').match(/(?:^|\/)(?:dp|gp\/product|gp\/aw\/d|exec\/obidos\/ASIN)\/([A-Z0-9]{10})(?:\/|$)/i);
+    return m ? m[1].toUpperCase() : '';
   }
 
   async function loadAnnotations() {
     try {
       const all = await chrome.storage.local.get(ANNO_KEY);
       const map = all[ANNO_KEY] || {};
-      annotations = Array.isArray(map[scopeKey()]) ? map[scopeKey()] : [];
+      const key = scopeKey();
+      const keys = scopeKeysForCurrentPage(map);
+      const seen = new Set();
+      annotations = [];
+      for (const candidateKey of keys) {
+        const list = Array.isArray(map[candidateKey]) ? map[candidateKey] : [];
+        for (const a of list) {
+          const id = a?.id || JSON.stringify(a);
+          if (seen.has(id)) continue;
+          seen.add(id);
+          annotations.push(a);
+        }
+      }
+      if (keys.some((candidateKey) => candidateKey !== key)) {
+        if (annotations.length) map[key] = annotations;
+        else delete map[key];
+        for (const oldKey of keys) {
+          if (oldKey !== key) delete map[oldKey];
+        }
+        await chrome.storage.local.set({ [ANNO_KEY]: map });
+      }
     } catch {
       annotations = [];
     }
@@ -1017,8 +1118,12 @@
   async function persistAnnotations() {
     const all = await chrome.storage.local.get(ANNO_KEY);
     const map = all[ANNO_KEY] || {};
-    if (annotations.length) map[scopeKey()] = annotations;
-    else delete map[scopeKey()];
+    const key = scopeKey();
+    if (annotations.length) map[key] = annotations;
+    else delete map[key];
+    for (const oldKey of scopeKeysForCurrentPage(map)) {
+      if (oldKey !== key) delete map[oldKey]; // 正規化キーへ自然移行する
+    }
     await chrome.storage.local.set({ [ANNO_KEY]: map });
   }
 
@@ -1026,12 +1131,14 @@
     if (!anno.id) anno.id = autoId('anno');
     anno.createdAt = anno.createdAt || new Date().toISOString();
     const i = annotations.findIndex((a) => a.id === anno.id);
-    if (i >= 0) annotations[i] = { ...annotations[i], ...anno };
-    else annotations.push(anno);
+    const saved = i >= 0 ? { ...annotations[i], ...anno } : anno;
+    if (i >= 0) annotations[i] = saved;
+    else annotations.push(saved);
     await persistAnnotations();
     notifyPageRemembered('annotation');
     renderAnnotations();
-    return annoSummary(anno);
+    if (saved.kind === 'drawing') notifyVisualFeedbackChanged('upsert');
+    return annoSummary(saved);
   }
 
   function notifyPageRemembered(source) {
@@ -1046,14 +1153,29 @@
   }
 
   async function deleteAnnotation(id) {
+    const removed = annotations.find((a) => a.id === id);
     annotations = annotations.filter((a) => a.id !== id);
     await persistAnnotations();
     renderAnnotations();
+    if (removed?.kind === 'drawing') notifyVisualFeedbackChanged('delete');
     return { removed: id };
+  }
+
+  function notifyVisualFeedbackChanged(reason) {
+    const sendCount = annotations.filter((a) => a.kind === 'drawing' && memoForAI(a)).length;
+    try {
+      chrome.runtime.sendMessage(
+        { type: 'VISUAL_FEEDBACK_CHANGED', url: location.href, title: document.title, reason, sendCount },
+        () => void chrome.runtime.lastError
+      );
+    } catch {
+      /* 自動同期通知に失敗しても注釈保存自体は成功扱いにする */
+    }
   }
 
   function annoSummary(a) {
     const t = a.anchor ? resolveAnchor(a.anchor) : null;
+    const drawing = a.kind === 'drawing';
     return {
       id: a.id,
       kind: a.kind,
@@ -1061,12 +1183,53 @@
       label: a.label || '',
       note: a.note || '',
       intent: a.intent || '',
-      shapeText: a.kind === 'drawing' ? describeShapes(a.shapes) : '',
+      shapeText: drawing ? describeShapes(a.shapes) : '',
       // お描きメモは forAI 未設定の旧レコードを ON 扱いにして後方互換にする。
-      forAI: a.kind === 'drawing' ? memoForAI(a) : undefined,
+      forAI: drawing ? memoForAI(a) : undefined,
+      shapePreview: drawing ? buildShapePreview(a.shapes) : undefined,
       target: t ? truncate(labelOf(t), 50) : '',
       resolved: Boolean(t) || a.placement === 'floating',
     };
+  }
+
+  // サイドパネルの「AI送信トレイ」用に、保存済み図形を小さなSVGへ描ける
+  // 正規化データへ変換する。実ページ座標や大きな手書き点列は渡さない。
+  function buildShapePreview(shapes) {
+    const list = Array.isArray(shapes) ? shapes.filter(Boolean).slice(0, 4) : [];
+    if (!list.length) return { color: DRAW_COLORS[0].hex, shapes: [] };
+    const bbox = shapesBBoxFrac(list);
+    const w = Math.max(0.001, bbox.maxX - bbox.minX);
+    const h = Math.max(0.001, bbox.maxY - bbox.minY);
+    const pad = 0.12;
+    const scale = 1 - pad * 2;
+    const normX = (x) => pad + ((Number(x) - bbox.minX) / w) * scale;
+    const normY = (y) => pad + ((Number(y) - bbox.minY) / h) * scale;
+    const color = list.find((s) => s.color)?.color || DRAW_COLORS[0].hex;
+    const normalized = list.map((s) => {
+      const base = { type: s.type, color: s.color || color };
+      if (s.type === 'rect') {
+        const x1 = normX(s.x);
+        const y1 = normY(s.y);
+        const x2 = normX((s.x || 0) + (s.w || 0));
+        const y2 = normY((s.y || 0) + (s.h || 0));
+        return { ...base, x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1) };
+      }
+      if (s.type === 'ellipse') {
+        const x1 = normX((s.cx || 0) - (s.rx || 0));
+        const y1 = normY((s.cy || 0) - (s.ry || 0));
+        const x2 = normX((s.cx || 0) + (s.rx || 0));
+        const y2 = normY((s.cy || 0) + (s.ry || 0));
+        return { ...base, cx: (x1 + x2) / 2, cy: (y1 + y2) / 2, rx: Math.abs(x2 - x1) / 2, ry: Math.abs(y2 - y1) / 2 };
+      }
+      if (s.type === 'arrow') {
+        return { ...base, x1: normX(s.x1), y1: normY(s.y1), x2: normX(s.x2), y2: normY(s.y2) };
+      }
+      return {
+        ...base,
+        pts: decimatePoints(s.pts || [], 36).map(([x, y]) => [normX(x), normY(y)]),
+      };
+    });
+    return { color, shapes: normalized };
   }
 
   // お描きメモが AI に渡される対象か。forAI 未設定(旧レコード)は既定でON。
@@ -1089,14 +1252,52 @@
     return String(s).replace(/([^a-zA-Z0-9_-])/g, '\\$1');
   }
 
+  function stableAttrSelector(el) {
+    if (!el || el.nodeType !== 1) return '';
+    for (const name of ['data-agent-id', 'data-testid', 'data-test', 'data-cy', 'data-asin']) {
+      const val = (el.getAttribute(name) || '').trim();
+      if (!val) continue;
+      if (name === 'data-asin' && !/^[A-Z0-9]{10}$/i.test(val)) continue;
+      return `[${name}="${cssAttr(val)}"]`;
+    }
+    return '';
+  }
+
+  function normalizedLinkHref(el) {
+    const link = el?.matches?.('a[href]') ? el : el?.closest?.('a[href]');
+    const href = link?.getAttribute?.('href') || '';
+    if (!href || href.startsWith('#') || /^javascript:/i.test(href)) return '';
+    try {
+      const url = new URL(href, location.href);
+      return `${url.origin}${url.pathname}`;
+    } catch {
+      return '';
+    }
+  }
+
+  function hasDurableAnchorSignal(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (stableAttrSelector(el)) return true;
+    if (el.id && isStableId(el.id)) return true;
+    if (el.matches?.('a[href]') && normalizedLinkHref(el)) return true;
+    return false;
+  }
+
   // 安定IDを持つ祖先を起点に、tag + :nth-of-type で短い決定的パスを作る。
   function cssPath(el) {
     if (!el || el.nodeType !== 1) return '';
+    const stableAttr = stableAttrSelector(el);
+    if (stableAttr) return stableAttr;
     if (el.id && isStableId(el.id)) return `#${cssIdent(el.id)}`;
     const parts = [];
     let cur = el;
     let depth = 0;
     while (cur && cur.nodeType === 1 && depth < 6) {
+      const attr = stableAttrSelector(cur);
+      if (attr) {
+        parts.unshift(attr);
+        break;
+      }
       if (cur.id && isStableId(cur.id)) {
         parts.unshift(`#${cssIdent(cur.id)}`);
         break;
@@ -1121,6 +1322,9 @@
       tag: el.tagName.toLowerCase(),
       role: roleOf(el),
       text: (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80),
+      dataAgentId: el.getAttribute('data-agent-id') || '',
+      dataAsin: el.getAttribute('data-asin') || '',
+      href: el.matches?.('a[href]') ? normalizedLinkHref(el) : '',
       name: el.getAttribute('name') || '',
       testid:
         el.getAttribute('data-testid') ||
@@ -1136,18 +1340,29 @@
   function resolveAnchor(anchor) {
     if (!anchor) return null;
     const tries = [];
-    if (anchor.selector) tries.push(() => safeQuery(anchor.selector));
+    if (anchor.dataAgentId)
+      tries.push(() => document.querySelector(`[data-agent-id="${cssAttr(anchor.dataAgentId)}"]`));
+    if (anchor.dataAsin && /^[A-Z0-9]{10}$/i.test(anchor.dataAsin))
+      tries.push(() => document.querySelector(`[data-asin="${cssAttr(anchor.dataAsin)}"]`));
     if (anchor.testid)
       tries.push(() =>
         document.querySelector(
           `[data-testid="${cssEscape(anchor.testid)}"],[data-test="${cssEscape(anchor.testid)}"],[data-cy="${cssEscape(anchor.testid)}"]`
         )
       );
+    if (anchor.href)
+      tries.push(() => {
+        for (const link of document.querySelectorAll('a[href]')) {
+          if (normalizedLinkHref(link) === anchor.href) return link;
+        }
+        return null;
+      });
     if (anchor.name) tries.push(() => document.querySelector(`[name="${cssEscape(anchor.name)}"]`));
     if (anchor.ariaLabel)
       tries.push(() => document.querySelector(`[aria-label="${cssEscape(anchor.ariaLabel)}"]`));
     if (anchor.placeholder)
       tries.push(() => document.querySelector(`[placeholder="${cssEscape(anchor.placeholder)}"]`));
+    if (anchor.selector) tries.push(() => safeQuery(anchor.selector));
     for (const t of tries) {
       try {
         const el = t();
@@ -1225,10 +1440,10 @@
         }
       });
 
-      // お描きの永続レイヤとピンを一旦クリア(下のループで再構築する)。
-      drawRegistry = [];
-      if (drawLayer) drawLayer.replaceChildren();
-      if (drawPinHost) drawPinHost.replaceChildren();
+      // お描きの永続レイヤとピンを一旦破棄して再構築する。
+      // 古い content-script インスタンス由来の点線コネクタは data-bag-anno を持たないため、
+      // 参照中の drawLayer だけを空にするのではなく、DOM 上のレイヤごと掃除する。
+      resetDrawingDom();
 
       let unresolved = 0;
       for (const a of annotations) {
@@ -1265,7 +1480,7 @@
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'bag-injected-btn bag-anno-btn';
-    btn.textContent = a.label || '合図';
+    btn.textContent = a.label || t('cs.button.cueDefault');
     btn.setAttribute(ATTR.anno, a.id);
     btn.setAttribute(ATTR.ui, '1');
     btn.setAttribute(ATTR.id, `cue:${a.id}`);
@@ -1280,7 +1495,7 @@
         label: a.label || '',
         at: new Date().toISOString(),
       });
-      toast(`シグナル記録: ${a.label || a.id}`, 'success');
+      toast(t('cs.toast.signalRecorded', { label: a.label || a.id }), 'success');
     });
     if (target && a.placement !== 'floating') {
       target.insertAdjacentElement(a.position || 'afterend', btn);
@@ -1319,6 +1534,15 @@
     }
   }
 
+  function resetDrawingDom() {
+    drawRegistry = [];
+    wfConnectors = [];
+    document.querySelectorAll('.bag-draw-layer, .bag-draw-pin-host').forEach((el) => el.remove());
+    drawLayer = null;
+    drawPinHost = null;
+    memoFocusId = null;
+  }
+
   let lastUrl = location.href;
   let renderTimer = null;
   let resolveAttempts = 0;
@@ -1348,14 +1572,34 @@
       handleUrlChange();
       return;
     }
-    // 全注釈が解決済み、または上限到達なら、後発DOM変化での再描画は不要(無駄を抑制)。
-    if (lastUnresolved === 0 || resolveAttempts >= MAX_RESOLVE_ATTEMPTS) return;
+    const staleResolvedTarget = hasDisconnectedDrawingTargets();
+    // 全注釈が解決済みで対象ノードも生きている場合、Amazon の lazy layout などに追従するため
+    // 座標だけ軽く更新し、DOMの作り直しは避ける。
+    if (!staleResolvedTarget && lastUnresolved === 0) {
+      if (drawRegistry.length) scheduleDrawingReposition();
+      return;
+    }
+    // 未解決注釈での無限リトライは抑える。ただし、解決済みだった対象が差し替わった場合は
+    // 一度は再解決を試す(Amazon の商品カード hydration/差し替え対策)。
+    if (!staleResolvedTarget && resolveAttempts >= MAX_RESOLVE_ATTEMPTS) return;
     if (renderTimer) return;
     renderTimer = setTimeout(() => {
       renderTimer = null;
       resolveAttempts += 1;
       renderAnnotations(/* deferrable */ true); // メモ編集中の入力フォーカスを奪わない
     }, 600);
+  }
+
+  function hasDisconnectedDrawingTargets() {
+    return drawRegistry.some((entry) => entry.anno?.kind === 'drawing' && !entry.el?.isConnected);
+  }
+
+  function scheduleDrawingReposition() {
+    if (drawRaf) return;
+    drawRaf = requestAnimationFrame(() => {
+      drawRaf = 0;
+      repositionDrawings();
+    });
   }
 
   // 戻る/進む・ハッシュ遷移はDOM変化を伴わないことがあるため明示的に拾う(SPA対応)。
@@ -1380,7 +1624,7 @@
     pickHintEl = document.createElement('div');
     pickHintEl.className = 'bag-pick-hint';
     pickHintEl.setAttribute(ATTR.ui, '1');
-    pickHintEl.textContent = '補足を付けたい場所をクリック（Escで終了）';
+    pickHintEl.textContent = t('cs.picker.hint');
     document.documentElement.appendChild(pickHintEl);
     document.addEventListener('mousemove', onPickMove, true);
     document.addEventListener('click', onPickClick, true);
@@ -1451,31 +1695,31 @@
     wrap.className = 'bag-author';
     wrap.setAttribute(ATTR.ui, '1');
     wrap.innerHTML = `
-      <div class="bag-author-head">補足を追加</div>
-      <div class="bag-author-target">対象: <b>${escapeHtml(truncate(heading, 40))}</b> <span class="muted">&lt;${escapeHtml(anchor.role)}&gt;</span></div>
+      <div class="bag-author-head">${escapeHtml(t('cs.author.addNote'))}</div>
+      <div class="bag-author-target">${escapeHtml(t('cs.author.target'))} <b>${escapeHtml(truncate(heading, 40))}</b> <span class="muted">&lt;${escapeHtml(anchor.role)}&gt;</span></div>
       <label class="bag-author-row">
-        <span>種類</span>
+        <span>${escapeHtml(t('cs.author.kind'))}</span>
         <select data-f="kind">
-          <option value="note">コメント</option>
-          <option value="marker">目印</option>
-          <option value="button">合図ボタン</option>
+          <option value="note">${escapeHtml(t('cs.author.kindNote'))}</option>
+          <option value="marker">${escapeHtml(t('cs.author.kindMarker'))}</option>
+          <option value="button">${escapeHtml(t('cs.author.kindButton'))}</option>
         </select>
       </label>
       <label class="bag-author-row" data-for="marker button">
-        <span>名前/ラベル</span>
-        <input data-f="label" placeholder="例: 送信ボタン" />
+        <span>${escapeHtml(t('cs.author.label'))}</span>
+        <input data-f="label" placeholder="${escapeHtml(t('cs.author.labelPlaceholder'))}" />
       </label>
       <label class="bag-author-row" data-for="note">
-        <span>コメント</span>
-        <textarea data-f="note" rows="2" placeholder="例: ここは送信前に必ず内容を確認すること"></textarea>
+        <span>${escapeHtml(t('cs.author.comment'))}</span>
+        <textarea data-f="note" rows="2" placeholder="${escapeHtml(t('cs.author.commentPlaceholder'))}"></textarea>
       </label>
       <label class="bag-author-row">
-        <span>目的（AI向け）</span>
-        <input data-f="intent" placeholder="例: フォームを送信する / 入力内容を確認する" />
+        <span>${escapeHtml(t('cs.author.intent'))}</span>
+        <input data-f="intent" placeholder="${escapeHtml(t('cs.author.intentPlaceholder'))}" />
       </label>
       <div class="bag-author-actions">
-        <button data-f="cancel" type="button">キャンセル</button>
-        <button data-f="save" type="button" class="primary">保存</button>
+        <button data-f="cancel" type="button">${escapeHtml(t('cs.author.cancel'))}</button>
+        <button data-f="save" type="button" class="primary">${escapeHtml(t('cs.author.save'))}</button>
       </div>`;
     document.documentElement.appendChild(wrap);
     positionAuthoring(wrap, el);
@@ -1514,7 +1758,7 @@
         placement: kind === 'button' && existing?.placement === 'floating' ? 'floating' : undefined,
       });
       closeAuthoring();
-      toast('補足を保存しました（次回も同じ場所に表示されます）', 'success');
+      toast(t('cs.toast.noteSaved'), 'success');
     });
   }
 
@@ -1880,22 +2124,28 @@
     drawToolbar = document.createElement('div');
     drawToolbar.className = 'bag-draw-toolbar';
     drawToolbar.setAttribute(ATTR.ui, '1');
-    const tools = DRAW_TOOLS.map(
-      (t) =>
-        `<button type="button" class="bag-draw-tool" data-tool="${t.id}" title="${t.label}"><span class="bag-draw-glyph">${t.glyph}</span><span>${t.label}</span></button>`
-    ).join('');
+    // ツールラベル/色名はUI表示なので i18n。図形のAI説明(describeShapes)用の verb/name は別途日本語のまま。
+    const toolLabelKey = { ellipse: 'cs.draw.toolEllipse', rect: 'cs.draw.toolRect', arrow: 'cs.draw.toolArrow', pen: 'cs.draw.toolPen' };
+    const colorNameKey = {
+      '#ef4444': 'cs.draw.colorRed', '#f97316': 'cs.draw.colorOrange', '#eab308': 'cs.draw.colorYellow',
+      '#14b8a6': 'cs.draw.colorGreen', '#3b82f6': 'cs.draw.colorBlue', '#111827': 'cs.draw.colorBlack',
+    };
+    const tools = DRAW_TOOLS.map((tool) => {
+      const label = escapeHtml(t(toolLabelKey[tool.id] || ''));
+      return `<button type="button" class="bag-draw-tool" data-tool="${tool.id}" title="${label}"><span class="bag-draw-glyph">${tool.glyph}</span><span>${label}</span></button>`;
+    }).join('');
     const colors = DRAW_COLORS.map(
-      (c) => `<button type="button" class="bag-draw-color" data-color="${c.hex}" title="${c.name}" style="--bag-sw:${c.hex}"></button>`
+      (c) => `<button type="button" class="bag-draw-color" data-color="${c.hex}" title="${escapeHtml(t(colorNameKey[c.hex.toLowerCase()] || ''))}" style="--bag-sw:${c.hex}"></button>`
     ).join('');
     drawToolbar.innerHTML = `
       <div class="bag-draw-tools">${tools}</div>
       <div class="bag-draw-colors">${colors}</div>
       <div class="bag-draw-ops">
-        <button type="button" class="bag-draw-op" data-op="undo" title="ひとつ戻す (Cmd/Ctrl+Z)">取消</button>
-        <button type="button" class="bag-draw-op" data-op="cancel" title="やめる (Esc)">キャンセル</button>
-        <button type="button" class="bag-draw-op primary" data-op="done" title="コメント入力へ進む">完了</button>
+        <button type="button" class="bag-draw-op" data-op="undo" title="${escapeHtml(t('cs.draw.undoTitle'))}">${escapeHtml(t('cs.draw.undo'))}</button>
+        <button type="button" class="bag-draw-op" data-op="cancel" title="${escapeHtml(t('cs.draw.cancelTitle'))}">${escapeHtml(t('cs.draw.cancel'))}</button>
+        <button type="button" class="bag-draw-op primary" data-op="done" title="${escapeHtml(t('cs.draw.doneTitle'))}">${escapeHtml(t('cs.draw.done'))}</button>
       </div>
-      <div class="bag-draw-hint">図形を選び、対象をドラッグで囲む（Escで終了 / Cmd+Zで取消）</div>`;
+      <div class="bag-draw-hint">${escapeHtml(t('cs.draw.hint'))}</div>`;
     document.documentElement.appendChild(drawToolbar);
     drawToolbar.addEventListener('click', onDrawToolbarClick);
     updateDrawToolbarState();
@@ -1940,7 +2190,7 @@
   // ---- 確定: アンカー要素を特定し、比率座標へ変換してコメント入力へ ----
   function finishDrawing() {
     if (!drawing.shapes.length) {
-      toast('お描きがありません。図形を描いてから完了してください。', 'warn');
+      toast(t('cs.toast.noDrawing'), 'warn');
       return;
     }
     const live = drawing.shapes.slice();
@@ -1949,10 +2199,10 @@
     if (drawOverlay) drawOverlay.style.pointerEvents = 'none';
     const cx = Math.max(1, Math.min(window.innerWidth - 1, bb.cx));
     const cy = Math.max(1, Math.min(window.innerHeight - 1, bb.cy));
-    const target = pickAnchorElement(cx, cy);
+    const target = pickDurableAnchorElement(pickAnchorElement(cx, cy), bb);
     if (drawOverlay) drawOverlay.style.pointerEvents = '';
     if (!target) {
-      toast('お描きの対象要素を特定できませんでした。', 'error');
+      toast(t('cs.toast.noTarget'), 'error');
       return;
     }
     const anchor = buildAnchor(target);
@@ -1961,12 +2211,8 @@
     const H = rect.height || 1;
     const shapes = live.map((s) => toFractionalShape(s, rect.left, rect.top, W, H));
     stopDrawing();
-    // お描き完了で図形の隣にAIメモ(空)を即生成し、その場で指示を書けるようにする。
-    // forAI は既定ON。本文編集はページ上のメモで行う(ページ上＝その場編集)。
-    upsertAnnotation({ kind: 'drawing', anchor, shapes, note: '', intent: '', forAI: true }).then((summary) => {
-      focusMemo(summary?.id);
-      toast('図形の隣にAIメモを置きました。指示を書いてください（次回も復元されます）。', 'success');
-    });
+    // 「完了」だけでは空メモを残さず、ユーザーが明示的に保存した時点でAIメモ化する。
+    openDrawingAuthoring({ kind: 'drawing', anchor, shapes, note: '', intent: '', forAI: true });
   }
 
   // 指定idのメモ(ページ上カード)の入力欄へフォーカスする(生成直後の即編集用)。
@@ -1992,6 +2238,49 @@
       return el;
     }
     return document.body || document.documentElement;
+  }
+
+  function pickDurableAnchorElement(el, shapeBox) {
+    if (!el || el.nodeType !== 1) return el;
+    let cur = el;
+    let smallestCovering = null;
+    let smallestArea = Infinity;
+    let depth = 0;
+    while (cur && cur.nodeType === 1 && cur !== document.documentElement && depth < 8) {
+      if (cur.closest && cur.closest(`[${ATTR.ui}]`)) break;
+      const rect = cur.getBoundingClientRect();
+      const covers = rectCoversShape(rect, shapeBox);
+      const area = Math.max(1, rect.width * rect.height);
+      if (covers && !isPageSizedRect(rect)) {
+        if (hasDurableAnchorSignal(cur)) return cur;
+        if (area < smallestArea) {
+          smallestCovering = cur;
+          smallestArea = area;
+        }
+      }
+      if (cur === document.body) break;
+      cur = cur.parentElement;
+      depth += 1;
+    }
+    return smallestCovering || el;
+  }
+
+  function rectCoversShape(rect, box) {
+    if (!rect || !box) return true;
+    // 人は対象要素ぴったりではなく少し外側を囲むため、その自然な余白は同一対象扱いにする。
+    const pad = 14;
+    return (
+      rect.width > 0 &&
+      rect.height > 0 &&
+      rect.left <= box.minX + pad &&
+      rect.top <= box.minY + pad &&
+      rect.right >= box.maxX - pad &&
+      rect.bottom >= box.maxY - pad
+    );
+  }
+
+  function isPageSizedRect(rect) {
+    return rect.width >= window.innerWidth * 0.94 && rect.height >= window.innerHeight * 0.86;
   }
 
   function shapesBBoxPx(shapes) {
@@ -2166,19 +2455,19 @@
     numChip.textContent = String(annoDrawingNumber(a));
     const tag = document.createElement('span');
     tag.className = 'bag-memo-tag';
-    tag.textContent = 'AIメモ';
+    tag.textContent = t('cs.memo.tag');
     const collapseBtn = document.createElement('button');
     collapseBtn.type = 'button';
     collapseBtn.className = 'bag-memo-collapse';
-    collapseBtn.title = '畳む / 展開';
-    collapseBtn.setAttribute('aria-label', '畳む');
+    collapseBtn.title = t('cs.memo.collapseTitle');
+    collapseBtn.setAttribute('aria-label', t('cs.memo.collapseAria'));
     collapseBtn.textContent = '–';
     head.append(numChip, tag, collapseBtn);
 
     const ta = document.createElement('textarea');
     ta.className = 'bag-memo-text';
     ta.rows = 2;
-    ta.placeholder = 'AIへの指示を書く（例: 見出しをもっと短く）';
+    ta.placeholder = t('cs.memo.placeholder');
     ta.value = a.note || '';
 
     const foot = document.createElement('div');
@@ -2189,13 +2478,13 @@
     cb.type = 'checkbox';
     cb.checked = memoForAI(a);
     const toggleText = document.createElement('span');
-    toggleText.textContent = 'AIに渡す';
+    toggleText.textContent = t('cs.memo.toAI');
     toggle.append(cb, toggleText);
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'bag-memo-del';
-    del.title = 'このメモとお描きを削除';
-    del.setAttribute('aria-label', '削除');
+    del.title = t('cs.memo.deleteTitle');
+    del.setAttribute('aria-label', t('cs.memo.deleteAria'));
     del.textContent = '🗑';
     foot.append(toggle, del);
 
@@ -2261,8 +2550,8 @@
     badge.className = 'bag-memo-badge';
     badge.setAttribute(ATTR.anno, a.id);
     badge.setAttribute(ATTR.ui, '1');
-    badge.title = a.note || 'AIメモ';
-    badge.setAttribute('aria-label', 'AIメモを展開');
+    badge.title = a.note || t('cs.memo.tag');
+    badge.setAttribute('aria-label', t('cs.memo.expandAria'));
     badge.textContent = 'AI';
     badge.hidden = true;
     badge.addEventListener('click', (e) => {
@@ -2378,6 +2667,7 @@
     }
     if (!changed) return;
     await persistAnnotations();
+    if (a.kind === 'drawing') notifyVisualFeedbackChanged('update');
   }
 
   // メモ⇄図形の相互ハイライト。on=true で対象ペアを強調し、他ペアを減光する。
@@ -2827,16 +3117,21 @@
     wfPanel.className = 'bag-wf-panel';
     wfPanel.setAttribute(ATTR.ui, '1');
     wfPanel.hidden = true;
+    const wfTitle = escapeHtml(t('cs.wf.title'));
+    const wfShowOrder = escapeHtml(t('cs.wf.showOrder'));
+    const wfPrev = escapeHtml(t('cs.wf.prev'));
+    const wfPlayPause = escapeHtml(t('cs.wf.playPause'));
+    const wfNext = escapeHtml(t('cs.wf.next'));
     wfPanel.innerHTML =
       '<div class="bag-wf-row">' +
-      '<span class="bag-wf-title">🖍 ワークフロー</span>' +
+      `<span class="bag-wf-title">${wfTitle}</span>` +
       '<span class="bag-wf-count" data-wf="count"></span>' +
       '</div>' +
-      '<label class="bag-wf-toggle"><input type="checkbox" data-wf="mode"> 順序を表示</label>' +
+      `<label class="bag-wf-toggle"><input type="checkbox" data-wf="mode"> ${wfShowOrder}</label>` +
       '<div class="bag-wf-controls" data-wf="controls" hidden>' +
-      '<button type="button" class="bag-wf-btn" data-wf="prev" title="前の手順" aria-label="前の手順">⏮</button>' +
-      '<button type="button" class="bag-wf-btn" data-wf="play" title="再生 / 停止" aria-label="再生 / 停止">▶</button>' +
-      '<button type="button" class="bag-wf-btn" data-wf="next" title="次の手順" aria-label="次の手順">⏭</button>' +
+      `<button type="button" class="bag-wf-btn" data-wf="prev" title="${wfPrev}" aria-label="${wfPrev}">⏮</button>` +
+      `<button type="button" class="bag-wf-btn" data-wf="play" title="${wfPlayPause}" aria-label="${wfPlayPause}">▶</button>` +
+      `<button type="button" class="bag-wf-btn" data-wf="next" title="${wfNext}" aria-label="${wfNext}">⏭</button>` +
       '<span class="bag-wf-step" data-wf="step"></span>' +
       '</div>';
     document.documentElement.appendChild(wfPanel);
@@ -2862,7 +3157,7 @@
     ensureWorkflowPanel();
     wfPanel.hidden = false;
     const q = (s) => wfPanel.querySelector(`[data-wf="${s}"]`);
-    q('count').textContent = `${n}手順`;
+    q('count').textContent = t('cs.wf.count', { count: n });
     q('mode').checked = wfMode;
     q('controls').hidden = !wfMode;
     q('play').textContent = wfPlayTimer ? '⏸' : '▶';
@@ -2889,7 +3184,7 @@
 
   // AI連携: 指定要素を囲む番号付きお描き(手順)を1つ追加する。番号は通し番号の続きで自動採番。
   async function addWorkflowStep(a) {
-    const el = requireEl(a, '手順の対象要素');
+    const el = requireEl(a);
     const kindMap = { ellipse: 'ellipse', 円: 'ellipse', circle: 'ellipse', rect: 'rect', 四角: 'rect', arrow: 'arrow', 矢印: 'arrow' };
     const kind = kindMap[a.kind] || 'rect';
     const color = /^#[0-9a-fA-F]{3,8}$/.test(a.color || '') ? a.color : '#2563eb';
@@ -3020,25 +3315,25 @@
   function openDrawingAuthoring(draft) {
     closeAuthoring();
     const anchor = draft.anchor || {};
-    const heading = anchor.text || anchor.ariaLabel || anchor.placeholder || anchor.tag || '対象';
+    const heading = anchor.text || anchor.ariaLabel || anchor.placeholder || anchor.tag || t('cs.author.targetFallback');
     const wrap = document.createElement('div');
     wrap.className = 'bag-author';
     wrap.setAttribute(ATTR.ui, '1');
     wrap.innerHTML = `
-      <div class="bag-author-head">お描きにコメントを追加</div>
-      <div class="bag-author-target">対象: <b>${escapeHtml(truncate(heading, 40))}</b> <span class="muted">&lt;${escapeHtml(anchor.role || anchor.tag || '')}&gt;</span></div>
-      <div class="bag-author-target">お描き: ${escapeHtml(describeShapes(draft.shapes))}</div>
+      <div class="bag-author-head">${escapeHtml(t('cs.author.drawAddComment'))}</div>
+      <div class="bag-author-target">${escapeHtml(t('cs.author.target'))} <b>${escapeHtml(truncate(heading, 40))}</b> <span class="muted">&lt;${escapeHtml(anchor.role || anchor.tag || '')}&gt;</span></div>
+      <div class="bag-author-target">${escapeHtml(t('cs.author.drawing'))} ${escapeHtml(describeShapes(draft.shapes))}</div>
       <label class="bag-author-row">
-        <span>コメント</span>
-        <textarea data-f="note" rows="2" placeholder="例: ここは送信前に必ず内容を確認すること"></textarea>
+        <span>${escapeHtml(t('cs.author.comment'))}</span>
+        <textarea data-f="note" rows="2" placeholder="${escapeHtml(t('cs.author.commentPlaceholder'))}"></textarea>
       </label>
       <label class="bag-author-row">
-        <span>目的（AI向け）</span>
-        <input data-f="intent" placeholder="例: フォームを送信する / 入力内容を確認する" />
+        <span>${escapeHtml(t('cs.author.intent'))}</span>
+        <input data-f="intent" placeholder="${escapeHtml(t('cs.author.intentPlaceholder'))}" />
       </label>
       <div class="bag-author-actions">
-        <button data-f="cancel" type="button">キャンセル</button>
-        <button data-f="save" type="button" class="primary">保存</button>
+        <button data-f="cancel" type="button">${escapeHtml(t('cs.author.cancel'))}</button>
+        <button data-f="save" type="button" class="primary">${escapeHtml(t('cs.author.placeMemo'))}</button>
       </div>`;
     document.documentElement.appendChild(wrap);
     const target = anchor ? resolveAnchor(anchor) : null;
@@ -3050,7 +3345,7 @@
     wrap.querySelector('[data-f="save"]').addEventListener('click', async () => {
       const note = wrap.querySelector('[data-f="note"]').value.trim();
       const intent = wrap.querySelector('[data-f="intent"]').value.trim();
-      await upsertAnnotation({
+      const saved = await upsertAnnotation({
         id: draft.id,
         kind: 'drawing',
         anchor,
@@ -3060,7 +3355,8 @@
         forAI: draft.forAI !== false, // 既存のforAIを保持(未設定はON)
       });
       closeAuthoring();
-      toast('お描きを保存しました（次回も同じ場所に表示されます）', 'success');
+      focusMemo(saved?.id || draft.id);
+      toast(t('cs.toast.memoSaved'), 'success');
     });
   }
 
@@ -3160,7 +3456,7 @@
     for (const a of actions || []) {
       const verb = AI_VERBS[a.verb];
       if (!verb) {
-        results.push({ verb: a.verb, ok: false, error: '未知の動詞です。' });
+        results.push({ verb: a.verb, ok: false, error: t('cs.err.unknownVerb') });
         continue;
       }
       if (!isActionAllowed(a.verb, source)) {
@@ -3168,7 +3464,7 @@
           verb: a.verb,
           ok: false,
           reason: a.reason || '',
-          error: 'この経路ではページ本文を直接変更する動詞は許可されていません。',
+          error: t('cs.err.verbBlocked'),
         });
         continue;
       }
@@ -3185,7 +3481,7 @@
             verb: a.verb,
             ok: false,
             reason: a.reason || '',
-            error: `waitFor: 要素 "${a.waitFor.selector}" が時間内に出現しませんでした。`,
+            error: t('cs.err.waitForTimeout', { selector: a.waitFor.selector }),
           });
           continue;
         }
@@ -3256,7 +3552,7 @@
           return { annotations: annotations.map(annoSummary), scope: scopeKey() };
         case 'EDIT_ANNOTATION': {
           const a = annotations.find((x) => x.id === msg.id);
-          if (!a) return { error: '注釈が見つかりません。' };
+          if (!a) return { error: t('cs.err.annotationNotFound') };
           if (a.kind === 'drawing') {
             // お描きはページ上のメモで編集する。メモが表示中ならそこへスクロール＋フォーカス。
             const onPage = drawPinHost?.querySelector(`.bag-memo[${ATTR.anno}="${cssEscape(msg.id)}"]`);
@@ -3316,6 +3612,21 @@
     return true; // 非同期応答
   });
 
-  // ---- 初期化: 保存済みの注釈を読み込んで復元する ----
-  loadAnnotations().then(renderAnnotations);
+  // 言語設定の変更を検知して辞書を更新し、ページ上の注釈(AIメモ等)を再描画する。
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes.aiAdvisorSettings) {
+        loadI18n().then(() => renderAnnotations());
+      }
+    });
+  } catch {
+    /* storage 監視不可環境は無視 */
+  }
+
+  // ---- 初期化: ロケール辞書を読み込み、保存済みの注釈を復元する ----
+  (async () => {
+    await loadI18n();
+    await loadAnnotations();
+    renderAnnotations();
+  })();
 })();

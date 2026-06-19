@@ -8,6 +8,48 @@ import { findMatchingRules } from '../lib/site-matcher.js';
 import { callAI } from '../lib/ai-client.js';
 import { buildSystemPrompt } from '../lib/prompt.js';
 import { slugFromCapture } from '../lib/slug.js';
+import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18n.js';
+
+// ---- i18n: ロケール辞書(sidepanel/locales)を拡張オリジンで読み、同期 t() で解決する ----
+// SW はオーケストレータとして唯一ロケール辞書を読み、content/offscreen/ai-client のエラーや
+// memo.md・学習ルール名をユーザー言語で返す。content script へは GET_I18N で辞書そのものを渡す
+// (非モジュールIIFE & ページ由来 fetch の WAR 制約を避けるため)。
+let i18nMessages = {};
+let i18nFallback = {};
+let i18nLocale = DEFAULT_LOCALE;
+let i18nLoadedFor = null;
+
+async function loadLocaleJson(locale) {
+  try {
+    const res = await fetch(chrome.runtime.getURL(`sidepanel/locales/${normalizeLocale(locale)}.json`));
+    return res.ok ? await res.json() : {};
+  } catch {
+    return {};
+  }
+}
+
+// 設定の言語(auto/en/ko/ja/zh)を解決し、必要時だけ辞書を読み直す。
+async function ensureI18n() {
+  const settings = await getSettings();
+  const locale = resolveLocale(settings.ui?.language);
+  if (i18nLoadedFor === locale) return;
+  i18nMessages = await loadLocaleJson(locale);
+  i18nFallback = locale === DEFAULT_LOCALE ? i18nMessages : await loadLocaleJson(DEFAULT_LOCALE);
+  i18nLocale = locale;
+  i18nLoadedFor = locale;
+}
+
+function t(key, vars) {
+  const tpl = i18nMessages[key] ?? i18nFallback[key] ?? key;
+  return String(tpl).replace(/\{(\w+)\}/g, (m, name) =>
+    vars && Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : m
+  );
+}
+
+// 言語設定が変わったら、次回 ensureI18n で辞書を読み直させる。
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.aiAdvisorSettings) i18nLoadedFor = null;
+});
 
 const MEMORY_VERBS = new Set([
   'addNote',
@@ -22,6 +64,11 @@ const MEMORY_VERBS = new Set([
 ]);
 const RECIPE_VERBS = new Set(['injectHtml', 'injectCss', 'injectScript', 'outlineElement', 'injectButton', 'injectPanel']);
 const REMEMBER_SCOPES = new Set(['page', 'domain', 'all']);
+const AUTO_SYNC_DEFAULT_DEBOUNCE_MS = 1800;
+const AUTO_SYNC_MIN_DEBOUNCE_MS = 750;
+const AUTO_SYNC_MAX_DEBOUNCE_MS = 10000;
+const autoSyncTimers = new Map();
+const autoSyncInFlight = new Set();
 
 // 拡張アイコンのクリックでサイドパネルを開く。
 chrome.runtime.onInstalled.addListener(() => {
@@ -77,7 +124,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 async function handleMessage(msg, sender) {
+  await ensureI18n(); // 以降の t() がユーザー言語で解決できるよう、辞書を確実に読み込む
   switch (msg?.type) {
+    case 'GET_I18N':
+      // content script へロケール辞書を渡す(content は import 不可のため SW が供給する)。
+      return { locale: i18nLocale, messages: i18nMessages, fallback: i18nFallback };
     case 'GET_ACTIVE_TAB_STATE':
       return getActiveTabState();
     case 'CHAT':
@@ -111,6 +162,11 @@ async function handleMessage(msg, sender) {
       return ensureContentAndSend(msg.tabId, { type: 'EXPORT_CONTEXT' });
     case 'CAPTURE_VISUAL_FEEDBACK':
       return captureVisualFeedback({ tabId: msg.tabId });
+    case 'VISUAL_FEEDBACK_CHANGED':
+      return scheduleAutoVisualFeedback({
+        tabId: sender?.tab?.id,
+        sendCount: msg.sendCount,
+      });
     case 'EXECUTE_USER_SCRIPT':
       return executeUserScript({ id: msg.id, code: msg.code, sender });
     case 'OPEN_OPTIONS':
@@ -124,19 +180,16 @@ async function handleMessage(msg, sender) {
 async function executeUserScript({ id, code, sender }) {
   const tabId = sender?.tab?.id;
   if (tabId == null) {
-    throw new Error('JavaScriptを実行する対象タブを特定できませんでした。');
+    throw new Error(t('sw.err.execTabMissing'));
   }
   if (!chrome.userScripts?.execute) {
-    throw new Error('JavaScript注入には Chrome 135+ と userScripts API が必要です。Chromeを更新してください。');
+    throw new Error(t('sw.err.userScriptsApi'));
   }
 
   try {
     await chrome.userScripts.getScripts();
   } catch (err) {
-    throw new Error(
-      'JavaScript注入には拡張機能詳細の「Allow User Scripts」を有効にしてください。' +
-        ` (${String(err?.message || err)})`
-    );
+    throw new Error(t('sw.err.allowUserScripts', { message: String(err?.message || err) }));
   }
 
   const frameId = Number.isInteger(sender?.frameId) ? sender.frameId : 0;
@@ -161,12 +214,12 @@ ${String(code || '')}
       world: 'USER_SCRIPT',
     });
   } catch (err) {
-    throw new Error(`JavaScriptを実行できませんでした: ${String(err?.message || err)}`);
+    throw new Error(t('sw.err.execFailed', { message: String(err?.message || err) }));
   }
 
   const result = injections?.[0] || {};
   if (result.error) {
-    throw new Error(`JavaScript実行エラー: ${result.error}`);
+    throw new Error(t('sw.err.execError', { message: result.error }));
   }
   return {
     world: 'USER_SCRIPT',
@@ -205,7 +258,7 @@ async function collectContext(tabId) {
 async function runChat({ tabId, text, history, rememberScope }) {
   const settings = await getSettings();
   if (!settings.ai.apiKey) {
-    throw new Error('APIキーが未設定です。設定画面で入力してください。');
+    throw new Error(t('sw.err.apiKeyMissing'));
   }
   const scope = normalizeRememberScope(rememberScope || settings.memory?.defaultScope);
   const context = await collectContext(tabId);
@@ -218,7 +271,7 @@ async function runChat({ tabId, text, history, rememberScope }) {
     { role: 'user', content: text },
   ];
 
-  const { reply, actions } = await callAI({ ai: settings.ai, messages, verbNames });
+  const { reply, actions } = await callAI({ ai: settings.ai, messages, verbNames, t });
 
   let results = [];
   if (actions.length) {
@@ -423,15 +476,15 @@ function pagePattern(url) {
 }
 
 function ruleLabel(title, target) {
-  if (target?.matchType === 'all') return '全サイトのAI注入';
-  if (target?.matchType === 'domain') return `${target.pattern} のAI注入`;
+  if (target?.matchType === 'all') return t('sw.rule.allSites');
+  if (target?.matchType === 'domain') return t('sw.rule.domain', { pattern: target.pattern });
   const cleanTitle = String(title || '').trim();
   if (cleanTitle) return cleanTitle.slice(0, 80);
   try {
     const url = new URL(target?.pattern || '');
     return `${url.hostname}${url.pathname}`;
   } catch {
-    return target?.pattern || 'AI注入';
+    return target?.pattern || t('sw.rule.fallback');
   }
 }
 
@@ -455,7 +508,7 @@ async function ensureContentAndSend(tabId, message) {
         files: ['content/content.css'],
       });
     } catch (e) {
-      throw new Error(`このページにはコンテンツスクリプトを注入できません(${String(e?.message || e)})。`);
+      throw new Error(t('sw.err.contentInjectFailed', { message: String(e?.message || e) }));
     }
     return chrome.tabs.sendMessage(tabId, message);
   }
@@ -472,15 +525,87 @@ const OFFSCREEN_URL = 'offscreen/offscreen.html';
 const INBOX_ROOT = 'ai-inbox';
 let creatingOffscreen = null;
 
-async function captureVisualFeedback({ tabId }) {
-  if (tabId == null) throw new Error('対象タブを特定できませんでした。');
+async function scheduleAutoVisualFeedback({ tabId, sendCount } = {}) {
+  if (tabId == null) return { scheduled: false, reason: 'no-tab' };
+  if (Number(sendCount || 0) <= 0) {
+    clearAutoSyncTimer(tabId);
+    return { scheduled: false, reason: 'empty' };
+  }
+
+  const settings = await getSettings();
+  const daemon = settings.daemon || {};
+  if (!settings.visualFeedback?.autoSync || !daemon.enabled || !daemon.url || !daemon.token) {
+    clearAutoSyncTimer(tabId);
+    return { scheduled: false, reason: 'disabled' };
+  }
+
+  const delayMs = clampAutoSyncDebounce(settings.visualFeedback?.autoSyncDebounceMs);
+  setAutoSyncTimer(tabId, delayMs);
+  return { scheduled: true, delayMs };
+}
+
+function setAutoSyncTimer(tabId, delayMs) {
+  clearAutoSyncTimer(tabId);
+  const timer = setTimeout(() => {
+    autoSyncTimers.delete(tabId);
+    runAutoVisualFeedback(tabId).catch((e) => {
+      console.warn('[bag] visual feedback auto sync failed:', e?.message || e);
+    });
+  }, delayMs);
+  autoSyncTimers.set(tabId, timer);
+}
+
+function clearAutoSyncTimer(tabId) {
+  const timer = autoSyncTimers.get(tabId);
+  if (timer) clearTimeout(timer);
+  autoSyncTimers.delete(tabId);
+}
+
+function clampAutoSyncDebounce(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return AUTO_SYNC_DEFAULT_DEBOUNCE_MS;
+  return Math.min(AUTO_SYNC_MAX_DEBOUNCE_MS, Math.max(AUTO_SYNC_MIN_DEBOUNCE_MS, Math.round(n)));
+}
+
+async function runAutoVisualFeedback(tabId) {
+  if (autoSyncInFlight.has(tabId)) {
+    setAutoSyncTimer(tabId, AUTO_SYNC_DEFAULT_DEBOUNCE_MS);
+    return;
+  }
+  let tab;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch {
+    return;
+  }
+  // captureVisibleTab captures the active tab in a window, so skip if the annotated tab is no longer active.
+  if (!tab?.active) return;
+
+  autoSyncInFlight.add(tabId);
+  try {
+    await captureVisualFeedback({ tabId, autoSync: true });
+  } finally {
+    autoSyncInFlight.delete(tabId);
+  }
+}
+
+async function captureVisualFeedback({ tabId, autoSync = false }) {
+  if (tabId == null) throw new Error(t('errors.targetTabMissing'));
+  const settings = await getSettings();
+  const daemon = settings.daemon || {};
+  if (autoSync && (!settings.visualFeedback?.autoSync || !daemon.enabled || !daemon.url || !daemon.token)) {
+    return { transport: 'skipped', reason: 'auto-sync-disabled' };
+  }
   const tab = await chrome.tabs.get(tabId);
+  if (autoSync && !tab?.active) {
+    return { transport: 'skipped', reason: 'tab-not-active' };
+  }
 
   // 1) 注釈を px へ解決し、自前UIを隠す。
   const data = await ensureContentAndSend(tabId, { type: 'PREPARE_CAPTURE' });
   if (!data || !Array.isArray(data.items) || data.items.length === 0) {
     await ensureContentAndSend(tabId, { type: 'FINISH_CAPTURE' }).catch(() => {});
-    throw new Error('お描きがありません。「お描き」で図形を描いてメモを書いてから送ってください。');
+    throw new Error(t('sw.err.captureNoDrawing'));
   }
 
   // 2) 可視タブを撮る（自前UIは隠れている）。必ず FINISH_CAPTURE で復元する。
@@ -490,7 +615,7 @@ async function captureVisualFeedback({ tabId }) {
   } finally {
     await ensureContentAndSend(tabId, { type: 'FINISH_CAPTURE' }).catch(() => {});
   }
-  if (!screenshotDataUrl) throw new Error('スクリーンショットを取得できませんでした。');
+  if (!screenshotDataUrl) throw new Error(t('sw.err.screenshotFailed'));
 
   // 3) offscreen で注釈を burn-in。
   await ensureOffscreen();
@@ -499,7 +624,7 @@ async function captureVisualFeedback({ tabId }) {
     type: 'COMPOSITE_VISUAL_FEEDBACK',
     payload: { screenshotDataUrl, data },
   });
-  if (!res?.ok) throw new Error(res?.error || '画像合成に失敗しました。');
+  if (!res?.ok) throw new Error(res?.error ? t(res.error) : t('sw.err.compositeFailed'));
   const composite = res.result;
 
   // 4) 保存。デーモン有効時は WebSocket push、未到達時は chrome.downloads にフォールバック。
@@ -514,8 +639,6 @@ async function captureVisualFeedback({ tabId }) {
     downscaled: composite.downscaled,
   };
 
-  const settings = await getSettings();
-  const daemon = settings.daemon || {};
   // 過去のダウンロード保存で学習した「ブラウザの実ダウンロード先」。あればデーモンへ伝え、
   // デーモンが既定 inbox をブラウザの実態(移動済み/Edge/Brave 等)へ合わせられるようにする。
   // 注意: これは下の chrome.downloads フォールバックが一度でも走って初めて学習される
@@ -545,7 +668,12 @@ async function captureVisualFeedback({ tabId }) {
       return { transport: 'daemon', dir: ack.dir, file: `${ack.dir}/shot.png`, id: ack.id, ...common };
     } catch (e) {
       daemonError = String(e?.message || e); // フォールバックして下の downloads へ
+      if (autoSync) throw new Error(daemonError);
     }
+  }
+
+  if (autoSync) {
+    throw new Error(t('sw.err.daemonUnreachable'));
   }
 
   // chrome.downloads フォールバック（Phase 0 と同じ）。
@@ -655,7 +783,7 @@ function pushToDaemon({ url, token, payload, timeoutMs = 8000 }) {
     try {
       ws = new WebSocket(`${url}?token=${encodeURIComponent(token)}`);
     } catch (e) {
-      reject(new Error(`WebSocket URL が不正です: ${String(e?.message || e)}`));
+      reject(new Error(t('sw.err.wsInvalidUrl', { message: String(e?.message || e) })));
       return;
     }
     const timer = setTimeout(() => {
@@ -664,7 +792,7 @@ function pushToDaemon({ url, token, payload, timeoutMs = 8000 }) {
       } catch {
         /* 既に閉じている */
       }
-      reject(new Error('デーモン応答タイムアウト'));
+      reject(new Error(t('sw.err.daemonTimeout')));
     }, timeoutMs);
     ws.onopen = () => ws.send(JSON.stringify(payload));
     ws.onmessage = (ev) => {
@@ -681,11 +809,11 @@ function pushToDaemon({ url, token, payload, timeoutMs = 8000 }) {
         /* noop */
       }
       if (m?.type === 'ack') resolve(m);
-      else reject(new Error(m?.error || 'デーモンが ack を返しませんでした'));
+      else reject(new Error(m?.error || t('sw.err.daemonNoAck')));
     };
     ws.onerror = () => {
       clearTimeout(timer);
-      reject(new Error('デーモンに接続できません（未起動 / URL違い / トークン不一致）'));
+      reject(new Error(t('sw.err.daemonUnreachable')));
     };
   });
 }
@@ -776,36 +904,42 @@ function buildAnnotationJson({ data, composite, capturedAt }) {
 
 function buildMemoMarkdown({ data, composite, capturedAt }) {
   const lines = [];
-  lines.push('# 視覚フィードバック (Browser Agent Guide)');
+  lines.push(t('memo.title'));
   lines.push('');
-  lines.push('> このフォルダの **shot.png を画像として** AI に見せてください（テキスト座標ではなく絵を直接 vision する）。');
-  lines.push('> - Claude Code: `shot.png` のパスを会話に貼る / ドラッグ / Ctrl+V');
-  lines.push('> - Codex CLI: `codex --image ./shot.png "..."`（または `view_image`）');
-  lines.push('> - Antigravity(IDE): 画像をエディタへドラッグ / 貼り付け');
+  lines.push(t('memo.intro'));
+  lines.push(t('memo.claudeCode'));
+  lines.push(t('memo.codex'));
+  lines.push(t('memo.antigravity'));
   lines.push('');
-  lines.push(`- URL: ${data.url}`);
-  lines.push(`- タイトル: ${data.title}`);
-  lines.push(`- 取得日時: ${capturedAt}`);
+  lines.push(t('memo.urlLine', { url: data.url }));
+  lines.push(t('memo.titleLine', { title: data.title }));
+  lines.push(t('memo.capturedAt', { at: capturedAt }));
   lines.push(
-    `- 画像: shot.png (${composite.width}x${composite.height}px, dpr ${data.dpr}, downscaled: ${composite.downscaled ? 'はい' : 'いいえ'})`
+    t('memo.imageLine', {
+      width: composite.width,
+      height: composite.height,
+      dpr: data.dpr,
+      downscaled: composite.downscaled ? t('memo.downscaledYes') : t('memo.downscaledNo'),
+    })
   );
-  lines.push('- 元画像(注釈なし): raw.png');
+  lines.push(t('memo.rawImage'));
   lines.push('');
-  lines.push('## 指示一覧');
+  lines.push(t('memo.instructions'));
   (data.items || []).forEach((it, i) => {
     const n = i + 1;
-    const body = (it.note || '').trim() || it.shapeText || '(メモなし)';
+    const body = (it.note || '').trim() || it.shapeText || t('memo.noMemo');
     const intent = (it.intent || '').trim();
-    const where = it.anchorLabel ? `対象「${it.anchorLabel}」` : '(対象不明)';
+    const where = it.anchorLabel ? t('memo.targetLabel', { label: it.anchorLabel }) : t('memo.targetUnknown');
     const flags = [];
-    if (!it.resolved) flags.push('対象未解決');
-    else if (!it.inViewport) flags.push('画面外');
+    if (!it.resolved) flags.push(t('memo.flagUnresolved'));
+    else if (!it.inViewport) flags.push(t('memo.flagOffscreen'));
     const flagStr = flags.length ? ` [${flags.join(', ')}]` : '';
-    lines.push(`${n}. ${body}${intent ? `（目的: ${intent}）` : ''} — ${where}${it.selector ? ` \`${it.selector}\`` : ''}${flagStr}`);
+    const purpose = intent ? t('memo.purposeSuffix', { intent }) : '';
+    lines.push(`${n}. ${body}${purpose} — ${where}${it.selector ? ` \`${it.selector}\`` : ''}${flagStr}`);
   });
   lines.push('');
-  lines.push('## (旧式) 図形の言葉での説明');
-  lines.push('> 画像が見られない場合のテキスト fallback。');
+  lines.push(t('memo.legacyHeading'));
+  lines.push(t('memo.legacyNote'));
   (data.items || []).forEach((it, i) => {
     lines.push(`- ${i + 1}: ${it.shapeText}`);
   });

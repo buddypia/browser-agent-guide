@@ -16,9 +16,9 @@
 - 拡張からの WebSocket push を受けて inbox に書き出す（トークン認証）。
 - inbox(`<slug>/shot.png` + `annotation.json` + `memo.md`)を新しい順にスキャン。
 - 3 つの MCP ツールを公開:
-  - `list_visual_feedback` — 一覧（id・取得元 url/title 付き）
-  - `get_latest_visual_feedback` — 最新を image+パスで返す（主用途）
-  - `get_visual_feedback` — id 指定で取得
+  - `bag_visual_feedback:list_visual_feedback` — 一覧（id・取得元 url/title 付き）
+  - `bag_visual_feedback:get_latest_visual_feedback` — 最新を image+パスで返す（主用途）
+  - `bag_visual_feedback:get_visual_feedback` — id 指定で取得
 - image を読めない CLI 向けに、常に `file_path` テキストを併走させる（fallback 内蔵）。
 
 ### 複数プロジェクトの絞り込み（urlContains / titleContains）
@@ -29,8 +29,8 @@
 受け取り、今のプロジェクトのものだけに絞れる。
 
 ```
-get_latest_visual_feedback({ urlContains: "example.com" })   # その URL を含む最新だけ
-list_visual_feedback({ titleContains: "ダッシュボード" })
+bag_visual_feedback:get_latest_visual_feedback({ urlContains: "example.com" })   # その URL を含む最新だけ
+bag_visual_feedback:list_visual_feedback({ titleContains: "ダッシュボード" })
 ```
 
 条件に一致しない場合は image を返さず案内テキストを返す（誤って別プロジェクトの画像を掴ませない）。
@@ -68,7 +68,7 @@ curl -s http://127.0.0.1:8765/healthz   # {"ok":true,"inboxDir":"..."}
 ### Claude Code
 
 ```bash
-claude mcp add --transport http visual_feedback http://127.0.0.1:8765/mcp
+claude mcp add --transport http bag_visual_feedback http://127.0.0.1:8765/mcp
 ```
 
 または `.mcp.json` / settings に:
@@ -76,15 +76,22 @@ claude mcp add --transport http visual_feedback http://127.0.0.1:8765/mcp
 ```json
 {
   "mcpServers": {
-    "visual_feedback": { "type": "http", "url": "http://127.0.0.1:8765/mcp" }
+    "bag_visual_feedback": { "type": "http", "url": "http://127.0.0.1:8765/mcp" }
   }
 }
 ```
 
-### Codex CLI — `~/.codex/config.toml`
+### Codex CLI
+
+```bash
+codex mcp add bag_visual_feedback --url http://127.0.0.1:8765/mcp
+codex mcp get bag_visual_feedback
+```
+
+または `~/.codex/config.toml` に:
 
 ```toml
-[mcp_servers.visual_feedback]
+[mcp_servers.bag_visual_feedback]
 url = "http://127.0.0.1:8765/mcp"
 ```
 
@@ -93,7 +100,7 @@ url = "http://127.0.0.1:8765/mcp"
 ```json
 {
   "mcpServers": {
-    "visual_feedback": { "serverUrl": "http://127.0.0.1:8765/mcp" }
+    "bag_visual_feedback": { "serverUrl": "http://127.0.0.1:8765/mcp" }
   }
 }
 ```
@@ -120,7 +127,7 @@ url = "http://127.0.0.1:8765/mcp"
 2. デーモンを起動（既定でその inbox を見る／受ける）。
 3. CLI に MCP を登録して、こう頼む:
    「ブラウザで指示した視覚フィードバックを見て直して」
-   → CLI が `get_latest_visual_feedback` を呼び、返った image を vision 解釈する。
+   → CLI が `bag_visual_feedback:get_latest_visual_feedback` を呼び、返った image を vision 解釈する。
    - **(検証済)** Claude Code / Codex が MCP image を実際に vision として読む（handoff §2.2）。
 
 ## テスト
