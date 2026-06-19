@@ -350,6 +350,68 @@ test.describe('お描き連動のAIメモ', () => {
     await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'FINISH_CAPTURE' }, {}, r)));
   });
 
+  test('商品画像だけを囲んだお描きでも近傍の商品リンク候補をcaptureに残す', async ({ page }) => {
+    await page.setViewportSize({ width: 1000, height: 820 });
+    await page.route('https://example.com/deals', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html; charset=utf-8',
+        body: `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">
+          <section style="position:fixed;left:40px;top:80px;width:700px;height:420px">
+            <h2>Fashion x 初夏 タイムセール祭り</h2>
+            <ol>
+              <li class="product-card" style="position:fixed;left:80px;top:150px;width:260px;height:280px">
+                <a href="/dp/B012345678?ref_=test" style="display:block;width:180px;height:180px">
+                  <div id="product-art" style="width:180px;height:180px;background:#e2e8f0"></div>
+                </a>
+                <div class="product-title">Stable Product Name</div>
+              </li>
+            </ol>
+          </section>
+        </body></html>`,
+      })
+    );
+    await page.goto('https://example.com/deals');
+    await page.addScriptTag({ content: CHROME_STUB });
+    await page.addStyleTag({ content: contentCss });
+    await page.addScriptTag({ content: contentScript });
+    await page.evaluate(() => {
+      const scope = location.origin + location.pathname;
+      window.__store.aiAdvisorAnnotations = {
+        [scope]: [
+          {
+            id: 'image-only-target',
+            kind: 'drawing',
+            createdAt: new Date().toISOString(),
+            note: 'このアイテムをカートに入れる',
+            intent: 'このアイテムをカートに入れる',
+            forAI: true,
+            anchor: {
+              selector: '#product-art',
+              tag: 'div',
+              role: 'div',
+              text: '',
+            },
+            shapes: [{ type: 'rect', x: -0.03, y: -0.04, w: 1.06, h: 1.08, color: '#ef4444', width: 3 }],
+          },
+        ],
+      };
+    });
+
+    const vf = await page.evaluate(
+      () => new Promise((r) => window.__bagListener({ type: 'PREPARE_CAPTURE' }, {}, r))
+    );
+    const item = vf.items[0];
+    expect(item.anchorLabel).toContain('Stable Product Name');
+    expect(item.href).toBe('https://example.com/dp/B012345678');
+    expect(item.dataAsin).toBe('B012345678');
+    expect(item.targetCandidates.map((c) => c.source)).toEqual(
+      expect.arrayContaining(['nearest-link', 'item-container', 'section-heading'])
+    );
+    expect(item.targetCandidates.some((c) => c.label.includes('Fashion x 初夏'))).toBe(true);
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'FINISH_CAPTURE' }, {}, r)));
+  });
+
   test('Amazonの旧商品URLキーに保存済みのAIメモをASIN正規化キーへ移行する', async ({ page }) => {
     const oldKey = 'https://www.amazon.com/Some-Product-Name/dp/B012345678';
     const canonicalKey = 'https://www.amazon.com/dp/B012345678';

@@ -899,6 +899,7 @@ function buildAnnotationJson({ data, composite, capturedAt }) {
       href: it.href,
       tag: it.tag,
       role: it.role,
+      targetCandidates: it.targetCandidates,
       resolved: it.resolved,
       inViewport: it.inViewport,
       bboxPx: it.bboxPx,
@@ -935,12 +936,14 @@ function buildMemoMarkdown({ data, composite, capturedAt }) {
     const body = (it.note || '').trim() || it.shapeText || t('memo.noMemo');
     const intent = (it.intent || '').trim();
     const where = it.anchorLabel ? t('memo.targetLabel', { label: it.anchorLabel }) : t('memo.targetUnknown');
+    const targetBits = [it.dataAsin ? `asin:${it.dataAsin}` : '', it.href ? it.href : ''].filter(Boolean);
     const flags = [];
     if (!it.resolved) flags.push(t('memo.flagUnresolved'));
     else if (!it.inViewport) flags.push(t('memo.flagOffscreen'));
     const flagStr = flags.length ? ` [${flags.join(', ')}]` : '';
     const purpose = intent ? t('memo.purposeSuffix', { intent }) : '';
-    lines.push(`${n}. ${body}${purpose} — ${where}${it.selector ? ` \`${it.selector}\`` : ''}${flagStr}`);
+    const targetInfo = targetBits.length ? ` (${targetBits.join(' / ')})` : '';
+    lines.push(`${n}. ${body}${purpose} — ${where}${targetInfo}${it.selector ? ` \`${it.selector}\`` : ''}${flagStr}`);
   });
   lines.push('');
   lines.push(t('memo.legacyHeading'));

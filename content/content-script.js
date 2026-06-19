@@ -1292,6 +1292,161 @@
     }
   }
 
+  function normalizedHrefFromLink(link) {
+    const href = link?.getAttribute?.('href') || '';
+    if (!href || href.startsWith('#') || /^javascript:/i.test(href)) return '';
+    try {
+      const url = new URL(href, location.href);
+      return `${url.origin}${url.pathname}`;
+    } catch {
+      return '';
+    }
+  }
+
+  function nearestLink(el) {
+    if (!el || el.nodeType !== 1) return null;
+    if (el.matches?.('a[href]')) return el;
+    const closest = el.closest?.('a[href]');
+    if (closest) return closest;
+    return el.querySelector?.('a[href]') || null;
+  }
+
+  function asinFromHref(href) {
+    const m = String(href || '').match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?#]|$)/i);
+    return m ? m[1].toUpperCase() : '';
+  }
+
+  function nearestDataAsin(el) {
+    if (!el || el.nodeType !== 1) return '';
+    const own = el.getAttribute?.('data-asin') || '';
+    if (/^[A-Z0-9]{10}$/i.test(own)) return own.toUpperCase();
+    const closest = el.closest?.('[data-asin]');
+    const val = closest?.getAttribute?.('data-asin') || '';
+    if (/^[A-Z0-9]{10}$/i.test(val)) return val.toUpperCase();
+    const nested = el.querySelector?.('[data-asin]');
+    const nestedVal = nested?.getAttribute?.('data-asin') || '';
+    return /^[A-Z0-9]{10}$/i.test(nestedVal) ? nestedVal.toUpperCase() : '';
+  }
+
+  function nearestTestId(el) {
+    if (!el || el.nodeType !== 1) return '';
+    const direct = el.getAttribute('data-testid') || el.getAttribute('data-test') || el.getAttribute('data-cy') || '';
+    if (direct) return direct;
+    const marked = el.closest?.('[data-testid],[data-test],[data-cy]');
+    return marked?.getAttribute?.('data-testid') || marked?.getAttribute?.('data-test') || marked?.getAttribute?.('data-cy') || '';
+  }
+
+  function stableAncestor(el) {
+    let cur = el;
+    let depth = 0;
+    while (cur && cur.nodeType === 1 && cur !== document.body && cur !== document.documentElement && depth < 8) {
+      if (stableAttrSelector(cur) || (cur.id && isStableId(cur.id))) return cur;
+      cur = cur.parentElement;
+      depth += 1;
+    }
+    return null;
+  }
+
+  function itemContainerAncestor(el) {
+    let cur = el;
+    let depth = 0;
+    while (cur && cur.nodeType === 1 && cur !== document.body && cur !== document.documentElement && depth < 8) {
+      const role = cur.getAttribute?.('role') || '';
+      const cls = cur.className && typeof cur.className === 'string' ? cur.className : '';
+      const looksLikeItem =
+        cur.matches?.('[data-asin],li,article,[role="listitem"],[data-testid],[data-test],[data-cy],[data-csa-c-item-id]') ||
+        /\b(card|item|product|result|tile)\b/i.test(cls);
+      const rect = cur.getBoundingClientRect?.();
+      if (looksLikeItem && rect && rect.width > 20 && rect.height > 20 && !isPageSizedRect(rect) && role !== 'presentation') return cur;
+      cur = cur.parentElement;
+      depth += 1;
+    }
+    return null;
+  }
+
+  function headingContextCandidate(el) {
+    if (!el || el.nodeType !== 1) return null;
+    const targetTop = el.getBoundingClientRect?.().top ?? Infinity;
+    let best = null;
+    let bestDist = Infinity;
+    let cur = el.parentElement;
+    let depth = 0;
+    while (cur && cur.nodeType === 1 && cur !== document.body && cur !== document.documentElement && depth < 6) {
+      const headings = cur.querySelectorAll?.('h1,h2,h3,h4,h5,h6,[role="heading"]') || [];
+      for (const h of headings) {
+        if (!isVisible(h) || isOwnUi(h) || h.contains(el)) continue;
+        const r = h.getBoundingClientRect();
+        if (r.top > targetTop + 12) continue;
+        const label = labelOf(h);
+        if (!label) continue;
+        const dist = Math.abs(targetTop - r.top);
+        if (dist < bestDist) {
+          best = h;
+          bestDist = dist;
+        }
+      }
+      cur = cur.parentElement;
+      depth += 1;
+    }
+    return best;
+  }
+
+  function targetCandidate(el, source) {
+    if (!el || el.nodeType !== 1) return null;
+    const link = nearestLink(el);
+    const href = normalizedHrefFromLink(link);
+    const dataAsin = nearestDataAsin(el) || asinFromHref(href);
+    const label = truncate(labelOf(el) || labelOf(link) || '', 160);
+    const selector = cssPath(el);
+    if (!selector && !href && !dataAsin && !label) return null;
+    return {
+      source,
+      selector,
+      label,
+      dataAgentId: el.getAttribute('data-agent-id') || '',
+      testid: nearestTestId(el),
+      dataAsin,
+      href,
+      tag: el.tagName.toLowerCase(),
+      role: roleOf(el),
+    };
+  }
+
+  function dedupeTargetCandidates(candidates) {
+    const seen = new Set();
+    const out = [];
+    for (const c of candidates) {
+      if (!c) continue;
+      const key = [c.selector, c.href, c.dataAsin, c.label, c.source].join('\n');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(c);
+    }
+    return out.slice(0, 6);
+  }
+
+  function buildTargetCandidates(el) {
+    if (!el || el.nodeType !== 1) return [];
+    return dedupeTargetCandidates([
+      targetCandidate(el, 'target'),
+      targetCandidate(nearestLink(el), 'nearest-link'),
+      targetCandidate(stableAncestor(el), 'stable-ancestor'),
+      targetCandidate(itemContainerAncestor(el), 'item-container'),
+      targetCandidate(headingContextCandidate(el), 'section-heading'),
+    ]);
+  }
+
+  function bestTargetCandidate(candidates) {
+    const list = Array.isArray(candidates) ? candidates : [];
+    return (
+      list.find((c) => c.dataAgentId || c.testid) ||
+      list.find((c) => c.dataAsin || c.href) ||
+      list.find((c) => c.label) ||
+      list[0] ||
+      null
+    );
+  }
+
   function hasDurableAnchorSignal(el) {
     if (!el || el.nodeType !== 1) return false;
     if (stableAttrSelector(el)) return true;
@@ -1334,22 +1489,23 @@
   }
 
   function buildAnchor(el) {
+    const candidates = buildTargetCandidates(el);
+    const best = bestTargetCandidate(candidates) || {};
+    const href = normalizedLinkHref(el) || best.href || '';
+    const dataAsin = nearestDataAsin(el) || asinFromHref(href) || best.dataAsin || '';
     return {
       selector: cssPath(el),
       tag: el.tagName.toLowerCase(),
       role: roleOf(el),
       text: (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80),
       dataAgentId: el.getAttribute('data-agent-id') || '',
-      dataAsin: el.getAttribute('data-asin') || '',
-      href: el.matches?.('a[href]') ? normalizedLinkHref(el) : '',
+      dataAsin,
+      href,
       name: el.getAttribute('name') || '',
-      testid:
-        el.getAttribute('data-testid') ||
-        el.getAttribute('data-test') ||
-        el.getAttribute('data-cy') ||
-        '',
+      testid: nearestTestId(el),
       placeholder: el.getAttribute('placeholder') || '',
       ariaLabel: el.getAttribute('aria-label') || '',
+      targetCandidates: candidates,
     };
   }
 
@@ -3311,20 +3467,27 @@
       }
       const firstColor = (a.shapes && a.shapes[0] && a.shapes[0].color) || '#ef4444';
       const anchor = a.anchor || {};
+      const targetCandidates = target ? buildTargetCandidates(target) : Array.isArray(anchor.targetCandidates) ? anchor.targetCandidates : [];
+      const best = bestTargetCandidate(targetCandidates) || {};
+      const bestLabel = targetCandidates.find((c) => c.label)?.label || '';
+      const href = (target ? normalizedLinkHref(target) : anchor.href) || best.href || '';
+      const dataAsin = (target ? nearestDataAsin(target) : anchor.dataAsin) || asinFromHref(href) || best.dataAsin || '';
+      const anchorLabel = target ? truncate(labelOf(target) || bestLabel, 60) : truncate(anchor.text || bestLabel || anchor.tag || '', 60);
       items.push({
         id: a.id,
         color: firstColor,
         note: a.note || '',
         intent: a.intent || '',
         shapeText: describeShapes(a.shapes),
-        anchorLabel: target ? truncate(labelOf(target), 60) : truncate(anchor.text || anchor.tag || '', 60),
+        anchorLabel,
         selector: anchor.selector || '',
         dataAgentId: target?.getAttribute?.('data-agent-id') || anchor.dataAgentId || '',
         testid: anchor.testid || '',
-        dataAsin: target?.getAttribute?.('data-asin') || anchor.dataAsin || '',
-        href: target ? normalizedLinkHref(target) : anchor.href || '',
+        dataAsin,
+        href,
         tag: target?.tagName?.toLowerCase?.() || anchor.tag || '',
         role: target ? roleOf(target) : anchor.role || '',
+        targetCandidates,
         resolved,
         inViewport,
         shapesPx,

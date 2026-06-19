@@ -26,8 +26,21 @@
       "dataAgentId": "@agent:docs/api-list",
       "selector": "main h2",
       "testid": "",
+      "dataAsin": "B012345678",
+      "href": "https://example.com/dp/B012345678",
       "tag": "h2",
       "role": "heading",
+      "targetCandidates": [
+        {
+          "source": "nearest-link",
+          "selector": "a.product-link",
+          "label": "Example product",
+          "dataAsin": "B012345678",
+          "href": "https://example.com/dp/B012345678",
+          "tag": "a",
+          "role": "a"
+        }
+      ],
       "resolved": true,
       "inViewport": true
     }
