@@ -29,6 +29,42 @@ const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"></head><body
   </script>
 </body></html>`;
 
+test('お描きツールバーはi18n読み込み完了後に描画される', async ({ page }) => {
+  await page.setContent(PAGE_HTML);
+  await page.addScriptTag({
+    content: `
+      window.__bagListener = null;
+      window.__bagI18n = ${jaLocaleJson};
+      window.chrome = {
+        runtime: {
+          onMessage: { addListener: (fn) => { window.__bagListener = fn; } },
+          sendMessage: (msg, cb) => {
+            if (msg && msg.type === 'GET_I18N') {
+              const r = { ok: true, result: { locale: 'ja', messages: window.__bagI18n, fallback: window.__bagI18n } };
+              const p = new Promise((resolve) => setTimeout(() => resolve(r), 80));
+              if (typeof cb === 'function') { p.then(cb); return; }
+              return p;
+            }
+            if (typeof cb === 'function') { cb({ ok: true }); return; }
+            return Promise.resolve({ ok: true });
+          },
+          get lastError() { return null; },
+        },
+        storage: { local: { get: async () => ({}), set: async () => {} }, onChanged: { addListener() {} } },
+      };
+    `,
+  });
+  await page.addStyleTag({ content: contentCss });
+  await page.addScriptTag({ content: contentScript });
+
+  await page.evaluate(
+    () => new Promise((resolve) => window.__bagListener({ type: 'START_DRAWING' }, {}, resolve))
+  );
+
+  await expect(page.locator('.bag-draw-tool[data-tool="ellipse"]')).toContainText('円');
+  await expect(page.locator('.bag-draw-toolbar')).not.toContainText('cs.draw.toolEllipse');
+});
+
 test.describe('お描き中のモーダル保護', () => {
   test.beforeEach(async ({ page }) => {
     await page.setContent(PAGE_HTML);
