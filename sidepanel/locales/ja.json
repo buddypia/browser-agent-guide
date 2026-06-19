@@ -126,6 +126,7 @@
   "cs.memo.tag": "AIメモ",
   "cs.memo.placeholder": "AIへの指示を書く（例: 見出しをもっと短く）",
   "cs.memo.toAI": "AIに渡す",
+  "cs.memo.save": "保存",
   "cs.memo.collapseTitle": "畳む / 展開",
   "cs.memo.collapseAria": "畳む",
   "cs.memo.deleteTitle": "このメモとお描きを削除",
