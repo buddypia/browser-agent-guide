@@ -29,6 +29,11 @@ const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"></head><body
   </script>
 </body></html>`;
 
+const AUTHOR_PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"></head>
+<body style="margin:0">
+  <button id="target" style="position:fixed;left:72px;top:620px;width:210px;height:48px">下部の対象</button>
+</body></html>`;
+
 test('お描きツールバーはi18n読み込み完了後に描画される', async ({ page }) => {
   await page.setContent(PAGE_HTML);
   await page.addScriptTag({
@@ -63,6 +68,59 @@ test('お描きツールバーはi18n読み込み完了後に描画される', a
 
   await expect(page.locator('.bag-draw-tool[data-tool="ellipse"]')).toContainText('円');
   await expect(page.locator('.bag-draw-toolbar')).not.toContainText('cs.draw.toolEllipse');
+});
+
+test('補足フォームはヘッダをドラッグして移動できる', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  await page.setContent(AUTHOR_PAGE_HTML);
+  await page.addScriptTag({
+    content: `
+      window.__bagListener = null;
+      window.__bagI18n = ${jaLocaleJson};
+      window.chrome = {
+        runtime: {
+          onMessage: { addListener: (fn) => { window.__bagListener = fn; } },
+          sendMessage: (msg, cb) => {
+            if (msg && msg.type === 'GET_I18N') {
+              const r = { ok: true, result: { locale: 'ja', messages: window.__bagI18n, fallback: window.__bagI18n } };
+              if (typeof cb === 'function') { cb(r); return; }
+              return Promise.resolve(r);
+            }
+            if (typeof cb === 'function') { cb({ ok: true }); return; }
+            return Promise.resolve({ ok: true });
+          },
+          get lastError() { return null; },
+        },
+        storage: { local: { get: async () => ({}), set: async () => {} }, onChanged: { addListener() {} } },
+      };
+    `,
+  });
+  await page.addStyleTag({ content: contentCss });
+  await page.addScriptTag({ content: contentScript });
+
+  await page.evaluate(
+    () => new Promise((resolve) => window.__bagListener({ type: 'START_PICKER' }, {}, resolve))
+  );
+  await page.locator('#target').click();
+
+  const author = page.locator('.bag-author');
+  await expect(author).toBeVisible();
+  await author.locator('[data-f="kind"]').selectOption('marker');
+  await author.locator('[data-f="kind"]').selectOption('note');
+
+  const before = await author.boundingBox();
+  const head = await author.locator('.bag-author-head').boundingBox();
+  await page.mouse.move(head.x + 20, head.y + head.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(28, 28, { steps: 8 });
+  await page.mouse.up();
+
+  const after = await author.boundingBox();
+  expect(after.y).toBeLessThan(before.y);
+  await expect(author.locator('[data-f="save"]')).toBeVisible();
+  await author.locator('[data-f="note"]').fill('下でも保存できる');
+  await author.locator('[data-f="save"]').click();
+  await expect(author).toHaveCount(0);
 });
 
 test.describe('お描き中のモーダル保護', () => {
