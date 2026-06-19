@@ -1,5 +1,5 @@
 // お描き完了後に「メモを残す」を押すと、図形のすぐ隣に編集可能な「AIメモ」がページ上に生成され、
-// 本文編集・forAIトグル・削除・件数・再配置・forAIによる文脈除外が正しく働くことを検証する。
+// 本文の保存ボタン・forAIトグル・削除・件数・再配置・forAIによる文脈除外が正しく働くことを検証する。
 // content/content-script.js を chrome スタブ付きで直接注入して実ブラウザDOMで確認する。
 import { expect, test } from '@playwright/test';
 import fs from 'node:fs';
@@ -92,9 +92,10 @@ test.describe('お描き連動のAIメモ', () => {
 
     const memo = page.locator('.bag-memo');
     await expect(memo).toHaveCount(1);
-    // メモは編集用テキストとforAIトグルを持つ。
+    // メモは編集用テキスト、明示保存ボタン、forAIトグルを持つ。
     await expect(memo.locator('.bag-memo-text')).toBeVisible();
     await expect(memo.locator('.bag-memo-text')).toHaveValue('最初の指示');
+    await expect(memo.locator('.bag-memo-save')).toHaveText('保存');
     await expect(memo.locator('.bag-memo-toggle input')).toBeChecked(); // forAI 既定ON
 
     // 図形(SVG)も永続レイヤに描かれている。
@@ -109,9 +110,9 @@ test.describe('お描き連動のAIメモ', () => {
     expect(summary.shapePreview.shapes.length).toBeGreaterThan(0);
     expect(summary.shapePreview.shapes[0].type).toBe('rect');
 
-    // 本文を編集すると storage(aiAdvisorAnnotations)へ保存される。
+    // 本文を編集し、保存ボタンを押すと storage(aiAdvisorAnnotations)へ即時保存される。
     await memo.locator('.bag-memo-text').fill('見出しをもっと短く');
-    await memo.locator('.bag-memo-text').blur();
+    await memo.locator('.bag-memo-save').click();
     await expect
       .poll(async () => {
         return page.evaluate(() => {

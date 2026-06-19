@@ -126,6 +126,7 @@
   "cs.memo.tag": "AI Memo",
   "cs.memo.placeholder": "Write an instruction for AI (e.g. make the heading shorter)",
   "cs.memo.toAI": "Send to AI",
+  "cs.memo.save": "Save",
   "cs.memo.collapseTitle": "Collapse / Expand",
   "cs.memo.collapseAria": "Collapse",
   "cs.memo.deleteTitle": "Delete this memo and drawing",
