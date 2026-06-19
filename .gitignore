@@ -39,12 +39,12 @@ tmp/
 .tmp/.agent_worktree_owner.json
 
 # Worktree ecosystem shared/runtime state
-.brief2dev/system/
 .brief2dev/session-history/
 .brief2dev/run/
 .brief2dev/runs/
 
-# Codex project hooks are tracked; machine-local config is not
+# Codex project hooks are tracked; machine-local CLI config is not
+.agents/
 .codex/*
 !.codex/hooks.json
 
