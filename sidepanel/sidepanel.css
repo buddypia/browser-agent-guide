@@ -747,9 +747,51 @@ textarea:focus-visible {
   max-width: 100%;
 }
 
+.msg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
 .msg .role {
+  min-width: 0;
   font-size: 11px;
   color: var(--muted);
+}
+
+.msg-delete {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #9aa6a2;
+  opacity: 0;
+}
+
+.msg:focus-within .msg-delete,
+.msg:hover .msg-delete {
+  opacity: 1;
+}
+
+.msg-delete:hover {
+  background: rgba(248, 113, 113, 0.12);
+  color: #fca5a5;
+}
+
+.msg-delete:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.msg-delete .action-icon {
+  width: 15px;
+  height: 15px;
 }
 
 .bubble {
