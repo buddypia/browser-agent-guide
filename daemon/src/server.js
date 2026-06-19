@@ -1,12 +1,14 @@
-// MCP サーバー定義。inbox を 3 つのツールで公開する。
-//   - list_visual_feedback        : 一覧（id を取得）
-//   - get_latest_visual_feedback  : 最新を image+パスで取得（CLI の主用途）
-//   - get_visual_feedback         : id 指定で取得
-// いずれも image を見られない CLI 向けに file_path テキストを必ず併走させる（§3.2）。
+// MCP サーバー定義。inbox を 5 つのツールで公開する。
+//   - list_visual_feedback                 : 一覧（id を取得）
+//   - get_latest_visual_feedback_context  : 最新を text/structured context で取得（画像なし）
+//   - get_visual_feedback_context         : id 指定で text/structured context を取得（画像なし）
+//   - get_latest_visual_feedback          : 最新を image+パスで取得（必要時の vision）
+//   - get_visual_feedback                 : id 指定で image+パスを取得
+// image ツールは、image を見られない CLI 向けに file_path テキストを必ず併走させる（§3.2）。
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { findEntry, buildEntryContent, queryEntries } from './inbox.js';
+import { findEntry, buildEntryContent, buildEntryContext, buildEntryContextText, queryEntries } from './inbox.js';
 
 // 複数プロジェクトが1つの inbox に積まれる時の絞り込み引数（部分一致・任意）。
 const FILTER_SCHEMA = {
@@ -19,9 +21,10 @@ export function createMcpServer(inboxDir) {
     { name: 'bag-visual-feedback', version: '0.1.0' },
     {
       instructions:
-        'ブラウザのお描き注釈スクリーンショットを vision で受け取るための inbox。' +
-        'ユーザーが「画面のこの部分をこう直して」と図で示したら get_latest_visual_feedback を呼び、' +
-        '返ってきた image を絵として解釈する（テキスト座標ではなく絵を見る）。',
+        'ブラウザのお描き注釈スクリーンショットと構造化メタを受け取るための inbox。' +
+        'ユーザーが「画面のこの部分をこう直して」と図で示したら、まず get_latest_visual_feedback_context を呼び、' +
+        '@agent: / selector / testid / anchorLabel で対象を特定する。曖昧または見た目の判断が必要な時だけ ' +
+        'get_latest_visual_feedback を呼び、返ってきた image を絵として解釈する（テキスト座標ではなく絵を見る）。',
     }
   );
 
@@ -49,6 +52,29 @@ export function createMcpServer(inboxDir) {
   );
 
   server.registerTool(
+    'get_latest_visual_feedback_context',
+    {
+      title: '最新の視覚フィードバック文脈を取得',
+      description:
+        '最新のお描きメタデータを image なしで返す。@agent: / selector / testid / anchorLabel を先に読み、' +
+        '画像 vision を使わず対象特定できるか判断するための軽量ツール。' +
+        '複数プロジェクトが混在する時は urlContains / titleContains で今のプロジェクトのものに絞れる。',
+      inputSchema: { ...FILTER_SCHEMA },
+    },
+    async ({ urlContains, titleContains }) => {
+      const [entry] = queryEntries(inboxDir, { limit: 1, urlContains, titleContains });
+      if (!entry) {
+        return { content: [{ type: 'text', text: filterEmptyMessage(inboxDir, { urlContains, titleContains }) }] };
+      }
+      const context = buildEntryContext(entry);
+      return {
+        content: [{ type: 'text', text: buildEntryContextText(context) }],
+        structuredContent: context,
+      };
+    }
+  );
+
+  server.registerTool(
     'get_latest_visual_feedback',
     {
       title: '最新の視覚フィードバックを取得',
@@ -64,6 +90,25 @@ export function createMcpServer(inboxDir) {
         return { content: [{ type: 'text', text: filterEmptyMessage(inboxDir, { urlContains, titleContains }) }] };
       }
       return { content: buildEntryContent(entry) };
+    }
+  );
+
+  server.registerTool(
+    'get_visual_feedback_context',
+    {
+      title: 'IDで視覚フィードバック文脈を取得',
+      description:
+        'id を指定してお描きメタデータを image なしで返す。@agent: / selector / testid / anchorLabel を先に読むための軽量ツール。',
+      inputSchema: { id: z.string().min(1) },
+    },
+    async ({ id }) => {
+      const entry = findEntry(inboxDir, id);
+      if (!entry) return { content: [{ type: 'text', text: `id=${id} は見つかりません。` }], isError: true };
+      const context = buildEntryContext(entry);
+      return {
+        content: [{ type: 'text', text: buildEntryContextText(context) }],
+        structuredContent: context,
+      };
     }
   );
 

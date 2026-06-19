@@ -23,8 +23,11 @@
       "intent": "API一覧を構造化して抽出",
       "shapeText": "赤色の四角で囲んだ",
       "anchorLabel": "提供API一覧",
+      "dataAgentId": "@agent:docs/api-list",
       "selector": "main h2",
       "testid": "",
+      "tag": "h2",
+      "role": "heading",
       "resolved": true,
       "inViewport": true
     }
