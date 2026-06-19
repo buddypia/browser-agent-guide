@@ -268,11 +268,17 @@ async function persistChatHistory(messages = state.history, page = state) {
   const all = await getLocal(CHAT_HISTORY_KEY, {});
   const now = new Date().toISOString();
   const next = all && typeof all === 'object' && !Array.isArray(all) ? { ...all } : {};
+  const normalized = normalizeMessages(messages);
+  if (!normalized.length) {
+    delete next[pageKey];
+    await setLocal(CHAT_HISTORY_KEY, next);
+    return;
+  }
   next[pageKey] = {
     url: page.url || '',
     title: page.title || '',
     updatedAt: now,
-    messages: normalizeMessages(messages),
+    messages: normalized,
   };
 
   const pruned = Object.fromEntries(
@@ -316,7 +322,7 @@ async function clearPromptHistory() {
 function renderChatHistory() {
   els.messages.innerHTML = '';
   if (!state.history.length) renderEmptyHint();
-  state.history.forEach((msg) => addMessage(msg.role, msg.content));
+  state.history.forEach((msg, index) => addMessage(msg.role, msg.content, { messageIndex: index }));
   scrollToBottom();
 }
 
@@ -435,11 +441,20 @@ function movePromptCursor(direction) {
 }
 
 // ---- メッセージ描画 ----
-function addMessage(role, content) {
+function addMessage(role, content, options = {}) {
   document.getElementById('empty-hint')?.remove();
   const wrap = document.createElement('div');
   wrap.className = `msg ${role}`;
-  wrap.innerHTML = `<div class="role">${escapeHtml(roleLabel(role))}</div>`;
+
+  const head = document.createElement('div');
+  head.className = 'msg-head';
+  const roleEl = document.createElement('div');
+  roleEl.className = 'role';
+  roleEl.textContent = roleLabel(role);
+  head.appendChild(roleEl);
+  wrap.appendChild(head);
+  setMessageDeleteButton(wrap, options.messageIndex);
+
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
   bubble.textContent = content;
@@ -453,6 +468,55 @@ function roleLabel(role) {
   if (role === 'user') return t('roles.user');
   if (role === 'assistant') return t('roles.assistant');
   return t('roles.error');
+}
+
+function setMessageDeleteButton(wrap, messageIndex) {
+  const head = wrap?.querySelector('.msg-head');
+  if (!head || !Number.isInteger(messageIndex) || messageIndex < 0) return;
+  head.querySelector('.msg-delete')?.remove();
+  head.appendChild(buildMessageDeleteButton(messageIndex));
+}
+
+function buildMessageDeleteButton(messageIndex) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'msg-delete';
+  btn.title = t('chat.deleteTurnTitle');
+  btn.setAttribute('aria-label', t('chat.deleteTurnAria'));
+  btn.disabled = state.busy;
+  btn.innerHTML = `
+    <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M6 6l1 14h10l1-14" />
+      <path d="M10 11v5M14 11v5" />
+    </svg>`;
+  btn.addEventListener('click', () => deleteChatTurn(messageIndex));
+  return btn;
+}
+
+function chatTurnRange(messageIndex) {
+  const msg = state.history[messageIndex];
+  if (!msg) return null;
+  if (msg.role === 'user' && state.history[messageIndex + 1]?.role === 'assistant') {
+    return [messageIndex, messageIndex + 2];
+  }
+  if (msg.role === 'assistant' && state.history[messageIndex - 1]?.role === 'user') {
+    return [messageIndex - 1, messageIndex + 1];
+  }
+  return [messageIndex, messageIndex + 1];
+}
+
+async function deleteChatTurn(messageIndex) {
+  if (state.busy) return;
+  const range = chatTurnRange(messageIndex);
+  if (!range) return;
+  if (!confirm(t('confirm.deleteChatTurn'))) return;
+  const [start, end] = range;
+  state.history = normalizeMessages([...state.history.slice(0, start), ...state.history.slice(end)]);
+  await persistChatHistory();
+  renderChatHistory();
+  els.input.focus();
 }
 
 function renderActions(parent, actions, results) {
@@ -517,7 +581,7 @@ async function handleSubmit(text) {
   const previousHistory = normalizeMessages(state.history);
   const userMessage = { role: 'user', content: cleanText };
   const submitPage = { pageKey: state.pageKey, url: state.url, title: state.title };
-  addMessage('user', cleanText);
+  const userWrap = addMessage('user', cleanText);
   const typing = addTyping();
 
   try {
@@ -534,6 +598,8 @@ async function handleSubmit(text) {
       const wrap = addMessage('assistant', reply || t('chat.noReply'));
       renderActions(wrap, actions, results);
       state.history = nextHistory;
+      setMessageDeleteButton(userWrap, nextHistory.length - 2);
+      setMessageDeleteButton(wrap, nextHistory.length - 1);
       if (actions?.length) refreshState();
     }
     await persistChatHistory(nextHistory, submitPage);
@@ -543,6 +609,7 @@ async function handleSubmit(text) {
     if (state.pageKey === submitPage.pageKey) {
       addMessage('error', e.message);
       state.history = nextHistory;
+      setMessageDeleteButton(userWrap, nextHistory.length - 1);
     }
     await persistChatHistory(nextHistory, submitPage);
   } finally {
@@ -554,6 +621,10 @@ function setBusy(b) {
   state.busy = b;
   els.send.disabled = b;
   els.input.disabled = b;
+  els.btnClearChat.disabled = b;
+  document.querySelectorAll('.msg-delete').forEach((btn) => {
+    btn.disabled = b;
+  });
   if (!b) els.input.focus();
 }
 

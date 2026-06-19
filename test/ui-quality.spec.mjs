@@ -90,7 +90,7 @@ async function installChromeMock(page) {
           return { ok: true, result: {} };
         case 'CHAT':
           return {
-            reply: 'Checked the goal, context, and result.',
+            reply: `Reply to: ${message.text}`,
             actions: [],
             results: [],
           };
@@ -177,7 +177,7 @@ test.describe('UI quality gates', () => {
     await expect(page.getByRole('button', { name: 'Copy for AI' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'List elements' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open prompt history' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'New chat' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Delete all chat messages' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open settings' })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Instruction for AI' })).toBeVisible();
 
@@ -223,8 +223,32 @@ test.describe('UI quality gates', () => {
     await page.getByRole('textbox', { name: 'Instruction for AI' }).fill('Check the main CTA on this page');
     await page.getByRole('button', { name: 'Send' }).click();
 
-    await expect(page.locator('#messages').getByText('Check the main CTA on this page')).toBeVisible();
-    await expect(page.locator('#messages').getByText('Checked the goal, context, and result.')).toBeVisible();
+    await expect(page.locator('#messages').getByText('Check the main CTA on this page', { exact: true })).toBeVisible();
+    await expect(page.locator('#messages').getByText('Reply to: Check the main CTA on this page')).toBeVisible();
+  });
+
+  test('side panel can delete one chat turn or all chat messages', async ({ page }) => {
+    page.on('dialog', (dialog) => dialog.accept());
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+
+    await page.getByRole('textbox', { name: 'Instruction for AI' }).fill('First change');
+    await page.getByRole('button', { name: 'Send' }).click();
+    await expect(page.locator('#messages').getByText('Reply to: First change')).toBeVisible();
+
+    await page.getByRole('textbox', { name: 'Instruction for AI' }).fill('Second change');
+    await page.getByRole('button', { name: 'Send' }).click();
+    await expect(page.locator('#messages').getByText('Reply to: Second change')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Delete this chat' }).first().click();
+    await expect(page.locator('#messages').getByText('First change', { exact: true })).toHaveCount(0);
+    await expect(page.locator('#messages').getByText('Reply to: First change')).toHaveCount(0);
+    await expect(page.locator('#messages').getByText('Second change', { exact: true })).toBeVisible();
+    await expect(page.locator('#messages').getByText('Reply to: Second change')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Delete all chat messages' }).click();
+    await expect(page.getByRole('heading', { name: 'Start by typing an instruction' })).toBeVisible();
+    await expect(page.locator('#messages').getByText('Second change', { exact: true })).toHaveCount(0);
+    await expect(page.locator('#messages').getByText('Reply to: Second change')).toHaveCount(0);
   });
 
   test('options page passes axe on the default settings state', async ({ page }) => {
