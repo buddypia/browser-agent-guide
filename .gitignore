@@ -39,7 +39,6 @@ tmp/
 .tmp/.agent_worktree_owner.json
 
 # Worktree ecosystem shared/runtime state
-.brief2dev/system
 .brief2dev/session-history/
 .brief2dev/run/
 .brief2dev/runs/
