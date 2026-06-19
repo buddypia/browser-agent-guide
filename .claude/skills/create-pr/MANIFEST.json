@@ -1,0 +1,92 @@
+{
+  "schema_version": 2,
+  "skill_id": "create-pr",
+  "version": "2.0.0-unified",
+  "tier": 3,
+  "tier_description": "Utility - Worktree 격리 GitHub Flow (8 명령, v2 응답 계약). Mode A staged 격리 + Mode B PLAN.md 기반 worktree 배포. unstaged/untracked 100% 보전, fail-loud finalize.",
+  "enforced_protocol": {
+    "preflight_required": true,
+    "postflight_required": true,
+    "model_routing_required": false,
+    "evidence_caching_enabled": false
+  },
+  "model_routing": {
+    "default_model": "sonnet",
+    "fallback_chain": [
+      "sonnet"
+    ]
+  },
+  "preflight_checks": [
+    {
+      "id": "PF-001",
+      "description": "init: main 최신성 + staged 존재 + 기밀 파일 차단 + gh auth + 동시 실행 보호 (30s flag mtime)",
+      "blocking": true
+    },
+    {
+      "id": "PF-002",
+      "description": "init: CI Mirror Gate (make q.ci-mirror, 60min stamp freshness)",
+      "blocking": true
+    },
+    {
+      "id": "PF-003",
+      "description": "ship-worktree: PLAN.md 검증 (코드블록/HTML주석 strip, 취소 마커 인식) + committed/clean worktree 검사 (commit_required)",
+      "blocking": true
+    }
+  ],
+  "postflight_checks": [
+    {
+      "id": "POF-001",
+      "description": "ship-feature 완료 (merged === true 또는 pending === true graceful)",
+      "blocking": true
+    },
+    {
+      "id": "POF-002",
+      "description": "finalize 완료 (sync_status === 'synced' 또는 의도된 fail-loud 응답)",
+      "blocking": true
+    },
+    {
+      "id": "POF-003",
+      "description": "cleanup-worktree 완료 시 active_stash === null 또는 stash conflict hint 표시",
+      "blocking": true
+    }
+  ],
+  "public_api": {
+    "direct_invocable": true,
+    "trigger_keywords": [
+      "create-pr",
+      "PR 작성",
+      "릴리즈",
+      "release"
+    ],
+    "args_pattern": "[추가 지시사항 (선택)]"
+  },
+  "runtime_requirements": {
+    "node": ">=18",
+    "cli": [
+      "git>=2.5",
+      "gh"
+    ]
+  },
+  "dependencies": {
+    "required": [],
+    "optional": []
+  },
+  "called_by": [],
+  "calls": [],
+  "outputs": [],
+  "state_transitions": {},
+  "ssot_files": [
+    ".claude/skills/create-pr/config.json",
+    ".claude/scripts/create-pr/ops.mjs"
+  ],
+  "tests": [
+    "tests/unit/create-pr-ops.test.mjs",
+    "tests/unit/create-pr-spec.test.mjs"
+  ],
+  "references": [
+    {
+      "file": "references/superpowers-branch-completion-options.md",
+      "description": "create-pr Mode B와 destructive guard 정책에 맞춘 branch completion options reference로 병합. 원본 local merge/discard 절차 직접 배포는 회피."
+    }
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/trunk-start-warning.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Trunk Warning: worktree guidance"
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/agent-worktree-guard.mjs\" session-start",
+            "timeout": 10,
+            "statusMessage": "Agent Worktree Guard: loading ledger"
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/worktree-system-symlink-guard.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Worktree System: checking shared state"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/worktree-policy-guard.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Worktree Policy: checking write target"
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/worktree-session-owner-guard.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Worktree Owner: cross-worktree confinement"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/agent-worktree-guard.mjs\" pre-tool",
+            "timeout": 5,
+            "statusMessage": "Agent Worktree Guard: checking worktree command"
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/scripts/merge-guard.mjs\"",
+            "timeout": 30,
+            "statusMessage": "Merge Guard: checking merge state"
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/destructive-git-guard.mjs\"",
+            "timeout": 30,
+            "statusMessage": "Destructive Git Guard: working tree protection"
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/commit-guard.mjs\"",
+            "timeout": 30,
+            "statusMessage": "Commit Guard: main protection"
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/worktree-session-owner-guard.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Worktree Owner: cross-worktree confinement"
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/pre-ship-review-guard.mjs\"",
+            "timeout": 30,
+            "statusMessage": "Pre-Ship Review: checking confirmation marker"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/agent-worktree-guard.mjs\" post-tool",
+            "timeout": 5,
+            "statusMessage": "Agent Worktree Guard: updating worktree ledger"
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/worktree-owner-tracker.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Worktree Owner: recording session ownership"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/agent-worktree-guard.mjs\" stop",
+            "timeout": 10,
+            "statusMessage": "Agent Worktree Guard: auditing worktree completion"
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/worktree-shipping-guard.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Worktree Shipping: uncommitted/unmerged check"
+          }
+        ]
+      }
+    ]
+  }
+}

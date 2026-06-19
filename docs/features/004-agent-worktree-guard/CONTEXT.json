@@ -1,0 +1,225 @@
+{
+  "schema_version": 4,
+  "feature_id": "004-agent-worktree-guard",
+  "title": "Agent Worktree Guard",
+  "quick_resume": {
+    "current_state": "Done",
+    "current_task": "Agent Worktree Guard implementation and acceptance checks completed",
+    "next_actions": [
+      "Prepare Pre-Ship review and PR"
+    ],
+    "blockers": [],
+    "last_updated_at": "2026-06-19T11:15:52+09:00"
+  },
+  "progress": {
+    "percentage": 100,
+    "fr_total": 6,
+    "fr_completed": 6,
+    "fr_in_progress": 0,
+    "details": {
+      "FR-00401": {
+        "status": "completed",
+        "files": [
+          "scripts/agent-worktree-guard/guard.py",
+          "scripts/agent-worktree-guard/agent-worktree-guard",
+          "scripts/agent-worktree-guard/awtg"
+        ],
+        "test_passed": true,
+        "last_verified_at": "2026-06-19T11:12:04+09:00"
+      },
+      "FR-00402": {
+        "status": "completed",
+        "files": [
+          "scripts/agent-worktree-guard/guard.py"
+        ],
+        "test_passed": true,
+        "last_verified_at": "2026-06-19T11:12:04+09:00"
+      },
+      "FR-00403": {
+        "status": "completed",
+        "files": [
+          ".claude/scripts/lib/hook-registry.mjs",
+          ".claude/scripts/ci/validators/validate-hooks.mjs",
+          ".claude/scripts/_migrations/generate-unified-registry.mjs",
+          "data/schemas/hook-registry.schema.json",
+          ".claude/settings.json",
+          ".codex/hooks.json",
+          ".githooks/pre-push"
+        ],
+        "test_passed": true,
+        "last_verified_at": "2026-06-19T11:12:04+09:00"
+      },
+      "FR-00404": {
+        "status": "completed",
+        "files": [
+          "scripts/agent-worktree-guard/guard.py",
+          "scripts/agent-worktree-guard/test_guard.py"
+        ],
+        "test_passed": true,
+        "last_verified_at": "2026-06-19T11:12:04+09:00"
+      },
+      "FR-00405": {
+        "status": "completed",
+        "files": [
+          "scripts/agent-worktree-guard/guard.py"
+        ],
+        "test_passed": true,
+        "last_verified_at": "2026-06-19T11:12:04+09:00"
+      },
+      "FR-00406": {
+        "status": "completed",
+        "files": [
+          "scripts/agent-worktree-guard/guard.py"
+        ],
+        "test_passed": true,
+        "last_verified_at": "2026-06-19T11:12:04+09:00"
+      }
+    }
+  },
+  "why": "AI-created worktrees need deterministic session ownership, completion prompting, and cleanup boundaries across Claude, Codex, and Git.",
+  "success_criteria": [
+    "init creates status and ledger runtime state",
+    "wrapper add records a worktree and owner marker",
+    "raw git worktree add/remove is denied by AI hooks",
+    "mark-done updates the checklist to [x]",
+    "all done audit emits the required PR confirmation prompt",
+    "cleanup removes only matching owned ledger worktrees"
+  ],
+  "constraints": [
+    "Do not modify output/<slug> generated projects",
+    "Do not set global core.hooksPath",
+    "Do not clean unregistered or marker-mismatched worktrees"
+  ],
+  "artifacts": {
+    "brief": "docs/features/004-agent-worktree-guard/BRIEF.md",
+    "spec": "docs/features/004-agent-worktree-guard/SPEC-004-agent-worktree-guard.md",
+    "screens": [],
+    "index": "docs/features/004-agent-worktree-guard/index.md"
+  },
+  "references": {
+    "related_code": {
+      "cli": [
+        "scripts/agent-worktree-guard/guard.py",
+        "scripts/agent-worktree-guard/agent-worktree-guard",
+        "scripts/agent-worktree-guard/awtg"
+      ],
+      "hooks": [
+        ".claude/hooks/agent-worktree-guard.mjs",
+        ".claude/hooks/codex/agent-worktree-guard.mjs",
+        ".claude/hooks/MULTI-CLI.md",
+        ".claude/scripts/lib/hook-registry.mjs",
+        ".claude/scripts/ci/validators/validate-hooks.mjs",
+        ".claude/scripts/_migrations/generate-unified-registry.mjs",
+        "data/schemas/hook-registry.schema.json",
+        ".claude/settings.json",
+        ".codex/hooks.json",
+        ".githooks/pre-push"
+      ],
+      "tests": [
+        "scripts/agent-worktree-guard/test_guard.py",
+        "tests/unit/hook-essential-set.test.mjs",
+        "tests/unit/hook-system.test.mjs"
+      ]
+    },
+    "dependencies": {
+      "features": [],
+      "packages": []
+    },
+    "navigation": {
+      "routes": [],
+      "actions": [
+        "agent_worktree_guard_init",
+        "agent_worktree_guard_add",
+        "agent_worktree_guard_audit",
+        "agent_worktree_guard_cleanup"
+      ],
+      "flow_id": "agent-worktree-guard"
+    }
+  },
+  "execution": {
+    "worktree": {
+      "branch": "feature/agent-worktree-guard",
+      "worktree_path": ".worktrees/feature/agent-worktree-guard",
+      "plan_path": ".worktrees/feature/agent-worktree-guard/.tmp/worktree-feature__agent-worktree-guard/PLAN.md",
+      "status": "implemented_verified",
+      "last_updated": "2026-06-19T11:15:52+09:00",
+      "handoff": "Agent Worktree Guard implemented and verified in feature/agent-worktree-guard. Ready for Pre-Ship review and PR."
+    }
+  },
+  "decisions": [
+    {
+      "at": "2026-06-19T00:00:00+09:00",
+      "summary": "Implement guard as a stdlib Python CLI with tiny executable wrappers",
+      "rationale": "The guard needs structured Git subprocess calls, JSON ledger IO, and hook invocation from both Node-generated Claude settings and Codex command hooks without adding dependencies."
+    },
+    {
+      "at": "2026-06-19T00:00:00+09:00",
+      "summary": "Keep Git hook activation repo-local and documented",
+      "rationale": "Changing global core.hooksPath would violate the user safety condition and could override unrelated hook systems."
+    }
+  ],
+  "open_questions": [],
+  "history": [
+    {
+      "at": "2026-06-19T00:00:00+09:00",
+      "from_state": "Idle",
+      "to_state": "Implementing",
+      "triggered_by": "feature-pilot",
+      "note": "Feature docs and implementation added in feature/agent-worktree-guard worktree."
+    }
+  ],
+  "traceability": {
+    "user_story_to_fr": [
+      {
+        "user_story": "AI session worktree ownership",
+        "fr": "FR-00401"
+      },
+      {
+        "user_story": "unsafe worktree operations blocked",
+        "fr": "FR-00403"
+      },
+      {
+        "user_story": "confirmed cleanup only",
+        "fr": "FR-00406"
+      }
+    ],
+    "bdd_to_fr": [
+      {
+        "scenario": "all ledger worktrees done prompts for PR confirmation",
+        "fr": "FR-00405"
+      }
+    ],
+    "validated_at": "2026-06-19T11:15:52+09:00"
+  },
+  "completion_summary": {
+    "status": "done",
+    "produces": {
+      "exports": [
+        "agent-worktree-guard CLI",
+        "awtg CLI alias",
+        "Claude/Codex/Git hook integration",
+        "session ledger and owner marker safety contract"
+      ],
+      "routes": [],
+      "tests": [
+        "scripts/agent-worktree-guard/test_guard.py",
+        "tests/unit/hook-essential-set.test.mjs",
+        "tests/unit/hook-system.test.mjs",
+        ".claude/scripts/test-hooks.mjs"
+      ]
+    },
+    "verified_by": [
+      "python3 -m py_compile scripts/agent-worktree-guard/guard.py scripts/agent-worktree-guard/test_guard.py",
+      "python3 scripts/agent-worktree-guard/test_guard.py",
+      "python3 -m json.tool .codex/hooks.json >/dev/null",
+      "node .claude/scripts/regen-hooks-settings.mjs --check",
+      "python3 .claude/skills/feature-pilot/scripts/validate_spec.py docs/features/004-agent-worktree-guard/SPEC-004-agent-worktree-guard.md",
+      "npx vitest run tests/unit/regen-hooks-settings-idempotency.test.mjs tests/unit/settings-codegen-guard.test.mjs tests/unit/hook-essential-set.test.mjs tests/unit/hook-system.test.mjs",
+      "npm test",
+      "node .claude/scripts/ci/validate-ecosystem.mjs",
+      "npx eslint .claude/hooks/agent-worktree-guard.mjs .claude/hooks/codex/agent-worktree-guard.mjs .claude/scripts/lib/hook-registry.mjs tests/unit/hook-essential-set.test.mjs"
+    ],
+    "generated_at": "2026-06-19T11:15:52+09:00",
+    "generated_by": "feature-pilot"
+  }
+}
