@@ -20,7 +20,6 @@
  * 동작 (carve-out 은 전부 fail-open passthrough — 오차단 0 우선):
  *   - tool 이 Edit|Write|MultiEdit|Bash 아님 → passthrough
  *   - 대상이 .worktrees/ 하위 아님 (main repo 파일) → passthrough (worktree-policy-guard 영역)
- *   - `.tmp/create-pr-active` 존재 → passthrough (ship/create-pr 흐름 carve-out)
  *   - Bash 가 `git commit` 아님 / `--dry-run` → passthrough
  *   - Layer 1: cwd worktree ≠ 대상 worktree → **deny** (session_id 무관 — orphan 도 차단)
  *   - Layer 2: 같은 worktree 인데 사이드카 owner ≠ session_id → **deny**
@@ -30,7 +29,7 @@
  */
 
 import { join, relative, isAbsolute } from 'node:path';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import {
   readStdin,
   output,
@@ -102,11 +101,6 @@ export async function run(data) {
     const sessionId = data?.session_id; // Layer 1 은 없어도 동작 (결정론적)
 
     const projectDir = resolveProjectDir(data);
-    // ship / create-pr 흐름은 worktree 경로를 합법적으로 다룬다 → carve-out
-    if (existsSync(join(projectDir, '.tmp', 'create-pr-active'))) {
-      return HookOutput.passthrough();
-    }
-
     const baseDir = data?.cwd || projectDir;
     let targetAbs = null;
     if (toolName === 'Bash') {
@@ -133,7 +127,7 @@ export async function run(data) {
           `현재 cwd 는 다른 worktree (${relative(projectDir, cwdWt).replace(/\\/g, '/')}) 인데 ` +
           `대상은 worktree ${relRoot} 입니다.\n` +
           `각 세션은 자기 worktree 의 파일만 편집·커밋할 수 있습니다 (R-CM-036 Layer 1).\n` +
-          `  → 본인 worktree 에서 작업하거나, 정상 ship 흐름(/create-pr ship-worktree)을 사용하세요.`
+          `  → 본인 worktree 에서 작업하거나, 정상 ship 흐름(gh pr create → gh pr merge)을 사용하세요.`
       );
     }
 

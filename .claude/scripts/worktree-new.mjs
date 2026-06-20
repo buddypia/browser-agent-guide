@@ -333,7 +333,7 @@ export function runWorktreeNew(opts) {
               `2) git reset --hard origin/${base} (사용자 직접 실행 — destructive-git-guard 가 AI 차단) ` +
               `3) make wt.new BR=feature/<task> 재시도 (diverge 해소 후 성공) ` +
               `4) worktree 안에서 git am <main>/.tmp/git-backup/*.patch (원본 author/message/timestamp 보존) ` +
-              `5) /create-pr ship-worktree.`,
+              `5) gh 로 ship: gh pr create → 사용자 컨펌 → gh pr merge.`,
           );
           return result;
         }
