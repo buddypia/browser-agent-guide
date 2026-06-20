@@ -183,10 +183,10 @@ export function readAnnotation(dir) {
 // MCP tool 用の content[] を組み立てる。image を見られない CLI でも text の file_path で
 // vision できるよう、必ず image と file_path の両方を返す（handoff §3.2 = fallback 内蔵）。
 export function buildEntryContent(entry, { includeImage = true } = {}) {
-  const annotation = readAnnotation(entry.dir);
+  const annotation = readEntryAnnotation(entry);
   const content = [];
   if (includeImage) {
-    const data = readFileSync(entry.shot).toString('base64');
+    const data = readEntryShotBase64(entry);
     content.push({ type: 'image', data, mimeType: 'image/png' });
   }
   content.push({ type: 'text', text: buildEntryText(entry, annotation) });
@@ -196,20 +196,19 @@ export function buildEntryContent(entry, { includeImage = true } = {}) {
 // 画像を送らず、annotation.json 由来の手がかりだけを返す軽量 context。
 // @agent: / selector / testid で特定できる時は vision を呼ばずに進められる。
 export function buildEntryContext(entry) {
-  const annotation = readAnnotation(entry.dir) || {};
-  const files = {
-    shot: entry.shot,
-    raw: pathIfExists(entry.dir, RAW),
-    annotation: pathIfExists(entry.dir, ANNOTATION),
-    memo: pathIfExists(entry.dir, MEMO),
-  };
+  const annotation = readEntryAnnotation(entry) || {};
+  const storage = entry.storage || 'disk';
+  const materialized = storage === 'memory' ? Boolean(entry.materialized) : true;
+  const files = entryFiles(entry, materialized);
   const items = Array.isArray(annotation.items) ? annotation.items : [];
   return {
     id: entry.id,
     entryDir: entry.dir,
+    storage,
+    materialized,
     files,
-    url: annotation.url || '',
-    title: annotation.title || '',
+    url: annotation.url || entry.url || '',
+    title: annotation.title || entry.title || '',
     capturedAt: annotation.capturedAt || '',
     viewport: annotation.viewport || null,
     image: annotation.image || null,
@@ -248,7 +247,9 @@ export function buildEntryContextText(context) {
   lines.push('visual_feedback_context: image omitted');
   lines.push(`id: ${context.id}`);
   lines.push(`entry_dir: ${context.entryDir}`);
-  lines.push(`shot_path: ${context.files.shot}`);
+  lines.push(`storage: ${context.storage}${context.materialized ? ' (materialized)' : ' (memory; image request will materialize file_path)'}`);
+  if (context.files.shot) lines.push(`shot_path: ${context.files.shot}`);
+  else lines.push('shot_path: (not materialized yet)');
   if (context.files.raw) lines.push(`raw_path: ${context.files.raw}`);
   if (context.files.annotation) lines.push(`annotation_path: ${context.files.annotation}`);
   if (context.files.memo) lines.push(`memo_path: ${context.files.memo}`);
@@ -305,6 +306,28 @@ export function buildEntryContextText(context) {
 function pathIfExists(dir, name) {
   const p = join(dir, name);
   return existsSync(p) ? p : '';
+}
+
+function readEntryAnnotation(entry) {
+  if (entry?.annotation) return entry.annotation;
+  return entry?.dir ? readAnnotation(entry.dir) : null;
+}
+
+function readEntryShotBase64(entry) {
+  if (entry?.shotBuffer) return entry.shotBuffer.toString('base64');
+  return readFileSync(entry.shot).toString('base64');
+}
+
+function entryFiles(entry, materialized) {
+  if (!materialized) {
+    return { shot: '', raw: '', annotation: '', memo: '' };
+  }
+  return {
+    shot: entry.shot,
+    raw: pathIfExists(entry.dir, RAW),
+    annotation: pathIfExists(entry.dir, ANNOTATION),
+    memo: pathIfExists(entry.dir, MEMO),
+  };
 }
 
 // image と並走させるテキスト。先頭に絶対パス、続いて指示一覧（selector/intent）。

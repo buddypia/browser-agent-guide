@@ -8,7 +8,8 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { findEntry, buildEntryContent, buildEntryContext, buildEntryContextText, queryEntries } from './inbox.js';
+import { buildEntryContent, buildEntryContext, buildEntryContextText } from './inbox.js';
+import { createDiskEntryStore } from './store.js';
 
 // 複数プロジェクトが1つの inbox に積まれる時の絞り込み引数（部分一致・任意）。
 const FILTER_SCHEMA = {
@@ -28,7 +29,8 @@ const IMAGE_GATE_SCHEMA = {
     .describe('@agent: / selector / testid / anchorLabel だけでは不十分で、vision が必要な具体的理由。'),
 };
 
-export function createMcpServer(inboxDir) {
+export function createMcpServer(entrySource) {
+  const entryStore = asEntryStore(entrySource);
   const server = new McpServer(
     { name: 'bag-visual-feedback', version: '0.1.0' },
     {
@@ -51,15 +53,15 @@ export function createMcpServer(inboxDir) {
       inputSchema: { limit: z.number().int().min(1).max(50).optional(), ...FILTER_SCHEMA },
     },
     async ({ limit, urlContains, titleContains }) => {
-      const entries = queryEntries(inboxDir, { limit: limit || 20, urlContains, titleContains });
+      const entries = entryStore.queryEntries({ limit: limit || 20, urlContains, titleContains });
       const text = entries.length
         ? entries
             .map(
               (e, i) =>
-                `${i + 1}. id=${e.id}  (${new Date(e.mtime).toISOString()})\n   url=${e.url || '(不明)'}  title=${e.title || '(不明)'}`
+                `${i + 1}. id=${e.id}  (${new Date(e.mtime).toISOString()})${entryStatus(e)}\n   url=${e.url || '(不明)'}  title=${e.title || '(不明)'}`
             )
             .join('\n')
-        : filterEmptyMessage(inboxDir, { urlContains, titleContains });
+        : filterEmptyMessage({ urlContains, titleContains });
       return { content: [{ type: 'text', text }] };
     }
   );
@@ -75,9 +77,9 @@ export function createMcpServer(inboxDir) {
       inputSchema: { ...FILTER_SCHEMA },
     },
     async ({ urlContains, titleContains }) => {
-      const [entry] = queryEntries(inboxDir, { limit: 1, urlContains, titleContains });
+      const [entry] = entryStore.queryEntries({ limit: 1, urlContains, titleContains });
       if (!entry) {
-        return { content: [{ type: 'text', text: filterEmptyMessage(inboxDir, { urlContains, titleContains }) }] };
+        return { content: [{ type: 'text', text: filterEmptyMessage({ urlContains, titleContains }) }] };
       }
       const context = buildEntryContext(entry);
       return {
@@ -100,13 +102,13 @@ export function createMcpServer(inboxDir) {
       inputSchema: { ...FILTER_SCHEMA, ...IMAGE_GATE_SCHEMA },
     },
     async ({ urlContains, titleContains, contextId, imageReason }) => {
-      const [entry] = queryEntries(inboxDir, { limit: 1, urlContains, titleContains });
+      const [entry] = entryStore.queryEntries({ limit: 1, urlContains, titleContains });
       if (!entry) {
-        return { content: [{ type: 'text', text: filterEmptyMessage(inboxDir, { urlContains, titleContains }) }] };
+        return { content: [{ type: 'text', text: filterEmptyMessage({ urlContains, titleContains }) }] };
       }
       const blocked = imageGateMessage(entry, { contextId, imageReason });
       if (blocked) return { content: [{ type: 'text', text: blocked }] };
-      return { content: buildEntryContent(entry) };
+      return { content: buildEntryContent(entryStore.materialize(entry)) };
     }
   );
 
@@ -119,7 +121,7 @@ export function createMcpServer(inboxDir) {
       inputSchema: { id: z.string().min(1) },
     },
     async ({ id }) => {
-      const entry = findEntry(inboxDir, id);
+      const entry = entryStore.findEntry(id);
       if (!entry) return { content: [{ type: 'text', text: `id=${id} は見つかりません。` }], isError: true };
       const context = buildEntryContext(entry);
       return {
@@ -139,15 +141,25 @@ export function createMcpServer(inboxDir) {
       inputSchema: { id: z.string().min(1), ...IMAGE_GATE_SCHEMA },
     },
     async ({ id, contextId, imageReason }) => {
-      const entry = findEntry(inboxDir, id);
+      const entry = entryStore.findEntry(id);
       if (!entry) return { content: [{ type: 'text', text: `id=${id} は見つかりません。` }], isError: true };
       const blocked = imageGateMessage(entry, { contextId, imageReason });
       if (blocked) return { content: [{ type: 'text', text: blocked }] };
-      return { content: buildEntryContent(entry) };
+      return { content: buildEntryContent(entryStore.materialize(entry)) };
     }
   );
 
   return server;
+}
+
+function asEntryStore(entrySource) {
+  if (entrySource?.queryEntries && entrySource?.findEntry && entrySource?.materialize) return entrySource;
+  return createDiskEntryStore(entrySource);
+}
+
+function entryStatus(entry) {
+  if (!entry?.storage) return '';
+  return `  storage=${entry.storage}${entry.materialized === false ? '/memory' : '/materialized'}`;
 }
 
 function imageGateMessage(entry, { contextId, imageReason } = {}) {
@@ -171,7 +183,7 @@ function imageGateMessage(entry, { contextId, imageReason } = {}) {
 }
 
 // フィルタ有無で空時メッセージを出し分ける（誤って別プロジェクトのを掴ませない案内）。
-function filterEmptyMessage(inboxDir, { urlContains, titleContains } = {}) {
+function filterEmptyMessage({ urlContains, titleContains } = {}) {
   const cond = [urlContains && `url に「${urlContains}」`, titleContains && `title に「${titleContains}」`]
     .filter(Boolean)
     .join(' かつ ');
