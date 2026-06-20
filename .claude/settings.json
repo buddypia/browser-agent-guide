@@ -111,6 +111,12 @@
             "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/worktree-shipping-guard.mjs\"",
             "timeout": 10,
             "statusMessage": "Worktree Shipping: uncommitted/unmerged check"
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/worktree-review-report-guard.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Worktree Review Report: REVIEW.md completeness check"
           }
         ]
       }
