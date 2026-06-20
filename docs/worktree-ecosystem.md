@@ -29,8 +29,9 @@ Target adaptations:
 - `.claude/settings.json` registers only hooks that are present in this
   transplant. The donor settings file had brief2dev-only hooks and was not
   copied wholesale.
-- `.brief2dev/system` is copied into the worktree when the donor init path is a
-  symlink so its current cache state can be tracked explicitly.
+- `.brief2dev/system` is git-ignored and shared across worktrees via a symlink
+  to the main worktree (`worktree-init.mjs` uses `symlinkSync`, not a copy), so
+  its runtime cache state stays machine-local instead of being committed.
 - `.agents/` is ignored because donor worktree scripts use it for
   machine-local CLI config.
 - `worktree-new.mjs` resolves companion scripts from the checkout containing
