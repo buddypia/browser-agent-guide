@@ -41,6 +41,20 @@ Target adaptations:
   use Vitest. Target verification uses syntax checks, import closure checks,
   the Python guard lifecycle test, hook smoke checks, and worktree dry-run.
 
+Local additions (not in the donor transplant):
+
+- **Worktree Review Report Gate** — a `Stop` hook
+  `.claude/hooks/worktree-review-report-guard.mjs` (+ `codex/` adapter) that enforces a
+  human-reviewable `REVIEW.md` (9 sections, HEAD-stamped) for owned worktrees with
+  committed work, closing the "marker without panel body" bypass that R-CM-030's
+  `pre-ship-review-guard` documents. Validation SSOT is
+  `.claude/scripts/lib/review-report.mjs`; the helper CLI is
+  `.claude/scripts/mark-worktree-reviewed.mjs`; tests are dependency-free `node:test`
+  under `.claude/scripts/lib/__tests__/` (run `node --test .claude/scripts/lib/__tests__/*.test.mjs`).
+  Because this repo has no `regen-hooks-settings.mjs`, the hook is registered by hand in
+  `.claude/settings.json` and `.codex/hooks.json` (the `hook-registry.mjs` entry only
+  drives profile enablement).
+
 Normal usage:
 
 ```bash

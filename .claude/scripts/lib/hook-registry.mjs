@@ -595,6 +595,15 @@ export const HOOK_REGISTRY = {
           "orchestrated": true
         },
         {
+          "id": "worktree-review-report-guard",
+          "module": "./worktree-review-report-guard.mjs",
+          "priority": 37,
+          "profile": "standard",
+          "description": "[R-CM-030] worktree commit 완료 시 사람-리뷰 REVIEW.md(9섹션) 출력 강제 (마커-only 우회 갭 폐쇄)",
+          "orchestrated": false,
+          "timeout": 10
+        },
+        {
           "id": "security-scan-guard",
           "module": "./security-scan-guard.mjs",
           "priority": 40,

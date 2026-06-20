@@ -20,6 +20,7 @@
 | `worktree-session-owner-guard.mjs` | `codex/worktree-session-owner-guard.mjs` | `antigravity/worktree-session-owner-guard.mjs` | 멀티세션 cross-worktree 편집/commit 차단 (R-CM-036, 2-Layer cwd-confinement + session_id) |
 | `worktree-owner-tracker.mjs` | `codex/worktree-owner-tracker.mjs` | (없음 — UNVERIFIED) | worktree 생성 시 세션 소유권 사이드카(.session-owner) 기록 (R-CM-036 Layer 2). Codex `session_id` 공식 지원. Antigravity 는 Gemini AfterTool session_id 미검증으로 보류 |
 | `worktree-shipping-guard.mjs` | `codex/worktree-shipping-guard.mjs` | `antigravity/worktree-shipping-guard.mjs` | 미커밋 / 미머지 worktree 시 Stop/SessionEnd BLOCK (R-CM-030) |
+| `worktree-review-report-guard.mjs` | `codex/worktree-review-report-guard.mjs` | (없음 — 미배포) | worktree commit 완료 시 사람-리뷰 REVIEW.md(9섹션) 출력 강제 (R-CM-030, 마커-only 우회 갭 폐쇄) |
 | `agent-worktree-guard.mjs` | `codex/agent-worktree-guard.mjs` | (없음 — UNVERIFIED) | Agent Worktree Guard ledger/checklist/owner-marker enforcement. Codex project hooks use the same Python CLI through this adapter |
 | `trunk-start-warning.mjs` | `codex/trunk-session-warn.mjs` | `antigravity/trunk-session-warn.mjs` | main 진입 시 worktree 안내 컨텍스트 주입 |
 
@@ -33,7 +34,7 @@
 | `PreToolUse` | `^(apply_patch\|Edit\|Write\|MultiEdit\|Bash\|shell\|run_shell\|run_shell_command\|exec_command)$` | `worktree-session-owner-guard` |
 | `PreToolUse` | `^(Bash\|shell\|run_shell\|run_shell_command\|exec_command)$` | `agent-worktree-guard`, `commit-guard`, `destructive-git-guard` |
 | `PostToolUse` | `^(Bash\|shell\|run_shell\|run_shell_command\|exec_command)$` | `agent-worktree-guard`, `worktree-owner-tracker` |
-| `Stop` | (전체) | `agent-worktree-guard`, `worktree-shipping-guard` |
+| `Stop` | (전체) | `agent-worktree-guard`, `worktree-shipping-guard`, `worktree-review-report-guard` |
 | `SessionStart` | `startup\|resume` | `trunk-session-warn`, `agent-worktree-guard` |
 
 머신-로컬 env (`GIT_WORK_TREE`/`GIT_DIR`) 는 `.codex/config.toml` (untracked, `worktree-init.mjs` 주입) 가 담당 — 등록 파일과 분리하여 worktree 마다 발생하던 추적 충돌을 차단 (PR #639 + 본 PR).

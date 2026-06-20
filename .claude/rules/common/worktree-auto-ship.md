@@ -4,12 +4,15 @@ paths:
   - ".worktrees/**"
   - ".claude/hooks/worktree-shipping-guard.mjs"
   - ".claude/hooks/pre-ship-review-guard.mjs"
+  - ".claude/hooks/worktree-review-report-guard.mjs"
+  - ".claude/scripts/lib/review-report.mjs"
+  - ".claude/scripts/mark-worktree-reviewed.mjs"
 ---
 # Worktree Auto-Ship Rules
 
 ## ID: R-CM-030
 ## Severity: major
-## Enforced by: worktree-shipping-guard, pre-ship-review-guard
+## Enforced by: worktree-shipping-guard, pre-ship-review-guard, worktree-review-report-guard
 ## Boundary: perspective1-only (관점1 전용 — deployed-assets.json#rules.never_deploy. R-CM-028 배포 분리)
 
 ### Purpose
@@ -226,7 +229,23 @@ node .claude/scripts/mark-pre-ship-confirmed.mjs <branch> --quality <agent_go|se
 - `ship-feature` 모드 (worktree 인자 부재) 는 `staged` 키.
 - 회귀 차단: `tests/unit/pre-ship-review-guard.test.mjs` 의 `inferBranchFromWorktreePath` describe block.
 
-**한계 (정직 명시)**: hook 은 마커 존재만 검사 — AI 가 패널 없이 마커 생성 후 호출 시 우회 가능. 우회 발생 시 사용자 retroactive 발견 + R-CM-024 audit 누적. "패널 + 컨펌 → 마커 → ship" 인과 정직성 강제는 AI 자기 규율이 1차.
+**한계 (정직 명시)**: 본 hook(pre-ship-review-guard) 은 마커 *존재*만 검사 — AI 가 패널 없이 마커 생성 후 ship 호출 시 우회 가능. 단, **본문 출력 자체의 강제는 `worktree-review-report-guard` (Stop) 가 REVIEW.md 본문 검증으로 보강**한다 (아래 절). "패널 + 컨펌 → 마커 → ship" 인과 정직성의 *컨펌→마커* 구간은 여전히 AI 자기 규율이 1차이나, *본문 출력* 구간은 결정론적으로 강제된다. 우회 발생 시 사용자 retroactive 발견 + R-CM-024 audit 누적.
+
+### 자동 강제: worktree-review-report-guard (Stop)
+
+`pre-ship-review-guard` 가 닫지 못한 갭("패널 없이 마커 생성") 중 **본문 출력** 차원을 결정론적으로 닫는다. 본 세션이 소유한 worktree 에 commit 된 작업이 있는데 사람이 리뷰할 구조화 레포트(`REVIEW.md`)가 부재/미완성/stale 이면 Stop 을 BLOCK 한다.
+
+- **검증 대상 artifact**: `<worktree>/.tmp/worktree-<safeBranch>/REVIEW.md` (위치 SSOT: `.claude/scripts/lib/review-report.mjs`). `.tmp/` 는 `.gitignore` 로 머지 누출이 봉쇄되며, REVIEW.md 작성은 worktree 의 tracked diff / uncommitted 상태에 영향을 주지 않아 `worktree-shipping-guard` 와 직교한다.
+- **필수 9 섹션** (사용자 열거 항목 1:1 — bilingual 헤더 허용): Summary/概要(작업내용) · Why/なぜ · Changed Files/変更ファイル(어떤 작업) · How/作業方法(어떻게) · Impact/影響範囲 · Trade-offs/トレードオフ · Remaining Work/残作業 · File Structure/フォルダー構造 · Review Requests/レビュー依頼(확인 요청 항목). trivial 변경도 헤더는 유지 — 본문만 축약.
+- **HEAD staleness**: REVIEW.md 본문의 `<!-- bag-review: head=<sha> -->` 앵커가 worktree 현재 HEAD 와 불일치하면 stale 로 보아 BLOCK (commit 후 미갱신 레포트 통과 차단).
+- **engage 조건**: owned(R-CM-036) + uncommitted == 0 + unmerged ≥ 1 + REVIEW.md invalid. uncommitted > 0 이면 skip(먼저 commit — `worktree-shipping-guard` 담당). 타 세션/orphan 은 차단 안 함(stderr 알림).
+- **강제 강도 (의도된 설계 — shipping-guard 와 다름)**: "한 번 시도 후 통과(5분 마커)" give-up 을 두지 않는다 — 사용자 "강제" 의도. REVIEW.md 가 완성되면 자연히 통과하며, deadlock backstop 은 Claude 의 8연속 block 상한 + fail-open. 긴급 비활성화는 `ECC_DISABLED_HOOKS=worktree-review-report-guard`.
+- **헬퍼 CLI**: `node .claude/scripts/mark-worktree-reviewed.mjs <branch> [--scaffold]` — `--scaffold` 는 9 섹션 템플릿 생성, 인자 없으면 섹션 검증 + 현재 HEAD stamp 갱신.
+- **멀티-CLI**: Claude Code(`.claude/settings.json#Stop`) + Codex(`.codex/hooks.json#Stop` + `codex/worktree-review-report-guard.mjs` 어댑터). 본문 결정 로직 1벌(`run`/`evaluate`) + 얇은 어댑터(MULTI-CLI.md 패턴).
+- **검증(node:test, 의존 0)**: `.claude/scripts/lib/__tests__/review-report.test.mjs` (lib) + `worktree-review-report-guard.test.mjs` (판정 매트릭스). 실행: `node --test .claude/scripts/lib/__tests__/*.test.mjs`.
+- **등록 정직 명시**: 본 transplant 에는 donor 의 `regen-hooks-settings.mjs` codegen 이 미설치 → `.claude/settings.json` 은 수동 SSOT 로 직접 등록. `hook-registry.mjs` 에도 entry 를 추가하나 효과는 `isHookEnabled` profile 활성화(+`ECC_DISABLED_HOOKS` 무력화 해제)뿐이다.
+
+본 gate 는 `pre-ship-review-guard` 를 *대체하지 않고 보완*한다: pre-ship-review-guard 는 ship 호출 시점의 마커/quality-label, 본 gate 는 완료(Stop) 시점의 본문 출력 — 두 차원이 직교.
 
 ### `/create-pr` 스킬과의 역할 분담
 
@@ -234,6 +253,7 @@ node .claude/scripts/mark-pre-ship-confirmed.mjs <branch> --quality <agent_go|se
 |------|------|
 | uncommitted 변경 검출 → BLOCK + commit 유도 메시지 | worktree-shipping-guard |
 | commit + unmerged 검출 → BLOCK + ship 유도 메시지 | worktree-shipping-guard |
+| commit 완료 → BLOCK + REVIEW.md(9섹션) 본문 출력 강제 | worktree-review-report-guard |
 | **Pre-Ship Quality Gate (`/code-review --fix` → verdict)** | **AI (본 룰 Rules 7-10 prompt-level)** |
 | 7섹션 Human Review Panel + 사용자 컨펌 + 마커 | AI (본 룰 prompt-level) + pre-ship-review-guard |
 | PLAN.md 검증, push, 멱등 PR, squash merge, cleanup | `/create-pr ship-worktree` |

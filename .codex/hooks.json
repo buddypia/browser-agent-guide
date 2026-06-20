@@ -80,6 +80,12 @@
             "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/codex/worktree-shipping-guard.mjs\"",
             "timeout": 10,
             "statusMessage": "Worktree Shipping: uncommitted/unmerged check"
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/codex/worktree-review-report-guard.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Worktree Review Report: REVIEW.md completeness check"
           }
         ]
       }
