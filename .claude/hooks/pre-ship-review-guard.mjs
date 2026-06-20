@@ -3,14 +3,15 @@
 /**
  * pre-ship-review-guard.mjs - PreToolUse Bash Hook
  *
- * `/create-pr ship-worktree` / `ship-feature` 호출 직전에 Pre-Ship Human Review Panel
+ * `gh pr merge` 호출 직전에 Pre-Ship Human Review Panel
  * 컨펌 마커가 신선한지 검증. 부재 시 deny + 패널 의무 안내.
  *
- * 정책 SSOT: R-CM-030 "Pre-Ship Human Review Panel" 절
+ * 정책: AGENTS.md "Conventions & gotchas" ship-flow + docs/retros/retro-2026-06-20-orphaned-ship-gate.md
+ * (R-CM-030 worktree-auto-ship.md 는 brief2dev 제거로 삭제 — ship 진입점이 ops.mjs ship-* → gh pr merge 로 이동).
  *
  * 동작:
  *   - tool_name != Bash → passthrough
- *   - command 가 ops.mjs ship-worktree / ship-feature 패턴 아님 → passthrough
+ *   - command 가 `gh pr merge` 패턴 아님 → passthrough
  *   - 마커 (.tmp/pre-ship-review-confirmed-<branch>) 신선 (10분) → passthrough (allow)
  *   - 마커 부재/stale → deny + AI 에게 Human Review Panel + 사용자 컨펌 + 마커 생성 안내
  *   - error → passthrough (R-CM-006 Rule 2 fail-open)
@@ -34,14 +35,18 @@ import { VALID_QUALITY_LABELS } from '../scripts/lib/quality-gate-labels.mjs';
 const MARKER_TTL_MS = 10 * 60 * 1000; // 10분 — 사용자 컨펌 후 ship 호출까지 충분
 import { CMD_ANCHOR_SRC } from '../scripts/lib/hook-anchors.mjs';
 
-// command 첫 토큰 (또는 chain operator 직후) 의 `node ... ops.mjs ship-...` 만 매칭.
-// 단순 word boundary `\bops\.mjs\b` 는 quoted string / 진단 코드 / grep / echo 안의
-// "ops.mjs ship-worktree" string 까지 false-positive 매칭하여 사용자 일반 명령을 차단했음
-// (사용자 보고 "shell 자꾸 멈춤" root cause F1, PR #493).
-// anchor (명령 시작 / chain operator / newline 직후만 매칭) 는 hook-anchors.mjs SSOT.
-const SHIP_PATTERN = new RegExp(
-  CMD_ANCHOR_SRC + '(?:cd\\s+\\S+\\s+&&\\s+)?\\s*node\\s+\\S*ops\\.mjs\\s+ship-(?:worktree|feature)\\b',
-);
+// 현재 ship 진입점 `gh pr merge` 만 매칭 (create-pr/ops.mjs 제거 후 재포인트, 2026-06-20).
+// `merge` 만 — `gh pr create` 는 가역(PR close 가능)이라 제외하고, 불가역(main 머지)인 merge
+// 만 게이트한다. `gh pr view/list/checks/diff/comment/edit/...` read-only 서브커맨드는
+// false-block 금지: anchor (명령 시작 / chain operator / newline 직후) + `merge\b` 로 분리해
+// quoted string / grep / echo 안의 "gh pr merge" 까지 false-positive 매칭하던 회귀를 차단
+// (과거 ops.mjs `\bops\.mjs\b` false-positive, PR #493). anchor SSOT = hook-anchors.mjs.
+// ⚠️ COUPLING (orphaned-guard-trigger 재발 주의): 본 패턴은 ship 진입점 커맨드 문자열
+//    (`gh pr merge`) 에 결합돼 있다. ship 이 새 skill/커맨드로 이동하면 이 트리거는 error
+//    가 아니라 *조용히* passthrough 로 죽는다 — 바로 ops.mjs 제거 때 실제 발생한 실패 모드.
+//    이 패턴을 바꾸는 사람은 ship 진입점을 함께 확인하라. dead-trigger 자동 감지는
+//    docs/retros/retro-2026-06-20-orphaned-ship-gate.md 의 ## Next.
+const SHIP_PATTERN = new RegExp(CMD_ANCHOR_SRC + 'gh\\s+pr\\s+merge\\b');
 const WORKTREE_ARG = /--worktree[\s=]+["']?([^"'\s]+)["']?/;
 // chain operator: && / || / ; — 명령 chain 만 검출. standalone pipe `|` 는 제외
 // (output filtering — `cmd 2>&1 | tail` — marker touch (file write) 와 무관).
@@ -71,13 +76,24 @@ import {
   inferBranchFromWorktreePath,
   preShipMarkerPath,
 } from '../scripts/lib/worktree-plan-path.mjs';
+import { resolveWorktreeRoot } from '../scripts/lib/worktree-path.mjs';
 
 export { safeBranchKey, inferBranchFromWorktreePath };
 
 export function extractBranch(command) {
   const m = command.match(WORKTREE_ARG);
-  if (!m) return null; // ship-feature 모드 (worktree 인자 없음)
+  if (!m) return null; // --worktree 인자 없음 (gh pr merge 등) → cwd 추정으로 fallback
   return inferBranchFromWorktreePath(m[1]);
+}
+
+// gh pr merge 는 `--worktree` 인자가 없으므로 cwd (worktree 경로) 에서 branch 추정.
+// resolveWorktreeRoot 로 KNOWN_BRANCH_PREFIXES 정규화 후 inferBranchFromWorktreePath →
+// `.worktrees/fix/foo/sub` 같은 하위 cwd / single-segment branch 모두 정확히 처리.
+// cwd 가 worktree 밖(main root 등)이면 null → staged 마커로 처리 (기존 ship-feature 모드와 동일).
+export function inferBranchFromCwd(cwd) {
+  if (!cwd || typeof cwd !== 'string') return null;
+  const root = resolveWorktreeRoot(cwd);
+  return root ? inferBranchFromWorktreePath(root) : null;
 }
 
 export const markerPath = preShipMarkerPath;
@@ -205,7 +221,7 @@ function buildDenyMessage(branch, safeKey, projectDir, cwd, chained, reason = 'm
     //   `--quality` 없는 helper 명령어 노출은 무한 deny 루프 회피용 차단 (HIGH #1)
     ...(reason !== 'quality_label_missing'
       ? [
-          'R-CM-030 "Pre-Ship Human Review Panel" 절에 따라 ship-worktree / ship-feature 호출 직전에는',
+          'AGENTS.md ship-flow 에 따라 `gh pr merge` (불가역 main 머지) 호출 직전에는',
           '사람이 merge 여부를 판단할 수 있는 7섹션 의사결정 브리프를 먼저 제공해야 합니다.',
           '단독 질문("ship으로 PR을 머지하겠습니까?")만으로는 컨펌을 받은 것으로 보지 않습니다.',
           '',
@@ -230,18 +246,18 @@ function buildDenyMessage(branch, safeKey, projectDir, cwd, chained, reason = 'm
           `     node ${helperPath} ${branch || '--staged'} --quality <label>`,
           `     (cwd 어디서 호출해도 main root 의 .tmp/ 에 마커 생성. helper 경로는 fs 검사로 자동 선택)`,
           `     label 종류: agent_go / self_review_pass / trivial_skip (helper --help 또는 본 PR Decisions 섹션 참조)`,
-          '  4. 그 다음 ship 명령 재실행',
+          '  4. 그 다음 `gh pr merge` 재실행 (worktree 안에서 실행하면 branch 자동 추정)',
           '',
         ]
       : []),
     branch
       ? `대상 branch: ${branch}`
-      : '주의: --worktree 인자가 누락되었거나 ship-feature 모드 (branch=staged 로 처리)',
+      : '주의: cwd 가 worktree 밖이거나 branch 추정 실패 (branch=staged 처리) — gh pr merge 는 worktree 안에서 실행 권장',
     '',
     `marker key: ${safeKey}`,
     'trivial 변경 (≤3 파일 / ≤50 LOC / 코드 무영향) 도 7섹션 헤더는 유지 — 내용만 축약.',
     '한계: 본 hook 은 마커 존재 + label 검증만. AI 가 패널 없이 마커 생성 후 호출 시 우회 가능.',
-    '       → 사용자 retroactive 발견 시 R-CM-030 위반 보고.',
+    '       → 사용자 retroactive 발견 시 ship-review 우회로 보고.',
   ];
   return lines.join('\n');
 }
@@ -255,7 +271,8 @@ export async function run(data) {
     if (!SHIP_PATTERN.test(stripped)) return HookOutput.passthrough();
 
     const projectDir = resolveProjectDir(data);
-    const branch = extractBranch(command);
+    // gh pr merge 는 --worktree 인자가 없어 extractBranch=null → cwd(worktree 경로) 에서 추정.
+    const branch = extractBranch(command) || inferBranchFromCwd(data?.cwd);
     const safeKey = safeBranchKey(branch);
     const path = markerPath(projectDir, branch);
 
