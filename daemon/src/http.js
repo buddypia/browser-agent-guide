@@ -10,13 +10,14 @@ import { createMcpServer } from './server.js';
 const MAX_BODY = 8 * 1024 * 1024; // 8MB（tools/call の要求は小さい）
 
 // inboxDir は文字列でも「現在の inbox を返す関数」でも良い（実行時に inbox を差し替えられるように）。
-export function createHttpServer({ inboxDir, path = '/mcp' } = {}) {
+// entryStore を渡すと、MCP は disk 直読みではなく store 抽象を通して context/image を取得する。
+export function createHttpServer({ inboxDir, entryStore, path = '/mcp' } = {}) {
   const currentInbox = () => (typeof inboxDir === 'function' ? inboxDir() : inboxDir);
   return http.createServer(async (req, res) => {
     const url = (req.url || '').split('?')[0];
     if (url === '/healthz') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, inboxDir: currentInbox() }));
+      res.end(JSON.stringify({ ok: true, inboxDir: currentInbox(), ...(entryStore?.info?.() || {}) }));
       return;
     }
     if (url !== path) {
@@ -32,7 +33,7 @@ export function createHttpServer({ inboxDir, path = '/mcp' } = {}) {
       res.end(jsonRpcError(-32700, 'Parse error'));
       return;
     }
-    const server = createMcpServer(currentInbox());
+    const server = createMcpServer(entryStore || currentInbox());
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => {
       transport.close().catch(() => {});

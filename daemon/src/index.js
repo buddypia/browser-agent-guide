@@ -6,7 +6,8 @@
 // 使い方:
 //   node src/index.js                       # 既定 inbox=<自動検出した Downloads>/ai-inbox, port=8765
 //   node src/index.js --inbox ./.ai-inbox --port 8765   # 明示指定すると「固定」され拡張の報告で上書きされない
-//   BAG_VF_INBOX=/path BAG_VF_PORT=8765 node src/index.js
+//   node src/index.js --storage hybrid      # 受信時はメモリ保持、image/file_path 要求時だけ inbox に保存
+//   BAG_VF_INBOX=/path BAG_VF_PORT=8765 BAG_VF_STORAGE=hybrid node src/index.js
 //
 // 既定 inbox は OS の Downloads を自動検出する（Win=レジストリ / Linux=XDG / mac=~/Downloads）。
 // さらに拡張が WS で報告する downloadsDir を採用して、ブラウザの実ダウンロード先（移動済み/Edge・Brave）に追従する。
@@ -16,6 +17,7 @@ import { createHttpServer } from './http.js';
 import { resolveInboxDir, inboxFromDownloadsDir } from './inbox.js';
 import { attachWebSocketServer } from './ws.js';
 import { loadOrCreateToken, tokenPath } from './token.js';
+import { createVisualFeedbackStore, normalizeStorageMode } from './store.js';
 
 const args = parseArgs(process.argv.slice(2));
 // --inbox / 環境変数による明示指定があれば「固定」し、拡張の報告では上書きしない。
@@ -25,6 +27,8 @@ const getInbox = () => inboxState.dir;
 const port = Number(args.port || process.env.BAG_VF_PORT || 8765);
 const host = args.host || process.env.BAG_VF_HOST || '127.0.0.1';
 const token = loadOrCreateToken(args.token);
+const storageMode = normalizeStorageMode(args.storage || process.env.BAG_VF_STORAGE || 'disk');
+const entryStore = createVisualFeedbackStore({ inboxDir: getInbox, storageMode });
 
 // 拡張が報告してきた実ダウンロード先を採用する（固定時/範囲外/不正時は無視）。
 // これにより、ブラウザのダウンロード先が OS 既定と違っても（移動済み/Edge・Brave）inbox が一致する。
@@ -43,11 +47,13 @@ function adoptDownloadsDir(downloadsDir) {
   return true;
 }
 
-const server = createHttpServer({ inboxDir: getInbox });
+const server = createHttpServer({ inboxDir: getInbox, entryStore });
 attachWebSocketServer(server, {
   inboxDir: getInbox,
+  entryStore,
   token,
-  onSaved: ({ id }) => process.stderr.write(`[bag-vf] saved ${id}\n`),
+  onSaved: ({ id, storage, materialized }) =>
+    process.stderr.write(`[bag-vf] saved ${id}${storage ? ` (${storage}${materialized ? ', materialized' : ''})` : ''}\n`),
   onHello: (downloadsDir) => adoptDownloadsDir(downloadsDir),
 });
 
@@ -56,6 +62,7 @@ server.listen(port, host, () => {
   process.stderr.write(`[bag-vf] MCP(Streamable HTTP)  http://${host}:${port}/mcp\n`);
   process.stderr.write(`[bag-vf] 拡張 push (WebSocket)  ws://${host}:${port}/ws\n`);
   process.stderr.write(`[bag-vf] inbox: ${getInbox()}${inboxState.pinned ? ' (固定)' : ' (自動検出。拡張の報告で更新される場合あり)'}\n`);
+  process.stderr.write(`[bag-vf] storage: ${storageMode}${storageMode === 'hybrid' ? ' (context はメモリ、image/file_path 時だけ保存)' : ' (即時保存)'}\n`);
   process.stderr.write(`[bag-vf] token: ${token}\n`);
   process.stderr.write(`[bag-vf]   ↑ これを拡張オプションの「視覚フィードバック デーモン」に貼る (保存先: ${tokenPath()})\n`);
 });
@@ -71,6 +78,7 @@ function parseArgs(argv) {
     else if (a === '--port') out.port = argv[(i += 1)];
     else if (a === '--host') out.host = argv[(i += 1)];
     else if (a === '--token') out.token = argv[(i += 1)];
+    else if (a === '--storage') out.storage = argv[(i += 1)];
   }
   return out;
 }

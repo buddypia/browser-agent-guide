@@ -23,7 +23,7 @@ function writeAtomic(dir, filename, buffer) {
   renameSync(tmp, target);
 }
 
-function decodeBase64(data) {
+export function decodeBase64(data) {
   if (!data) return null;
   // data URL でも生 base64 でも受ける。
   const b64 = String(data).replace(/^data:image\/png;base64,/, '');
@@ -37,16 +37,18 @@ function decodeBase64(data) {
  *          image?:{shot?:string,raw?:string}, annotation?:object, memo?:string}} payload
  * @returns {{id:string, dir:string, files:string[]}}
  */
-export function writeEntry(inboxDir, payload, { now } = {}) {
+export function writeEntry(inboxDir, payload, { now, id } = {}) {
   const shot = decodeBase64(payload?.image?.shot);
   if (!shot || !shot.length) throw new Error('image.shot (base64 PNG) が必要です。');
   const capturedAt = payload?.capturedAt || payload?.annotation?.capturedAt || now || new Date().toISOString();
   // フォルダー名は {日時}__{ホスト}__{タイトル}__{ID}。url/title はペイロード(または annotation)から取る。
   const url = payload?.url || payload?.annotation?.url || '';
   const title = payload?.title || payload?.annotation?.title || '';
-  const slug = slugFromCapture({ capturedAt, url, title });
+  const slug = id || slugFromCapture({ capturedAt, url, title });
+  if (/[\\/]/.test(slug) || slug === '.' || slug === '..') throw new Error('invalid entry id');
   mkdirSync(inboxDir, { recursive: true });
-  const { name, dir } = uniqueDir(inboxDir, slug);
+  const { name, dir } = id ? { name: slug, dir: join(inboxDir, slug) } : uniqueDir(inboxDir, slug);
+  if (id && existsSync(dir)) throw new Error(`entry already exists: ${slug}`);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const files = [];
   try {
