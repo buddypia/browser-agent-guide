@@ -842,4 +842,49 @@ test.describe('お描き連動のAIメモ', () => {
     expect(saved.intent).toBe('フォームを正しく送信する'); // AI向けの内容を更新
     expect(saved.outline).toBe(true); // 目印の枠線体裁を保持
   });
+
+  test('floatingな合図ボタン(anchor=null)を編集してもbuildAnchor(null)で落ちず、floating体裁を保つ', async ({ page }) => {
+    await page.evaluate(() => {
+      const scope = location.origin + location.pathname;
+      window.__store.aiAdvisorAnnotations = {
+        [scope]: [
+          {
+            id: 'cue-float',
+            kind: 'button',
+            createdAt: new Date().toISOString(),
+            name: 'ヘルプ',
+            label: '質問する',
+            intent: '画面下のヘルプを開く',
+            placement: 'floating', // 画面隅固定なので対象要素は無く anchor=null
+            anchor: null,
+          },
+        ],
+      };
+    });
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'LIST_ANNOTATIONS' }, {}, r)));
+
+    // 旧実装は openAuthoring が buildAnchor(null) で TypeError を投げ、フォーム自体が出なかった。
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'EDIT_ANNOTATION', id: 'cue-float' }, {}, r)));
+    const author = page.locator('.bag-author');
+    await expect(author).toBeVisible();
+    // anchor=null でも対象見出しは既定文言にフォールバックして描画される(クラッシュしない)。
+    await expect(author.locator('.bag-author-target')).toBeVisible();
+    await expect(author.locator('[data-f="note"]')).toHaveValue('画面下のヘルプを開く');
+
+    await author.locator('[data-f="note"]').fill('画面下のヘルプチャットを開く');
+    await author.locator('[data-f="save"]').click();
+    await expect(author).toHaveCount(0);
+
+    const saved = await page.evaluate(() => {
+      const map = window.__store.aiAdvisorAnnotations || {};
+      const scope = location.origin + location.pathname;
+      return (map[scope] || []).find((a) => a.id === 'cue-float');
+    });
+    expect(saved.kind).toBe('button'); // noteに化けない
+    expect(saved.placement).toBe('floating'); // 画面隅固定の体裁を保持
+    expect(saved.anchor).toBe(null); // floatingは対象要素を持たないまま
+    expect(saved.name).toBe('ヘルプ'); // 識別子(名前)は保持
+    expect(saved.label).toBe('質問する'); // ボタン表示名は保持
+    expect(saved.intent).toBe('画面下のヘルプチャットを開く'); // AI向けの内容を更新
+  });
 });
