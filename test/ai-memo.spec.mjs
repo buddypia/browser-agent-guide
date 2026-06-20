@@ -1,4 +1,4 @@
-// お描き完了後に「メモを残す」を押すと、図形のすぐ隣に編集可能な「AIメモ」がページ上に生成され、
+// お描き完了（「完了」押下）で中間モーダルを挟まず、図形のすぐ隣に編集可能な「AIメモ」が即生成され、
 // 本文の保存ボタン・forAIトグル・削除・件数・再配置・forAIによる文脈除外が正しく働くことを検証する。
 // content/content-script.js を chrome スタブ付きで直接注入して実ブラウザDOMで確認する。
 import { expect, test } from '@playwright/test';
@@ -50,7 +50,10 @@ const CHROME_STUB = `
   };
 `;
 
-async function drawRectDraft(page) {
+// 図形をドラッグして「完了」を押すと、中間の確認モーダルを挟まず、図形の隣に編集可能な
+// AIメモが即生成される（新フロー）。直前の枚数+1になったことで生成を確認する。
+async function drawRect(page) {
+  const before = await page.locator('.bag-memo').count();
   await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'START_DRAWING' }, {}, r)));
   await expect(page.locator('.bag-draw-overlay')).toHaveCount(1);
   await page.locator('.bag-draw-tool[data-tool="rect"]').click();
@@ -61,18 +64,23 @@ async function drawRectDraft(page) {
   await page.mouse.move(210, 342, { steps: 6 });
   await page.mouse.up();
   await page.locator('.bag-draw-op[data-op="done"]').click();
-  await expect(page.locator('.bag-author')).toBeVisible();
+  await expect(page.locator('.bag-author')).toHaveCount(0); // 中間モーダルは出ない
+  await expect(page.locator('.bag-memo')).toHaveCount(before + 1); // 図形の隣にメモが即出る
 }
 
+// 完了直後に出たAIメモへ、任意で本文を書いて確定（blur）する。note 省略/空なら空のまま。
 async function saveDrawingMemo(page, note) {
-  if (note !== undefined) await page.locator('.bag-author [data-f="note"]').fill(note);
-  await expect(page.locator('.bag-author [data-f="save"]')).toHaveText('メモを残す');
-  await page.locator('.bag-author [data-f="save"]').click();
   await expect(page.locator('.bag-author')).toHaveCount(0);
+  const memo = page.locator('.bag-memo').last();
+  await expect(memo).toBeVisible();
+  if (note) {
+    await memo.locator('.bag-memo-text').fill(note);
+    await memo.locator('.bag-memo-text').blur();
+  }
 }
 
 async function drawRectAndFinish(page, note = '') {
-  await drawRectDraft(page);
+  await drawRect(page);
   await saveDrawingMemo(page, note);
 }
 
@@ -84,16 +92,16 @@ test.describe('お描き連動のAIメモ', () => {
     await page.addScriptTag({ content: contentScript });
   });
 
-  test('お描き完了後、保存ボタンで図形の隣に編集可能なAIメモが生成される', async ({ page }) => {
-    await drawRectDraft(page);
-    await expect(page.locator('.bag-memo')).toHaveCount(0);
-    await page.locator('.bag-author [data-f="note"]').fill('最初の指示');
-    await saveDrawingMemo(page);
+  test('お描き完了で図形の隣に編集可能なAIメモが即生成される', async ({ page }) => {
+    // 「完了」を押した時点で（確認モーダルを挟まず）図形の隣にAIメモが現れ、そのまま編集できる。
+    await drawRect(page);
 
     const memo = page.locator('.bag-memo');
     await expect(memo).toHaveCount(1);
-    // メモは編集用テキスト、明示保存ボタン、forAIトグルを持つ。
+    // 生成直後のメモは空。編集用テキスト、明示保存ボタン、forAIトグルを持つ。
     await expect(memo.locator('.bag-memo-text')).toBeVisible();
+    await expect(memo.locator('.bag-memo-text')).toHaveValue('');
+    await memo.locator('.bag-memo-text').fill('最初の指示');
     await expect(memo.locator('.bag-memo-text')).toHaveValue('最初の指示');
     await expect(memo.locator('.bag-memo-save')).toHaveText('保存');
     await expect(memo.locator('.bag-memo-toggle input')).toBeChecked(); // forAI 既定ON
@@ -124,6 +132,32 @@ test.describe('お描き連動のAIメモ', () => {
         });
       })
       .toBe('見出しをもっと短く');
+  });
+
+  test('「完了」を連打しても空メモは1つだけ生成される（再入ガード）', async ({ page }) => {
+    // finishDrawing は async（storage を await）。連打/再入で空メモが二重生成されないことを検証する。
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'START_DRAWING' }, {}, r)));
+    await expect(page.locator('.bag-draw-overlay')).toHaveCount(1);
+    await page.locator('.bag-draw-tool[data-tool="rect"]').click();
+    await page.mouse.move(70, 308);
+    await page.mouse.down();
+    await page.mouse.move(150, 330, { steps: 6 });
+    await page.mouse.move(210, 342, { steps: 6 });
+    await page.mouse.up();
+    // 「完了」を同期的に2回クリックする。1回目で stopDrawing() が drawing.active=false にするため、
+    // 2回目（detachされたツールバーへの click）は finishDrawing 冒頭の再入ガードで弾かれる。
+    await page.evaluate(() => {
+      const btn = document.querySelector('.bag-draw-op[data-op="done"]');
+      btn.click();
+      btn.click();
+    });
+    await expect(page.locator('.bag-memo')).toHaveCount(1);
+    const drawingCount = await page.evaluate(() => {
+      const map = window.__store.aiAdvisorAnnotations || {};
+      const scope = location.origin + location.pathname;
+      return (map[scope] || []).filter((a) => a.kind === 'drawing').length;
+    });
+    expect(drawingCount).toBe(1);
   });
 
   test('AIメモ保存とforAI切替で自動同期用の変更通知を送る', async ({ page }) => {
