@@ -3,7 +3,8 @@
 ブラウザのお描き注釈スクリーンショットを 1 プロセスで受け取り・公開する常駐デーモン。
 
 - **受信（WebSocket / `/ws`）**: 拡張の「お描きを画像でAIへ」が push した PNG+注釈を、
-  トークン認証のうえ inbox に書き出す（原子的書き込み・0600・slug 採番はサーバ側）。
+  トークン認証のうえ受け取る。既定は inbox に即時書き出し（原子的書き込み・0600・slug 採番はサーバ側）。
+  `--storage hybrid` ではまずメモリに保持し、MCP の image/file_path 要求時だけ inbox に書き出す。
 - **公開（MCP / Streamable HTTP / `/mcp`）**: AI コーディング CLI はまず `get_latest_visual_feedback_context`
   で **画像なしの軽量メタ**を読み、必要な時だけ `get_latest_visual_feedback` で
   **image(PNG) + ファイルパスの両方**を受け取って vision 解釈できる。image ツールは
@@ -15,7 +16,7 @@
 
 ## 何をするか
 
-- 拡張からの WebSocket push を受けて inbox に書き出す（トークン認証）。
+- 拡張からの WebSocket push を受ける（トークン認証）。既定は inbox 保存、`hybrid` はメモリ優先。
 - inbox(`<slug>/shot.png` + `annotation.json` + `memo.md`)を新しい順にスキャン。
 - 5 つの MCP ツールを公開:
   - `bag_visual_feedback:list_visual_feedback` — 一覧（id・取得元 url/title 付き）
@@ -24,8 +25,25 @@
   - `bag_visual_feedback:get_latest_visual_feedback` — context 確認後のみ最新を image+パスで返す（必要時の vision）
   - `bag_visual_feedback:get_visual_feedback` — context 確認後のみ id 指定で image+パスを返す
 - image ツールでは、image を読めない CLI 向けに `file_path` テキストを併走させる（fallback 内蔵）。
+  `hybrid` でも、この image ツールを呼んだ時点で `file_path` 用の `shot.png` を materialize する。
 - context 出力は `dataAgentId` (`@agent:`) を最優先にし、`selector` / `testid` / `anchorLabel`
   で足りる時は image を取得しない。
+
+### storage mode（disk / hybrid）
+
+`inbox` は MCP の仕様上必須ではない。MCP tool は image を base64 content として返せるため、注釈データを
+メモリで保持して `get_latest_visual_feedback_context` に返すことはできる。一方、このデーモンは
+image を読めない CLI のために `file_path` も必ず返す設計なので、最終的な fallback と監査ログとして
+ファイル化できる経路は残している。
+
+- `disk`（既定）: WS push を受けた時点で `<inbox>/<slug>/` に保存する。既存 UI/運用と互換。
+- `hybrid`: WS push 直後はメモリだけに保持する。context-only MCP tool は disk を使わない。
+  `get_latest_visual_feedback` / `get_visual_feedback` が呼ばれた時だけ `<inbox>/<slug>/` を作り、
+  image と同時に `file_path` fallback を返す。
+
+つまり「Chrome Extension と MCP を直接つなぐ」実用解は、拡張 → daemon は WebSocket で直接 push、
+daemon → AI CLI は MCP Streamable HTTP、保存は `hybrid` で遅延、という構成になる。Chrome 拡張自身は
+MCP の HTTP endpoint を待ち受けられないため、AI CLI が接続する MCP サーバープロセスは残る。
 
 ### 複数プロジェクトの絞り込み（urlContains / titleContains）
 
@@ -58,15 +76,17 @@ npm start
 node src/index.js --inbox ~/Downloads/ai-inbox --port 8765
 # プロジェクト直下の .ai-inbox を見る場合:
 node src/index.js --inbox ./.ai-inbox
+# inbox への即時保存を避け、MCP image/file_path 要求時だけ保存する場合:
+node src/index.js --storage hybrid
 ```
 
 確認:
 
 ```bash
-curl -s http://127.0.0.1:8765/healthz   # {"ok":true,"inboxDir":"..."}
+curl -s http://127.0.0.1:8765/healthz   # {"ok":true,"inboxDir":"...","storage":"disk|hybrid",...}
 ```
 
-環境変数でも設定可: `BAG_VF_INBOX`, `BAG_VF_PORT`, `BAG_VF_HOST`。
+環境変数でも設定可: `BAG_VF_INBOX`, `BAG_VF_PORT`, `BAG_VF_HOST`, `BAG_VF_STORAGE`。
 
 ## 3 CLI への MCP 登録（同じデーモン、キー名だけ違う）
 
@@ -125,7 +145,8 @@ url = "http://127.0.0.1:8765/mcp"
    - WebSocket URL = `ws://127.0.0.1:8765/ws`
    - トークン = 上でコピーした値
    - 「接続テスト」で `接続OK` を確認
-3. 以降「お描きを画像でAIへ」は WS で push され、デーモンが inbox に書き出す
+3. 以降「お描きを画像でAIへ」は WS で push される。`disk` ではデーモンが即時 inbox に書き出し、
+   `hybrid` では MCP の image/file_path 要求時までメモリに保持する
    （失敗時は自動で `chrome.downloads` にフォールバック）。
 
 ## 使い方（検証）
