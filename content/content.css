@@ -113,9 +113,9 @@
   outline: 2px dashed var(--bag-accent) !important;
   outline-offset: 2px !important;
 }
-/* 補足(note)を付けた要素は赤い実線枠で囲み、対象をひと目で示す。 */
+/* 補足(note)を付けた要素は赤い破線枠で囲み、ページ本来の実線ボーダーと区別する。 */
 [data-bag-anno-outline='note'] {
-  outline: 2px solid #ef4444 !important;
+  outline: 2px dashed #ef4444 !important;
   outline-offset: 2px !important;
 }
 
@@ -177,9 +177,9 @@ html.bag-picking * {
   position: fixed;
   z-index: 2147483640;
   display: none;
-  /* 選択中の要素は赤枠でハイライトし、保存後の赤枠と見た目を揃える。 */
+  /* 選択中の要素は赤い破線枠でハイライトし、保存後の赤枠と見た目を揃える。 */
   background: rgba(239, 68, 68, 0.12);
-  border: 2px solid #ef4444;
+  border: 2px dashed #ef4444;
   border-radius: 4px;
   pointer-events: none;
   box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.04);
