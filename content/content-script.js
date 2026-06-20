@@ -1865,15 +1865,18 @@
   // 要素クリック後に出る、非エンジニア向けの簡易フォーム。
   function openAuthoring(el, existing) {
     closeAuthoring();
-    const anchor = existing?.anchor || buildAnchor(el);
-    const heading = anchor.text || anchor.ariaLabel || anchor.placeholder || anchor.tag;
+    // 編集時は保存済みanchorを維持する。floating合図ボタンはanchor=nullなので、
+    // ここでbuildAnchor(null)に落ちると el.tagName で TypeError になる。新規メモのみ要素から生成。
+    const anchor = existing ? existing.anchor : buildAnchor(el);
+    const head = anchor || {};
+    const heading = head.text || head.ariaLabel || head.placeholder || head.tag || t('cs.author.targetFallback');
     const wrap = document.createElement('div');
     wrap.className = 'bag-author';
     wrap.setAttribute(ATTR.ui, '1');
     // 補足はAI向けの指示1つに絞る。種類(コメント/目印/合図ボタン)や名前欄は出さない。
     wrap.innerHTML = `
       <div class="bag-author-head">${escapeHtml(t('cs.author.addNote'))}</div>
-      <div class="bag-author-target">${escapeHtml(t('cs.author.target'))} <b>${escapeHtml(truncate(heading, 40))}</b> <span class="muted">&lt;${escapeHtml(anchor.role)}&gt;</span></div>
+      <div class="bag-author-target">${escapeHtml(t('cs.author.target'))} <b>${escapeHtml(truncate(heading, 40))}</b> <span class="muted">&lt;${escapeHtml(head.role || head.tag || '')}&gt;</span></div>
       <label class="bag-author-row">
         <span>${escapeHtml(t('cs.author.aiContent'))}</span>
         <textarea data-f="note" rows="3" placeholder="${escapeHtml(t('cs.author.aiContentPlaceholder'))}"></textarea>
