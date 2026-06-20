@@ -1,0 +1,508 @@
+{
+  "title": "MCP と Browser Agent Guide Chrome拡張のつながり",
+  "eyebrow": "Browser Agent Guide / MCP / Visual Feedback",
+  "subtitle": "Chrome拡張本体、ローカル daemon、MCP、AIコーディングCLIの責務を一枚で把握するための説明資料。",
+  "lang": "ja",
+  "target": "document",
+  "viewport": "desktop",
+  "theme": "slate",
+  "layout": "stack",
+  "header": "split",
+  "density": "comfortable",
+  "meta": [
+    { "k": "Extension", "v": "Chrome Manifest V3 side panel" },
+    { "k": "Daemon", "v": "bag-visual-feedback-daemon" },
+    { "k": "WebSocket", "v": "ws://127.0.0.1:8765/ws" },
+    { "k": "MCP", "v": "http://127.0.0.1:8765/mcp" }
+  ],
+  "footer": "Sources: README.md, daemon/README.md, background/service-worker.js, content/content-script.js, offscreen/offscreen.js, daemon/src/{index,http,ws,server,inbox,writer}.js",
+  "sections": [
+    {
+      "type": "callout",
+      "variant": "tldr",
+      "title": "一言でいうと",
+      "body": "このChrome拡張はブラウザ上のページを決定論的な動詞レジストリで操作する本体です。MCPはその本体に直接入り込んでページを操作する仕組みではなく、拡張が作った「お描き注釈スクショと構造化メタ」をローカルdaemon経由でAIコーディングCLIへ渡すための読み取り口です。"
+    },
+    {
+      "type": "statlist",
+      "title": "責務分担の早見表",
+      "desc": "どの部品が何を担当しているかを先に分けて見ると、MCPの位置づけがはっきりします。",
+      "columns": 2,
+      "items": [
+        {
+          "k": "Chrome拡張本体",
+          "v": "ページ操作と注釈UI",
+          "note": "Side panel、service worker、content script、options、offscreen document の5文脈で動く。"
+        },
+        {
+          "k": "Service worker",
+          "v": "LLM呼び出しとChrome特権API",
+          "note": "Structured OutputsでAIに固定形式の actions を返させ、content scriptへ実行依頼する。"
+        },
+        {
+          "k": "Content script",
+          "v": "閉じた動詞レジストリ",
+          "note": "AI_VERBSを実行する唯一のページ内コンポーネント。自由なDOM操作ではなく登録済みverbだけを扱う。"
+        },
+        {
+          "k": "Offscreen document",
+          "v": "注釈画像のCanvas合成",
+          "note": "MV3 service workerにDOM/Canvasがないため、スクリーンショットへお描きをburn-inする。"
+        },
+        {
+          "k": "Local daemon",
+          "v": "WS受信 + inbox保存 + MCP公開",
+          "note": "拡張からのpushを受け取り、shot.png / raw.png / annotation.json / memo.md を保存する。"
+        },
+        {
+          "k": "MCP",
+          "v": "AI CLI向けの読み取り口",
+          "note": "AIコーディングCLIが最新の視覚フィードバックをcontext-firstで取得するための道具。"
+        }
+      ]
+    },
+    {
+      "type": "comparison",
+      "label": "2つのAI経路",
+      "options": [
+        {
+          "name": "拡張内チャット経路",
+          "recommended": true,
+          "metrics": [
+            { "k": "入口", "v": "Side panel CHAT" },
+            { "k": "LLM呼び出し", "v": "service worker" },
+            { "k": "実行場所", "v": "content script" }
+          ],
+          "pros": [
+            "ユーザーがside panelに自然言語で指示できる",
+            "COLLECT_CONTEXTでページのaffordanceとverb catalogを集める",
+            "AIの出力はreplyとactionsのStructured Outputsに固定される",
+            "RUN_ACTIONSで登録済みverbだけを順番に実行する"
+          ],
+          "cons": [
+            "拡張が呼ぶLLMはページ操作のための判断役",
+            "AIコーディングCLIがローカルコードを修正する経路ではない",
+            "高リスクverbはchat経路では隠す、または拒否する"
+          ]
+        },
+        {
+          "name": "MCP視覚フィードバック経路",
+          "metrics": [
+            { "k": "入口", "v": "お描き/Draw capture" },
+            { "k": "受け渡し", "v": "daemon /ws then /mcp" },
+            { "k": "消費者", "v": "AI coding CLI" }
+          ],
+          "pros": [
+            "ブラウザで丸や矢印を描いた意図を、AI CLIが自動で読める",
+            "まず画像なしcontextを返すため、@agent: / selector / testidで対象特定しやすい",
+            "必要時だけimage + file_pathを返すのでvisionと非vision CLIの両方に対応できる",
+            "urlContains / titleContainsで共有inboxをプロジェクト単位に絞れる"
+          ],
+          "cons": [
+            "daemon起動とCLIへのMCP登録が必要",
+            "MCPはページをクリックする実行層ではなく、注釈を読むための橋渡し",
+            "共有inboxではフィルタを付けないと別プロジェクトの最新を拾う可能性がある"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "diagram",
+      "title": "接続図: 拡張のページ操作経路とMCPの視覚フィードバック経路",
+      "layout": "layered",
+      "zones": ["Chrome extension", "Local daemon / inbox", "AI CLI / external services"],
+      "groupLabels": {
+        "1": "拡張内操作",
+        "2": "視覚フィードバック",
+        "3": "AI/CLI消費"
+      },
+      "nodes": [
+        { "id": "user", "label": "ユーザー", "sub": "chat / draw / settings", "zone": "Chrome extension", "group": 1 },
+        { "id": "sidepanel", "label": "Side panel", "sub": "CHAT, toolbar, history", "zone": "Chrome extension", "group": 1 },
+        { "id": "sw", "label": "Service worker", "sub": "orchestrator + privileged APIs", "zone": "Chrome extension", "group": 1 },
+        { "id": "content", "label": "Content script", "sub": "AI_VERBS + resolver + annotations", "zone": "Chrome extension", "group": 1 },
+        { "id": "page", "label": "任意のWebページ", "sub": "click / fill / inject / annotate", "zone": "Chrome extension", "group": 1 },
+        { "id": "offscreen", "label": "Offscreen document", "sub": "Canvas 2D compositing", "zone": "Chrome extension", "group": 2 },
+        { "id": "llm", "label": "AI provider API", "sub": "OpenAI / Anthropic / Gemini / custom", "zone": "AI CLI / external services", "group": 3 },
+        { "id": "ws", "label": "WebSocket /ws", "sub": "token authenticated push", "zone": "Local daemon / inbox", "group": 2 },
+        { "id": "inbox", "label": "ai-inbox", "sub": "shot.png / raw.png / annotation.json / memo.md", "zone": "Local daemon / inbox", "group": 2 },
+        { "id": "mcp", "label": "MCP /mcp", "sub": "Streamable HTTP tools", "zone": "Local daemon / inbox", "group": 2 },
+        { "id": "cli", "label": "AI coding CLI", "sub": "Codex / Claude Code / Antigravity", "zone": "AI CLI / external services", "group": 3 },
+        { "id": "workspace", "label": "Workspace / tests", "sub": "code edit + browser verification", "zone": "AI CLI / external services", "group": 3 }
+      ],
+      "edges": [
+        { "from": "user", "to": "sidepanel", "label": "入力" },
+        { "from": "sidepanel", "to": "sw", "label": "chrome.runtime" },
+        { "from": "sw", "to": "content", "label": "COLLECT_CONTEXT / RUN_ACTIONS" },
+        { "from": "content", "to": "page", "label": "closed verbs" },
+        { "from": "sw", "to": "llm", "label": "Structured Outputs" },
+        { "from": "content", "to": "sw", "label": "PREPARE_CAPTURE" },
+        { "from": "sw", "to": "offscreen", "label": "COMPOSITE_VISUAL_FEEDBACK" },
+        { "from": "offscreen", "to": "sw", "label": "composite PNG" },
+        { "from": "sw", "to": "ws", "label": "visual_feedback payload" },
+        { "from": "ws", "to": "inbox", "label": "atomic write" },
+        { "from": "cli", "to": "mcp", "label": "tool calls" },
+        { "from": "mcp", "to": "inbox", "label": "scan newest" },
+        { "from": "mcp", "to": "cli", "label": "context / image + file_path" },
+        { "from": "cli", "to": "workspace", "label": "fix + verify" }
+      ]
+    },
+    {
+      "type": "stepper",
+      "title": "拡張内チャットのページ操作フロー",
+      "desc": "MCPを使わない、Chrome拡張本体の主経路です。",
+      "steps": [
+        {
+          "n": 1,
+          "title": "Side panel が CHAT を送る",
+          "event": "CHAT",
+          "fn": "sidepanel/sidepanel.js",
+          "desc": "ユーザーの文、履歴、対象tabId、rememberScopeをservice workerへ送る。",
+          "level": "info",
+          "branches": [
+            { "label": "API keyあり", "desc": "runChatへ進む", "kind": "go" },
+            { "label": "API keyなし", "desc": "options設定を促す", "kind": "stop" }
+          ]
+        },
+        {
+          "n": 2,
+          "title": "Service worker がページ文脈を集める",
+          "event": "COLLECT_CONTEXT",
+          "fn": "background/service-worker.js",
+          "desc": "content scriptからverb catalog、affordances、targets、annotationsを取得する。",
+          "level": "info",
+          "branches": [
+            { "label": "取得成功", "desc": "prompt構築へ進む", "kind": "go" }
+          ]
+        },
+        {
+          "n": 3,
+          "title": "LLMにStructured Outputsで問い合わせる",
+          "event": "callAI",
+          "fn": "lib/ai-client.js",
+          "desc": "verb名はライブcatalog由来のenumに固定され、argsはargsJson文字列として返る。",
+          "level": "critical",
+          "branches": [
+            { "label": "OpenAI/custom", "desc": "json_schema strict", "kind": "go" },
+            { "label": "Anthropic/Gemini", "desc": "tool_choiceまたはresponseJsonSchema", "kind": "go" }
+          ]
+        },
+        {
+          "n": 4,
+          "title": "Content script がverbを順番に実行する",
+          "event": "RUN_ACTIONS",
+          "fn": "content/content-script.js",
+          "desc": "clickAffordance、fillAffordance、outlineElement、injectPanelなど、AI_VERBSにあるものだけが実行対象になる。",
+          "level": "block",
+          "branches": [
+            { "label": "chat経路", "desc": "defineMarker / setStyle / removeElement は拒否", "kind": "stop" },
+            { "label": "安全verb", "desc": "document orderのaiIdで決定論的に実行", "kind": "go" }
+          ]
+        },
+        {
+          "n": 5,
+          "title": "成功した変更をrecipeとして覚える",
+          "event": "rememberSuccessfulChanges",
+          "fn": "lib/storage.js + service worker",
+          "desc": "許可されたinject/outline/panel系verbだけを保存し、再訪問やSPA内部遷移でACTIVATEとして再適用する。",
+          "level": "neutral",
+          "branches": [
+            { "label": "再訪問", "desc": "syncTabがURLルールを評価", "kind": "go" },
+            { "label": "SPA遷移", "desc": "SPA_NAVIGATEDで再評価", "kind": "go" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stepper",
+      "title": "お描きからMCPでAI CLIへ届くフロー",
+      "desc": "ユーザーがブラウザ画面で示した「ここを直して」を、コード修正側のAIへ運ぶ経路です。",
+      "steps": [
+        {
+          "n": 1,
+          "title": "ユーザーがお描きを残す",
+          "event": "Draw",
+          "fn": "content/content-script.js",
+          "desc": "丸、四角、矢印、ペンとコメントを対象要素へアンカーする。座標は要素rectに対する割合で保存される。",
+          "level": "info",
+          "branches": [
+            { "label": "保存", "desc": "origin + pathname単位で復元可能", "kind": "go" }
+          ]
+        },
+        {
+          "n": 2,
+          "title": "拡張がcaptureを準備する",
+          "event": "PREPARE_CAPTURE",
+          "fn": "content script -> service worker",
+          "desc": "注釈をpxへ解決し、拡張自身のUIを一時的に隠してから可視タブを撮る。",
+          "level": "info",
+          "branches": [
+            { "label": "撮影", "desc": "chrome.tabs.captureVisibleTab", "kind": "go" }
+          ]
+        },
+        {
+          "n": 3,
+          "title": "Offscreen document が画像を合成する",
+          "event": "COMPOSITE_VISUAL_FEEDBACK",
+          "fn": "offscreen/offscreen.js",
+          "desc": "Canvas 2Dだけでshot.png相当の注釈入り画像を作り、raw.png相当の元画像も保持する。",
+          "level": "neutral",
+          "branches": [
+            { "label": "完了", "desc": "annotation.jsonとmemo.mdも組み立てる", "kind": "go" }
+          ]
+        },
+        {
+          "n": 4,
+          "title": "daemon有効ならWebSocketでpushする",
+          "event": "WS /ws",
+          "fn": "pushToDaemon",
+          "desc": "payloadにはurl、title、viewport、dpr、downloadsDir、image、annotation、memoが含まれる。",
+          "level": "block",
+          "branches": [
+            { "label": "ack", "desc": "daemonがidと保存dirを返す", "kind": "go" },
+            { "label": "失敗", "desc": "手動送信時はchrome.downloadsへフォールバック", "kind": "warn" }
+          ]
+        },
+        {
+          "n": 5,
+          "title": "daemonがinboxに原子的保存する",
+          "event": "writeEntry",
+          "fn": "daemon/src/writer.js",
+          "desc": "slugはサーバ側で採番され、保存先は既定でブラウザのDownloads配下ai-inbox、または明示inboxになる。",
+          "level": "info",
+          "branches": [
+            { "label": "保存", "desc": "MCPから新しい順に読める", "kind": "go" }
+          ]
+        },
+        {
+          "n": 6,
+          "title": "AI CLIがまずcontextだけ読む",
+          "event": "MCP tool",
+          "fn": "get_latest_visual_feedback_context",
+          "desc": "@agent: / selector / testid / anchorLabel / url / title / idを画像なしで返す。ここで対象特定できるならvisionは不要。",
+          "level": "critical",
+          "branches": [
+            { "label": "特定できる", "desc": "ソース検索とDOM確認へ進む", "kind": "go" },
+            { "label": "見た目が必要", "desc": "contextIdとimageReason付きでimage toolへ", "kind": "warn" }
+          ]
+        },
+        {
+          "n": 7,
+          "title": "必要時だけimage + file_pathを取得する",
+          "event": "MCP image tool",
+          "fn": "get_latest_visual_feedback / get_visual_feedback",
+          "desc": "contextIdが現在entryと一致し、imageReasonがある時だけ画像を返す。画像を読めないCLIでもfile_pathで開ける。",
+          "level": "neutral",
+          "branches": [
+            { "label": "修正", "desc": "AI CLIがコード編集、ブラウザ確認、テストへ進む", "kind": "go" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "features",
+      "title": "Chrome拡張本体でできること",
+      "desc": "MCPとは別に、拡張だけでページ上のAI操作と人間の手がかり付与ができます。",
+      "columns": 3,
+      "items": [
+        {
+          "icon": "code",
+          "title": "閉じたverb実行",
+          "body": "AIはAI_VERBSに登録されたclick、fill、scroll、highlight、injectなどの動詞だけを選ぶ。自由なDOMコードは出せない。",
+          "tag": "deterministic"
+        },
+        {
+          "icon": "layers",
+          "title": "安定aiIdとaffordance",
+          "body": "interactive要素をdocument orderでannotateし、button#1やinput-text#2のような安定IDで参照する。",
+          "tag": "resolver"
+        },
+        {
+          "icon": "star",
+          "title": "注釈とお描き",
+          "body": "要素へ補足メモや丸・四角・矢印・手書きを付け、origin + pathname単位で保存して再訪問時に復元する。",
+          "tag": "human cues"
+        },
+        {
+          "icon": "gear",
+          "title": "Structured Outputs",
+          "body": "service workerだけがLLMを呼び、replyとactionsを厳格な構造で受け取ってcontent scriptへ渡す。",
+          "tag": "LLM"
+        },
+        {
+          "icon": "clock",
+          "title": "recipe再適用",
+          "body": "許可されたinject/outline/panel系の変更はURL、domain、all-sitesの範囲で保存され、ロード時やSPA遷移時に再適用できる。",
+          "tag": "memory"
+        },
+        {
+          "icon": "shield",
+          "title": "危険verbの隔離",
+          "body": "setStyle、removeElement、defineMarkerなど高リスク操作はchat経路から隠し、chat/auto-recipeでは拒否する。",
+          "tag": "guardrail"
+        }
+      ]
+    },
+    {
+      "type": "features",
+      "title": "Daemon / MCPでできること",
+      "desc": "外部AI CLIが、ブラウザで示された視覚フィードバックを扱うための機能です。",
+      "columns": 3,
+      "items": [
+        {
+          "icon": "rocket",
+          "title": "WebSocket push受信",
+          "body": "拡張の「お描きを画像でAIへ」からPNGと注釈メタを受け取り、ackとしてidと保存先を返す。",
+          "tag": "/ws"
+        },
+        {
+          "icon": "check",
+          "title": "context-first取得",
+          "body": "MCP toolはまず画像なしのcontextを返す。@agent:、selector、testid、anchorLabelで十分なら画像トークンを使わない。",
+          "tag": "cheap first"
+        },
+        {
+          "icon": "globe",
+          "title": "url/titleフィルタ",
+          "body": "共有inboxに複数プロジェクトのキャプチャが混ざっても、urlContainsやtitleContainsで対象を絞れる。",
+          "tag": "scope"
+        },
+        {
+          "icon": "layers",
+          "title": "image + file_path",
+          "body": "vision対応CLIには画像を返し、画像を直接読めないCLIにも絶対file_pathを併走させる。",
+          "tag": "fallback"
+        },
+        {
+          "icon": "gear",
+          "title": "Downloads追従",
+          "body": "拡張が実ダウンロード先を報告すると、daemonは固定されていない限り<downloadsDir>/ai-inboxへ追従する。",
+          "tag": "adopt"
+        },
+        {
+          "icon": "lock",
+          "title": "ローカル安全策",
+          "body": "daemonはloopbackで起動し、/wsはtoken認証、保存はinbox配下のみ、slugはサーバ側で採番する。",
+          "tag": "local"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "label": "MCPツール一覧",
+      "density": "compact",
+      "paginate": 8,
+      "placeholder": "tool / 目的 / 戻り値で絞り込み",
+      "columns": ["Tool", "主な用途", "返すもの", "使うタイミング"],
+      "rows": [
+        [
+          "list_visual_feedback",
+          "inboxを新しい順に一覧する",
+          "id、url、title、mtimeのテキスト一覧",
+          { "badge": "info", "text": "候補確認" }
+        ],
+        [
+          "get_latest_visual_feedback_context",
+          "条件に合う最新キャプチャのcontextを読む",
+          "@agent:、selector、testid、anchorLabel、url/titleなど。画像なし。",
+          { "badge": "success", "text": "まず最初" }
+        ],
+        [
+          "get_visual_feedback_context",
+          "id指定で特定キャプチャのcontextを読む",
+          "指定idの構造化context。画像なし。",
+          { "badge": "info", "text": "一覧後" }
+        ],
+        [
+          "get_latest_visual_feedback",
+          "最新キャプチャの画像を必要時だけ取得する",
+          "image(PNG) + file_path。contextIdとimageReasonが必須。",
+          { "badge": "warning", "text": "vision必要時" }
+        ],
+        [
+          "get_visual_feedback",
+          "id指定キャプチャの画像を必要時だけ取得する",
+          "image(PNG) + file_path。contextIdとimageReasonが必須。",
+          { "badge": "warning", "text": "vision必要時" }
+        ]
+      ]
+    },
+    {
+      "type": "statlist",
+      "title": "起動・登録・設定の要点",
+      "desc": "実際に連携する時に触るURL、設定、コマンド。",
+      "columns": 2,
+      "items": [
+        {
+          "k": "daemon起動",
+          "v": "cd daemon && npm start",
+          "note": "既定はhost=127.0.0.1、port=8765、inbox=<Downloads>/ai-inbox。"
+        },
+        {
+          "k": "health check",
+          "v": "curl -s http://127.0.0.1:8765/healthz",
+          "note": "現在daemonが見ているinboxDirを確認する。"
+        },
+        {
+          "k": "拡張options",
+          "v": "視覚フィードバック デーモン",
+          "note": "デーモンへ送るをON、WS URLとtokenを保存し、接続テストで確認する。"
+        },
+        {
+          "k": "token",
+          "v": "~/.bag-vf/token",
+          "note": "daemon起動時にstderrへ表示される。WebSocket認証に使う。"
+        },
+        {
+          "k": "Codex MCP登録",
+          "v": "codex mcp add bag_visual_feedback --url http://127.0.0.1:8765/mcp",
+          "note": "Claude Codeはurlキー、AntigravityはserverUrlキーを使う。"
+        },
+        {
+          "k": "明示inbox",
+          "v": "node src/index.js --inbox ./.ai-inbox",
+          "note": "--inboxまたはBAG_VF_INBOXを指定すると拡張のdownloadsDir報告では上書きされない。"
+        }
+      ]
+    },
+    {
+      "type": "collapsible",
+      "label": "よくある誤解",
+      "items": [
+        {
+          "summary": "MCPがChromeページをクリックしているの？",
+          "body": "<p>いいえ。ページクリックや入力は拡張のcontent scriptがAI_VERBSで実行します。MCPはdaemon上のinboxをAI CLIへ公開する読み取り口です。</p>",
+          "open": true
+        },
+        {
+          "summary": "daemonがないと視覚フィードバックは使えない？",
+          "body": "<p>いいえ。daemonが無効または到達不能なら、拡張はchrome.downloadsでai-inboxへ保存します。ただしAI CLIへ自動で渡す体験はdaemon + MCPの方が滑らかです。</p>"
+        },
+        {
+          "summary": "なぜ画像をすぐ返さずcontext-firstなの？",
+          "body": "<p>画像は高コストで、対象特定には@agent:、selector、testid、anchorLabelで十分な場合があります。context-firstにするとトークンを節約し、別プロジェクトの画像取り違えも減ります。</p>"
+        },
+        {
+          "summary": "MCPはLLM APIを呼ぶ？",
+          "body": "<p>いいえ。拡張内チャットのLLM呼び出しはservice workerのlib/ai-client.jsです。daemonのMCPは保存済み視覚フィードバックをAI CLIへ返すだけです。</p>"
+        },
+        {
+          "summary": "なぜこの仕組みが必要？",
+          "body": "<p>ブラウザ上でユーザーが指した場所と、ターミナル側でコードを直すAIの作業空間は別です。MCP daemonはその境界を、画像ファイルの手渡しではなく構造化contextと必要時のimageでつなぎます。</p>"
+        }
+      ]
+    },
+    {
+      "type": "callout",
+      "variant": "warning",
+      "title": "運用時の注意",
+      "body": "共有inboxでは必ずurlContainsまたはtitleContainsでスコープを絞るのが安全です。また/mcpはloopback前提、/wsはtoken認証付きですが、localhostは完全な隔離境界ではありません。tokenと絶対file_pathの扱いには注意してください。"
+    },
+    {
+      "type": "callout",
+      "variant": "success",
+      "title": "覚えるべき最短モデル",
+      "body": "拡張本体はブラウザを動かす。daemonは拡張のお描きを保存する。MCPはAI CLIがその保存物を読むための入口。AI CLIはまずcontextを読み、必要な時だけ画像を読み、コード修正と検証へ進む。"
+    }
+  ]
+}
