@@ -692,7 +692,7 @@
     },
     startDrawing: {
       description:
-        'ページ上に円/四角/矢印/フリーハンドで印を描く「お描きモード」を開始する。描き終えたあと確認モーダルで「メモを残す」を押すと、図形のすぐ隣に編集可能な「AIメモ」が生成される。図形とメモは対象要素にアンカーされ永続保存され、再訪時に復元される。「AIに渡す」がONのメモだけがAIへの文脈に同梱される。',
+        'ページ上に円/四角/矢印/フリーハンドで印を描く「お描きモード」を開始する。描き終えて「完了」を押すと、図形のすぐ隣に編集可能な「AIメモ」がすぐに生成され、そのまま指示を書き込める。図形とメモは対象要素にアンカーされ永続保存され、再訪時に復元される。「AIに渡す」がONのメモだけがAIへの文脈に同梱される。',
       args: {},
       run: async () => startDrawing(),
     },
@@ -2420,7 +2420,9 @@
     const op = opBtn.getAttribute('data-op');
     if (op === 'undo') undoDrawShape();
     else if (op === 'cancel') stopDrawing();
-    else if (op === 'done') finishDrawing();
+    // finishDrawing は async（storage 書き込みを await する）。未ハンドルの reject を出さないよう
+    // 失敗はトーストで可視化する。
+    else if (op === 'done') finishDrawing().catch((err) => toast(String(err?.message || err), 'error'));
   }
 
   function updateDrawToolbarState() {
@@ -2436,8 +2438,11 @@
     if (done) done.disabled = !has;
   }
 
-  // ---- 確定: アンカー要素を特定し、比率座標へ変換してコメント入力へ ----
-  function finishDrawing() {
+  // ---- 確定: アンカー要素を特定し、比率座標へ変換して即AIメモ化する ----
+  async function finishDrawing() {
+    // 「完了」連打や（async 化に伴う）再入で空メモが二重生成されるのを防ぐ。
+    // 成功経路では下の stopDrawing() が drawing.active=false にするので、await 中の2回目はここで弾く。
+    if (!drawing.active) return;
     if (!drawing.shapes.length) {
       toast(t('cs.toast.noDrawing'), 'warn');
       return;
@@ -2460,8 +2465,10 @@
     const H = rect.height || 1;
     const shapes = live.map((s) => toFractionalShape(s, rect.left, rect.top, W, H));
     stopDrawing();
-    // 「完了」だけでは空メモを残さず、ユーザーが明示的に保存した時点でAIメモ化する。
-    openDrawingAuthoring({ kind: 'drawing', anchor, shapes, note: '', intent: '', forAI: true });
+    // お描き完了と同時に、図形のすぐ隣へ編集可能なAIメモを生成する。中間の確認モーダルは挟まず、
+    // 生成直後に本文へフォーカスしてそのまま指示を書けるようにする（不要なら🗑で消せる）。
+    const saved = await upsertAnnotation({ kind: 'drawing', anchor, shapes, note: '', intent: '', forAI: true });
+    focusMemo(saved?.id);
   }
 
   // 指定idのメモ(ページ上カード)の入力欄へフォーカスする(生成直後の即編集用)。

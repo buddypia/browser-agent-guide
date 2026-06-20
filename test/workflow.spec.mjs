@@ -54,6 +54,7 @@ const CHROME_STUB = `
 const send = (page, msg) => page.evaluate((m) => new Promise((r) => window.__bagListener(m, {}, r)), msg);
 
 async function drawRectOver(page, topY) {
+  const before = await page.locator('.bag-memo').count();
   await send(page, { type: 'START_DRAWING' });
   await expect(page.locator('.bag-draw-overlay')).toHaveCount(1);
   await page.locator('.bag-draw-tool[data-tool="rect"]').click();
@@ -63,9 +64,9 @@ async function drawRectOver(page, topY) {
   await page.mouse.move(210, topY + 40, { steps: 5 });
   await page.mouse.up();
   await page.locator('.bag-draw-op[data-op="done"]').click();
-  await expect(page.locator('.bag-author [data-f="save"]')).toHaveText('メモを残す');
-  await page.locator('.bag-author [data-f="save"]').click();
+  // 完了で中間モーダルを挟まず、図形の隣にAIメモが即生成される。
   await expect(page.locator('.bag-author')).toHaveCount(0);
+  await expect(page.locator('.bag-memo')).toHaveCount(before + 1);
   await page.mouse.move(960, 780); // メモ/パネルから離す
 }
 
