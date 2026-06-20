@@ -13,7 +13,7 @@
  *   3) `git worktree add <path> -b <branch> origin/<base>` (이미 같은 path/branch
  *      가 등록되어 있고 동일하면 멱등 SKIP; 다른 branch/path 충돌은 STOP)
  *   4) `node .claude/scripts/worktree-init.mjs --worktree <path>` chain
- *      (symlink + PLAN.md)
+ *      (local CLI env + PLAN.md)
  *   5) JSON 보고: { ok, branch, base, base_sha, worktree_path, plan_path,
  *                   actions: [...], warnings: [...] }
  *
@@ -33,7 +33,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -256,44 +256,16 @@ export function runWorktreeNew(opts) {
   result.worktree_path = wtPathAbs;
 
   // Step 1: fetch origin <base>
-  const cacheDir = join(cwd, '.brief2dev', 'system'); // @layout-resolver-allow
-  const cacheFile = join(cacheDir, `fetch-cache-${base}.json`);
-  let shouldFetch = true;
-  const FETCH_TTL = 60_000; // 60s
-
-  if (existsFn(cacheFile)) {
+  result.actions.push(`fetch origin ${base}`);
+  if (!dryRun) {
     try {
-      const cacheData = JSON.parse(readFileSync(cacheFile, 'utf-8'));
-      const age = Date.now() - (cacheData.timestamp || 0);
-      if (age < FETCH_TTL) {
-        shouldFetch = false;
-        result.actions.push(`fetch origin skipped (cached within 60s)`);
-      }
-    } catch {
-      // ignore and fetch
-    }
-  }
-
-  if (shouldFetch) {
-    result.actions.push(`fetch origin ${base}`);
-    if (!dryRun) {
-      try {
-        gitFn(['fetch', 'origin', base], { cwd, timeout: 60_000 });
-        try {
-          if (!existsSync(cacheDir)) {
-            mkdirSync(cacheDir, { recursive: true });
-          }
-          writeFileSync(cacheFile, JSON.stringify({ timestamp: Date.now() }));
-        } catch {
-          // ignore cache write error
-        }
-      } catch (e) {
-        result.errors.push(
-          `fetch origin ${base} failed: ${(e.stderr || e.message || '').toString().trim()}`,
-        );
-        result.errors.push('hint: 네트워크 / origin 설정 확인 후 재시도. (git remote -v)');
-        return result;
-      }
+      gitFn(['fetch', 'origin', base], { cwd, timeout: 60_000 });
+    } catch (e) {
+      result.errors.push(
+        `fetch origin ${base} failed: ${(e.stderr || e.message || '').toString().trim()}`,
+      );
+      result.errors.push('hint: 네트워크 / origin 설정 확인 후 재시도. (git remote -v)');
+      return result;
     }
   }
 
@@ -356,7 +328,7 @@ export function runWorktreeNew(opts) {
               `silent rebase 위험 회피를 위해 STOP. 수동 reconcile 후 재시도하세요.`,
           );
           result.errors.push(
-            `hint (brief2dev R-CM-008 정합 복구 — rebase/merge 는 destructive-git-guard 차단 + main 직접 흐름이라 비권장): ` +
+            `hint (worktree freshness recovery — rebase/merge 는 destructive-git-guard 차단 + main 직접 흐름이라 비권장): ` +
               `1) git format-patch origin/${base}..HEAD -o .tmp/git-backup/ (로컬 unique commits patch 백업) ` +
               `2) git reset --hard origin/${base} (사용자 직접 실행 — destructive-git-guard 가 AI 차단) ` +
               `3) make wt.new BR=feature/<task> 재시도 (diverge 해소 후 성공) ` +
@@ -445,13 +417,11 @@ export function runWorktreeNew(opts) {
   }
 
   // Step 4: worktree-init.mjs chain
-  // Use the checkout that owns this script for companion scripts. When this
-  // transplant is being verified from a linked worktree before it is merged to
-  // main, the Git common root may not have the new .claude/scripts yet.
+  // Use the checkout that owns this script for companion scripts.
   const initScript = join(REPO_ROOT, '.claude/scripts/worktree-init.mjs');
   if (!existsFn(initScript)) {
     result.warnings.push(
-      `worktree-init.mjs not found at ${initScript} — skipped symlink + PLAN.md auto-creation.`,
+      `worktree-init.mjs not found at ${initScript} — skipped local env + PLAN.md setup.`,
     );
   } else {
     result.actions.push(`node worktree-init.mjs --worktree ${wtPathRel}`);

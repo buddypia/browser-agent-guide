@@ -38,16 +38,6 @@ tmp/
 .tmp/worktree-guard-ledger/
 .tmp/.agent_worktree_owner.json
 
-# Worktree ecosystem shared/runtime state
-# .brief2dev/system holds machine-local runtime caches (e.g. fetch-cache-*.json,
-# a wall-clock timestamp) and the shared system_persistent SSOT; worktrees reach
-# it via a symlink to the main worktree, so it must never be committed. No
-# trailing slash so the symlink node itself is also ignored.
-.brief2dev/system
-.brief2dev/session-history/
-.brief2dev/run/
-.brief2dev/runs/
-
 # Codex/Claude project config is tracked; machine-local CLI config is not.
 # .claude/settings.json is tracked codegen; settings.local.json is per-machine
 # (worktree-init.mjs writes GIT_DIR/GIT_WORK_TREE into it). The repo's *.local
