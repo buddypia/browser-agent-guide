@@ -105,8 +105,8 @@ test('補足フォームはヘッダをドラッグして移動できる', async
 
   const author = page.locator('.bag-author');
   await expect(author).toBeVisible();
-  await author.locator('[data-f="kind"]').selectOption('marker');
-  await author.locator('[data-f="kind"]').selectOption('note');
+  // 補足フォームはAI向けの指示1欄だけ(種類セレクタは廃止)。
+  await expect(author.locator('[data-f="note"]')).toBeVisible();
 
   const before = await author.boundingBox();
   const head = await author.locator('.bag-author-head').boundingBox();
@@ -121,6 +121,63 @@ test('補足フォームはヘッダをドラッグして移動できる', async
   await author.locator('[data-f="note"]').fill('下でも保存できる');
   await author.locator('[data-f="save"]').click();
   await expect(author).toHaveCount(0);
+});
+
+test('補足は種類選択なしのAI指示1欄で、選択した要素を赤枠で囲む', async ({ page }) => {
+  const red = 'rgb(239, 68, 68)';
+  await page.setViewportSize({ width: 390, height: 720 });
+  await page.setContent(AUTHOR_PAGE_HTML);
+  await page.addScriptTag({
+    content: `
+      window.__bagListener = null;
+      window.__bagI18n = ${jaLocaleJson};
+      window.chrome = {
+        runtime: {
+          onMessage: { addListener: (fn) => { window.__bagListener = fn; } },
+          sendMessage: (msg, cb) => {
+            if (msg && msg.type === 'GET_I18N') {
+              const r = { ok: true, result: { locale: 'ja', messages: window.__bagI18n, fallback: window.__bagI18n } };
+              if (typeof cb === 'function') { cb(r); return; }
+              return Promise.resolve(r);
+            }
+            if (typeof cb === 'function') { cb({ ok: true }); return; }
+            return Promise.resolve({ ok: true });
+          },
+          get lastError() { return null; },
+        },
+        storage: { local: { get: async () => ({}), set: async () => {} }, onChanged: { addListener() {} } },
+      };
+    `,
+  });
+  await page.addStyleTag({ content: contentCss });
+  await page.addScriptTag({ content: contentScript });
+
+  await page.evaluate(
+    () => new Promise((resolve) => window.__bagListener({ type: 'START_PICKER' }, {}, resolve))
+  );
+
+  // 選択中ハイライト枠は赤。
+  await page.locator('#target').hover();
+  await expect(page.locator('.bag-pick-overlay')).toHaveCSS('border-top-color', red);
+
+  await page.locator('#target').click();
+  const author = page.locator('.bag-author');
+  await expect(author).toBeVisible();
+  // 種類セレクタ/名前/目的の各欄は廃止し、AI向けの指示1欄だけにする。
+  await expect(author.locator('[data-f="kind"]')).toHaveCount(0);
+  await expect(author.locator('[data-f="label"]')).toHaveCount(0);
+  await expect(author.locator('[data-f="intent"]')).toHaveCount(0);
+  await expect(author.locator('[data-f="note"]')).toHaveCount(1);
+
+  await author.locator('[data-f="note"]').fill('送信前に内容を確認する');
+  await author.locator('[data-f="save"]').click();
+  await expect(author).toHaveCount(0);
+
+  // 補足を付けた対象要素は赤い実線枠で囲まれる。
+  const target = page.locator('#target');
+  await expect(target).toHaveAttribute('data-bag-anno-outline', 'note');
+  await expect(target).toHaveCSS('outline-color', red);
+  await expect(target).toHaveCSS('outline-style', 'solid');
 });
 
 test.describe('お描き中のモーダル保護', () => {

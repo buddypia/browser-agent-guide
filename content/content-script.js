@@ -1605,13 +1605,14 @@
       document.querySelectorAll(`[${ATTR.anno}]`).forEach((el) => el.remove());
       document.querySelectorAll(`[${ATTR.annoMarked}]`).forEach((el) => {
         el.removeAttribute(ATTR.annoMarked);
-        el.removeAttribute(ATTR.annoOutline);
         // 目印が付与していた intent はクリア(再付与する)
         if (el.getAttribute(ATTR.intentSrc) === 'marker') {
           el.removeAttribute(ATTR.intent);
           el.removeAttribute(ATTR.intentSrc);
         }
       });
+      // 補足(note)の赤枠と目印の枠線。annoMarkedを持たないnote分も含め一括で外す。
+      document.querySelectorAll(`[${ATTR.annoOutline}]`).forEach((el) => el.removeAttribute(ATTR.annoOutline));
 
       // お描きの永続レイヤとピンを一旦破棄して再構築する。
       // 古い content-script インスタンス由来の点線コネクタは data-bag-anno を持たないため、
@@ -1689,6 +1690,8 @@
     tip.textContent = a.note || '';
     pin.appendChild(tip);
     if (target && a.placement !== 'floating') {
+      // 補足を付けた要素は赤枠で囲み、対象がひと目で分かるようにする(旧noteレコードも一律に囲む)。
+      target.setAttribute(ATTR.annoOutline, 'note');
       target.insertAdjacentElement('afterend', pin);
     } else {
       pin.classList.add('bag-floating');
@@ -1867,28 +1870,13 @@
     const wrap = document.createElement('div');
     wrap.className = 'bag-author';
     wrap.setAttribute(ATTR.ui, '1');
+    // 補足はAI向けの指示1つに絞る。種類(コメント/目印/合図ボタン)や名前欄は出さない。
     wrap.innerHTML = `
       <div class="bag-author-head">${escapeHtml(t('cs.author.addNote'))}</div>
       <div class="bag-author-target">${escapeHtml(t('cs.author.target'))} <b>${escapeHtml(truncate(heading, 40))}</b> <span class="muted">&lt;${escapeHtml(anchor.role)}&gt;</span></div>
       <label class="bag-author-row">
-        <span>${escapeHtml(t('cs.author.kind'))}</span>
-        <select data-f="kind">
-          <option value="note">${escapeHtml(t('cs.author.kindNote'))}</option>
-          <option value="marker">${escapeHtml(t('cs.author.kindMarker'))}</option>
-          <option value="button">${escapeHtml(t('cs.author.kindButton'))}</option>
-        </select>
-      </label>
-      <label class="bag-author-row" data-for="marker button">
-        <span>${escapeHtml(t('cs.author.label'))}</span>
-        <input data-f="label" placeholder="${escapeHtml(t('cs.author.labelPlaceholder'))}" />
-      </label>
-      <label class="bag-author-row" data-for="note">
-        <span>${escapeHtml(t('cs.author.comment'))}</span>
-        <textarea data-f="note" rows="2" placeholder="${escapeHtml(t('cs.author.commentPlaceholder'))}"></textarea>
-      </label>
-      <label class="bag-author-row">
-        <span>${escapeHtml(t('cs.author.intent'))}</span>
-        <input data-f="intent" placeholder="${escapeHtml(t('cs.author.intentPlaceholder'))}" />
+        <span>${escapeHtml(t('cs.author.aiContent'))}</span>
+        <textarea data-f="note" rows="3" placeholder="${escapeHtml(t('cs.author.aiContentPlaceholder'))}"></textarea>
       </label>
       <div class="bag-author-actions">
         <button data-f="cancel" type="button">${escapeHtml(t('cs.author.cancel'))}</button>
@@ -1899,38 +1887,29 @@
     setupAuthoringDrag(wrap);
     authoringEl = wrap;
 
-    const kindSel = wrap.querySelector('[data-f="kind"]');
-    const syncRows = () => {
-      const k = kindSel.value;
-      wrap.querySelectorAll('[data-for]').forEach((row) => {
-        row.style.display = row.getAttribute('data-for').split(' ').includes(k) ? '' : 'none';
-      });
-      requestAnimationFrame(() => clampAuthoringIntoViewport(wrap));
-    };
+    // 既存編集時はAI向けの内容を初期表示する。noteは本文、marker/buttonは目的(intent)が
+    // AI向けの中身なので、種類に応じて1欄に出し入れする(名前/ラベルは識別子なので保持して触らない)。
     if (existing) {
-      kindSel.value = existing.kind;
-      wrap.querySelector('[data-f="label"]').value = existing.label || existing.name || '';
-      wrap.querySelector('[data-f="note"]').value = existing.note || '';
-      wrap.querySelector('[data-f="intent"]').value = existing.intent || '';
+      const seed = existing.kind === 'note' ? existing.note : existing.intent || existing.note;
+      wrap.querySelector('[data-f="note"]').value = seed || '';
     }
-    syncRows();
-    kindSel.addEventListener('change', syncRows);
+    requestAnimationFrame(() => clampAuthoringIntoViewport(wrap));
     wrap.querySelector('[data-f="cancel"]').addEventListener('click', closeAuthoring);
     wrap.querySelector('[data-f="save"]').addEventListener('click', async () => {
-      const kind = kindSel.value;
-      const label = wrap.querySelector('[data-f="label"]').value.trim();
-      const note = wrap.querySelector('[data-f="note"]').value.trim();
-      const intent = wrap.querySelector('[data-f="intent"]').value.trim();
+      const value = wrap.querySelector('[data-f="note"]').value.trim();
+      // 新規・noteは赤枠付きの補足。既存のmarker/button編集時は体裁を保ち、AI向けの内容(intent)だけ更新する。
+      const kind = existing?.kind || 'note';
+      const isNote = kind === 'note';
       await upsertAnnotation({
         id: existing?.id,
         kind,
         anchor,
-        label: kind === 'note' ? '' : label,
-        name: kind === 'marker' ? label || anchor.text || anchor.tag : '',
-        note,
-        intent,
-        outline: kind === 'marker',
-        placement: kind === 'button' && existing?.placement === 'floating' ? 'floating' : undefined,
+        label: isNote ? '' : existing?.label || '',
+        name: isNote ? '' : existing?.name || '',
+        note: isNote ? value : existing?.note || '',
+        intent: isNote ? '' : value,
+        outline: isNote ? true : Boolean(existing?.outline),
+        placement: isNote ? undefined : existing?.placement,
       });
       closeAuthoring();
       toast(t('cs.toast.noteSaved'), 'success');
@@ -3524,12 +3503,8 @@
       <div class="bag-author-target">${escapeHtml(t('cs.author.target'))} <b>${escapeHtml(truncate(heading, 40))}</b> <span class="muted">&lt;${escapeHtml(anchor.role || anchor.tag || '')}&gt;</span></div>
       <div class="bag-author-target">${escapeHtml(t('cs.author.drawing'))} ${escapeHtml(describeShapes(draft.shapes))}</div>
       <label class="bag-author-row">
-        <span>${escapeHtml(t('cs.author.comment'))}</span>
-        <textarea data-f="note" rows="2" placeholder="${escapeHtml(t('cs.author.commentPlaceholder'))}"></textarea>
-      </label>
-      <label class="bag-author-row">
-        <span>${escapeHtml(t('cs.author.intent'))}</span>
-        <input data-f="intent" placeholder="${escapeHtml(t('cs.author.intentPlaceholder'))}" />
+        <span>${escapeHtml(t('cs.author.aiContent'))}</span>
+        <textarea data-f="note" rows="3" placeholder="${escapeHtml(t('cs.author.aiContentPlaceholder'))}"></textarea>
       </label>
       <div class="bag-author-actions">
         <button data-f="cancel" type="button">${escapeHtml(t('cs.author.cancel'))}</button>
@@ -3541,18 +3516,16 @@
     setupAuthoringDrag(wrap);
     authoringEl = wrap;
     if (draft.note) wrap.querySelector('[data-f="note"]').value = draft.note;
-    if (draft.intent) wrap.querySelector('[data-f="intent"]').value = draft.intent;
     wrap.querySelector('[data-f="cancel"]').addEventListener('click', closeAuthoring);
     wrap.querySelector('[data-f="save"]').addEventListener('click', async () => {
       const note = wrap.querySelector('[data-f="note"]').value.trim();
-      const intent = wrap.querySelector('[data-f="intent"]').value.trim();
       const saved = await upsertAnnotation({
         id: draft.id,
         kind: 'drawing',
         anchor,
         shapes: draft.shapes,
         note,
-        intent,
+        intent: draft.intent || '', // 旧データのintentは保持(フォームでは編集しない)
         forAI: draft.forAI !== false, // 既存のforAIを保持(未設定はON)
       });
       closeAuthoring();

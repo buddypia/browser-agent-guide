@@ -799,4 +799,47 @@ test.describe('お描き連動のAIメモ', () => {
     await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'LIST_ANNOTATIONS' }, {}, r)));
     await expect(page.locator('.bag-memo-text')).toHaveValue('見出しをみじかく');
   });
+
+  // 回帰ガード: 補足フォームを1欄化した後も、AIが作った目印(marker)を編集すると目的(intent)が
+  // その1欄に出て編集でき、保存しても種類・名前・枠線は保持される(空欄化・データ破壊しない)。
+  test('AI作成の目印を簡素化フォームで編集してもintentを編集でき、種類/名前は保持される', async ({ page }) => {
+    await page.evaluate(() => {
+      const scope = location.origin + location.pathname;
+      window.__store.aiAdvisorAnnotations = {
+        [scope]: [
+          {
+            id: 'marker-1',
+            kind: 'marker',
+            createdAt: new Date().toISOString(),
+            name: '送信ボタン',
+            intent: 'フォームを送信する',
+            outline: true,
+            anchor: { selector: '#target', tag: 'button', role: 'button', text: 'CTAボタン' },
+          },
+        ],
+      };
+    });
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'LIST_ANNOTATIONS' }, {}, r)));
+
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'EDIT_ANNOTATION', id: 'marker-1' }, {}, r)));
+    const author = page.locator('.bag-author');
+    await expect(author).toBeVisible();
+    // 1欄(AI向けの内容)に目印の目的(intent)が出る。種類セレクタは無い。空欄ではない。
+    await expect(author.locator('[data-f="kind"]')).toHaveCount(0);
+    await expect(author.locator('[data-f="note"]')).toHaveValue('フォームを送信する');
+
+    await author.locator('[data-f="note"]').fill('フォームを正しく送信する');
+    await author.locator('[data-f="save"]').click();
+    await expect(author).toHaveCount(0);
+
+    const saved = await page.evaluate(() => {
+      const map = window.__store.aiAdvisorAnnotations || {};
+      const scope = location.origin + location.pathname;
+      return (map[scope] || []).find((a) => a.id === 'marker-1');
+    });
+    expect(saved.kind).toBe('marker'); // noteに化けない
+    expect(saved.name).toBe('送信ボタン'); // 識別子(名前)は保持
+    expect(saved.intent).toBe('フォームを正しく送信する'); // AI向けの内容を更新
+    expect(saved.outline).toBe(true); // 目印の枠線体裁を保持
+  });
 });

@@ -6,10 +6,11 @@
 
 ---
 
-**Browser Agent Guide** is a Chrome (Manifest V3) extension that lets **non-engineers** add notes, markers,
-cue-buttons, and **drawings (circle/box/arrow/freehand around an element)** to any web page **just by
-clicking** — so a browser-operating AI (this extension's chat, or an external AI chat UI) understands the
-page context and behaves deterministically.
+**Browser Agent Guide** is a Chrome (Manifest V3) extension that lets **non-engineers** add notes and
+**drawings (circle/box/arrow/freehand around an element)** to any web page **just by clicking** — so a
+browser-operating AI (this extension's chat, or an external AI chat UI) understands the page context and
+behaves deterministically. (Markers and cue-buttons still exist, but are added by the AI through its verb
+registry rather than the click-to-add form.)
 
 Annotations are **persisted per page (origin + path)** and **restored on every visit** (reproducibility),
 and each target element is re-resolved through a **robust multi-signal anchor** (stable-ID path,
@@ -80,7 +81,7 @@ the selected URL / domain / all-sites scope and any durable re-apply rules are r
 Saved visual changes such as `outlineElement` re-apply after page refresh. To revert them, delete the
 matching remembered URL or memory rule in Settings, then refresh the page.
 
-Toolbar: **＋補足を付ける/Add context** (save notes, markers, or cue buttons) ·
+Toolbar: **＋補足を付ける/Add context** (click an element to attach one AI-facing note; the target is framed in red) ·
 **お描き/Draw** (circle/box/arrow/freehand a target and attach a comment) ·
 **文脈をコピー/Copy context** · **手がかり/Affordances** (list interactive elements) ·
 **履歴/History** (reuse sent prompts, also via ↑/↓ at the textarea edge) · **設定/Settings**.
@@ -88,7 +89,7 @@ Toolbar: **＋補足を付ける/Add context** (save notes, markers, or cue butt
 ### Drawing (circle/box/arrow/freehand around an element)
 
 Press **🖍 お描き/Draw** to enter drawing mode and sketch on the page (◯circle / ▭box / ↗arrow / ✎pen +
-color), then **Done** to attach a comment and an AI-facing purpose. Each drawing is **anchored to the
+color), then **Done** to attach a single AI-facing instruction. Each drawing is **anchored to the
 element it encircles**; coordinates are stored as **fractions of the element's box**, so the sketch
 follows the element and is **restored at the same place on revisit, scroll, and reflow**. The AI receives
 a plain-language description (e.g. *"circled in red. comment: …"*), so "look here / fix this circled part"
