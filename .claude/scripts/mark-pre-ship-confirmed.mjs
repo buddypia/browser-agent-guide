@@ -32,8 +32,7 @@
  *   0 — 마커 생성 성공
  *   1 — 인자 누락 / git common-dir resolve 실패 / mkdir/touch 실패
  *
- * Boundary (R-CM-028): 관점 1 (brief2dev 자체) 전용. 관점 2 는 pre-ship-review-guard
- * 가 scaffold target 에 미배포 (R-CM-030 Rule 11 boundary-divergent).
+ * Used by the local pre-ship review guard to record explicit confirmation.
  */
 
 import { execSync } from 'node:child_process';
@@ -46,7 +45,6 @@ import {
   safeBranchKey,
 } from './lib/worktree-plan-path.mjs';
 import { VALID_QUALITY_LABELS } from './lib/quality-gate-labels.mjs';
-import { parseUnchecked } from './create-pr/ops.mjs';
 
 /**
  * git common-dir 의 부모를 main project root 로 resolve.
@@ -131,16 +129,12 @@ export function createMarker(path, content = '') {
 }
 
 /**
- * PLAN.md 미완료 체크박스 사전 검사 — ops.mjs verify-plan 과 같은 SSOT (parseUnchecked) 재사용.
+ * PLAN.md 미완료 체크박스 사전 검사.
  *
  * Why (R-CM-029 Rule 3 Proposal-stage 의무):
- *   (a) 위협: PR #303 ship 단계에서 PLAN.md `- [ ]` 토글 누락으로 ops.mjs verify-plan
- *       차단 → 1 round-trip 발생. AI 가 verification 통과 → commit → marker 생성 → ship
- *       흐름에서 PLAN.md 토글 단계를 silently SKIP 가능.
- *   (b) 기존 갭: ops.mjs verify-plan 은 ship 호출 시점만 차단. 마커 생성 시점은
- *       검사 부재 → round-trip 발생 후 차단.
- *   (c) 더 단순한 대안: 본 함수가 한 phase 빠른 시점에 차단 + ops.mjs 의 parseUnchecked
- *       재사용으로 SSOT 1개 유지.
+ *   (a) 위협: PLAN.md `- [ ]` 토글 누락 후 marker 생성까지 진행되어, 이후 단계에서
+ *       뒤늦게 차단될 수 있다.
+ *   (b) 대응: marker 생성 시점に PLAN.md を先に検査する。
  *
  * 정책:
  *   - branch=null (staged 모드) → skip (ship-feature 모드, worktree 부재)
@@ -181,6 +175,19 @@ export function checkPlanCheckboxes(mainRoot, branch, force) {
   const unchecked = parseUnchecked(content);
   if (unchecked.length === 0) return { ok: true };
   return { ok: false, unchecked, planPath };
+}
+
+function stripIgnoredSections(content) {
+  return content
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
+}
+
+const UNCHECKED_RE =
+  /^[\s]*[-*]\s\[\s\](?!.*(?:\(취소됨[^)]*\)|\(dropped[^)]*\)|\(Dropped[^)]*\)|\(deferred[^)]*\)|\(Deferred[^)]*\)|~~)).*$/gm;
+
+export function parseUnchecked(content) {
+  return stripIgnoredSections(content).match(UNCHECKED_RE) || [];
 }
 
 /**

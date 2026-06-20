@@ -214,8 +214,8 @@ export function readSessionOwner(worktreePath, branch = null) {
  *     Codex/Antigravity 는 worktree 로 cd 하여 작업하므로(cwd=worktree) 이 축으로 자기 worktree 를
  *     판정한다. session_id 가 stdin 에 없는 CLI 에서도 shipping nag 가 유지되는 핵심.
  *   Layer 2 — session_id 사이드카: `.session-owner` === 현재 session_id 면 'owned'.
- *     brief2dev Claude Code 는 cwd=main 고정(learnings bash-cwd-reset-worktree)이라 사이드카가
- *     유일한 소유 신호다. `make wt.new` 가 항상 사이드카를 남기므로 단일 세션은 정상 'owned'.
+ *     Some CLI sessions run from main, so the sidecar is the ownership signal.
+ *     `make wt.new` leaves the sidecar, so a single session is normally 'owned'.
  *   사이드카 owner 가 존재하나 현재 session_id 와 불일치 → 'other' (타 세션 소유).
  *   둘 다 미확정(사이드카 부재 + cwd 불일치, 또는 session_id 부재) → 'orphan'.
  *
@@ -399,12 +399,11 @@ export function buildBlockMessage(projectDir, candidates) {
   lines.push('');
   lines.push('  질문: PR을 생성하고 squash merge 후 worktree/branch/stash cleanup까지 진행할까요?');
   lines.push('');
-  lines.push('  OPS="node .claude/scripts/create-pr/ops.mjs"');
   for (const c of candidates.filter((item) => item.commits > 0 && !item.commit_required)) {
     const rel = relativizePath(c.path, projectDir);
-    lines.push(`  $OPS verify-plan --worktree "${rel}"`);
+    lines.push(`  # Verify PLAN.md checklist in "${rel}" before shipping.`);
     lines.push(`  node .claude/scripts/mark-pre-ship-confirmed.mjs "${c.branch}" --quality self_review_pass`);
-    lines.push(`  $OPS ship-worktree --worktree "${rel}" --title "<Conventional Commits>" --body "<요약>"`);
+    lines.push(`  # Then open the PR and merge only after user confirmation.`);
   }
   // Layer 2 — base staleness 경고 (BLOCK 추가 X — ship 시점 non-FF 가 차단 담당)
   const stale = candidates.filter((c) => Array.isArray(c.stale_reasons) && c.stale_reasons.length);

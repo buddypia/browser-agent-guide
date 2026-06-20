@@ -19,19 +19,7 @@ make q.check                      # root npm run check + daemon npm test
 Tracked source changes should be made in an owned worktree, normally
 `.worktrees/<branch>`. Do not commit directly on `main`, do not use raw
 `git worktree add` as the normal entrypoint, and do not edit or commit another
-session's worktree. See `AGENTS.md` and `docs/worktree-ecosystem.md` for the
-transplanted worktree safety workflow.
-
-**Worktree Review Report Gate** (local addition, R-CM-030): once you have committed
-work in an owned worktree, a `Stop` hook (`worktree-review-report-guard`, mirrored to
-Codex) BLOCKs until a human-reviewable `REVIEW.md` exists at
-`<worktree>/.tmp/worktree-<safeBranch>/REVIEW.md` with all 9 sections filled (Summary,
-Why, Changed Files, How, Impact, Trade-offs, Remaining Work, File Structure, Review
-Requests) and stamped to the current HEAD. Scaffold/validate with
-`node .claude/scripts/mark-worktree-reviewed.mjs <branch> [--scaffold]`. `.tmp/` is
-gitignored so the report never merges. This enforces *output* of the review (closing
-the marker-only bypass that `pre-ship-review-guard` documents); ship still goes through
-`/create-pr ship-worktree` after approval.
+session's worktree.
 
 ### Extension (repo root)
 ```bash

@@ -515,8 +515,7 @@ export async function run(data) {
           `[Destructive Git Guard] 직접 worktree branch fast-forward merge가 차단되었습니다.\n\n` +
           `차단된 merge target: ${result.matched}\n` +
           `이유: ${result.description}\n\n` +
-          `worktree shipping은 /create-pr ship-worktree 또는 ` +
-          `node .claude/scripts/create-pr/ops.mjs ship-worktree --worktree <path> 경로만 사용하세요.`
+          `worktree shipping은 사용자 확인 후 PR 경로로만 진행하세요.`
         );
       }
 

@@ -65,8 +65,7 @@ export function isChainedCommand(command) {
 
 // SSOT: branch parsing + escape 변형 정규화 + 마커 경로는 worktree-plan-path.mjs.
 // 본 hook 은 marker key 산출에 같은 정규화 결과를 사용해야 worktree-shipping-guard +
-// create-pr/ops.mjs#resolveWorktreePlanPath + mark-pre-ship-confirmed.mjs (CLI) 와
-// 일관된 branch 식별자 + 마커 경로가 보장된다 (R-CM-024).
+// mark-pre-ship-confirmed.mjs (CLI) 와 일관된 branch 식별자 + 마커 경로가 보장된다.
 import {
   safeBranchKey,
   inferBranchFromWorktreePath,
