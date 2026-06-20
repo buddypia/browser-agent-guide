@@ -14,12 +14,6 @@
             "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/agent-worktree-guard.mjs\" session-start",
             "timeout": 10,
             "statusMessage": "Agent Worktree Guard: loading ledger"
-          },
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/worktree-system-symlink-guard.mjs\"",
-            "timeout": 5,
-            "statusMessage": "Worktree System: checking shared state"
           }
         ]
       }

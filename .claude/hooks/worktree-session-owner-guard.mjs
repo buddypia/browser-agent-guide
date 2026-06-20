@@ -123,11 +123,9 @@ export async function run(data) {
     const action = toolName === 'Bash' ? 'commit' : 'edit';
 
     // ── Layer 1: cross-worktree confinement (cwd 가 *다른* worktree 일 때만 deny) ──
-    // brief2dev Claude Code 의 Edit/Bash cwd 는 항상 main(PROJECT_DIR) 로 고정된다
-    // (learnings bash-cwd-reset-worktree) — 단일 세션이 main cwd 에서 자기 worktree 를
-    // 편집하는 것이 *정상* 워크플로다. 따라서 cwd=main(null) 은 deny 하지 않고
-    // Layer 2(session_id 사이드카)로 위임한다. cwd 가 *다른 worktree* 인 경우만
-    // cross-worktree 침범으로 차단한다 (trip-jarvis 멀티-cd 세션 시나리오).
+    // Some CLI sessions run Edit/Bash from main(PROJECT_DIR) while targeting
+    // their owned worktree. That is allowed and checked by Layer 2. Only a cwd
+    // inside a different worktree is treated as cross-worktree access.
     const cwdWt = resolveWorktreeRoot(data?.cwd || '');
     if (cwdWt !== null && cwdWt !== wtRoot) {
       return HookOutput.deny(

@@ -14,7 +14,7 @@
  * (운영 검증된 구현). apply_patch heredoc 의 `*** Add|Update|Delete File:` / `*** Move to:`
  * 라인 파싱 + invocation fallback.
  *
- * Boundary: 관점 1 (brief2dev 자체) 전용 — worktree 가드 hook 은 scaffold 미배포 (R-CM-028).
+ * Used by local worktree guard hooks.
  */
 
 import { isAbsolute, join } from 'path';

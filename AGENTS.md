@@ -19,8 +19,7 @@ make q.check                      # root npm run check + daemon npm test
 Tracked source changes should be made in an owned worktree, normally
 `.worktrees/<branch>`. Do not commit directly on `main`, do not use raw
 `git worktree add` as the normal entrypoint, and do not edit or commit another
-session's worktree. See `AGENTS.md` and `docs/worktree-ecosystem.md` for the
-transplanted worktree safety workflow.
+session's worktree.
 
 ### Extension (repo root)
 ```bash

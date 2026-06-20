@@ -4,8 +4,8 @@
 
 ### 0.0 Project Context
 
-This feature changes brief2dev itself. The target is the repository root, not a
-generated project under `output/<slug>`.
+This feature changes this repository directly. The target is the repository
+root, not a generated project under `output/<slug>`.
 
 ### 0.1 Target Files
 

@@ -7,8 +7,7 @@
  *
  * branch namespace 격리로 병렬 worktree 작업 충돌도 자연스럽게 해소된다.
  *
- * Boundary (R-CM-028): 관점 1 (brief2dev 자체) 만 적용. 관점 2 (scaffold 내부
- * feature-pilot 의 CONTEXT.json#execution.worktree.plan_path) 는 별도.
+ * This helper applies to local worktree sessions in this repository.
  */
 
 import { basename, join } from 'node:path';
@@ -22,7 +21,7 @@ export function safeBranchKey(branch) {
 }
 
 // GitHub Flow branch prefix — `.worktrees/<prefix>__name` escape 변형 reverse 대상.
-// `release/*` `support/*` 는 의도적 미포함 (R-CM-008 Rule 4: brief2dev = GitHub Flow only, git-flow 거부).
+// `release/*` `support/*` 는 의도적 미포함 (GitHub Flow only).
 // 사용자 정의 brand prefix 추가 시 본 배열 갱신 + tests/unit/worktree-plan-path.test.mjs 회귀 케이스 추가.
 // worktree-path.mjs#resolveWorktreeRoot 도 본 배열을 import (R-CM-037 2-세그먼트 판정 SSOT 공유).
 export const KNOWN_BRANCH_PREFIXES = ['feature', 'fix', 'hotfix', 'chore', 'refactor', 'docs', 'test'];
@@ -54,7 +53,7 @@ function reverseEscapeIfKnownPrefix(segment) {
  *   `<a>/<b>`                            → `<a>/<b>` (마지막 2 segments)
  *
  * pre-ship-review-guard.mjs 는 본 함수를 import 한다 (SSOT). worktree-shipping-guard +
- * create-pr/ops.mjs 도 `resolveWorktreePlanPath` 를 통해 본 함수에 의존.
+ * Local worktree helpers depend on this path convention.
  */
 export function inferBranchFromWorktreePath(wtPath) {
   if (!wtPath) return null;
