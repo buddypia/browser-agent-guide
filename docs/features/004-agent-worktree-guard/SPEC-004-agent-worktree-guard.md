@@ -142,6 +142,7 @@ natural-language instructions.
 | FR-00405 | Prompt for PR confirmation after all work is complete. | `audit`/Stop emits a generated work briefing plus the exact Japanese/Korean prompt until `confirm-pr --confirmed`. |
 | FR-00406 | Cleanup only owned, merged ledger worktrees. | `cleanup --confirmed` verifies marker/session/root, requires `pr_merged_at`, and leaves unregistered worktrees alone. |
 | FR-00407 | Support Antigravity CLI hooks. | `.agents/hooks.json` wires SessionStart/PreToolUse/PostToolUse/Stop for `run_command` through the shared guard. |
+| FR-00408 | Register standard worktree entrypoints. | Successful `make wt.new BR=...` / `worktree-new.mjs --branch ...` PostToolUse events create the same ledger owner marker used by cleanup. |
 
 ## 3. Verification
 

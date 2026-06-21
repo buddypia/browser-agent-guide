@@ -31,6 +31,11 @@ agent-worktree-guard status
 `.tmp/.agent_worktree_owner.json` inside the new worktree, and adds a pending
 line to `.tmp/.worktree_status.md`.
 
+Successful standard worktree creation commands such as `make wt.new
+BR=feature/x` and `worktree-new.mjs --branch feature/x` are also registered from
+the PostToolUse hook. That keeps the cleanup ledger aligned with the normal
+Claude/Codex/Antigravity worktree entrypoint.
+
 `confirm-pr --confirmed` is the deterministic marker the AI must run only after
 it has briefed the work and the human answered Yes / 進行 to PR creation.
 
@@ -70,7 +75,8 @@ generated `.claude/settings.json` includes:
   the human PR confirmation marker exists.
 - `PostToolUse` for Bash: mark ledger worktrees done after successful
   `git commit`, `git push`, or `gh pr create`; record merge after successful
-  `gh pr merge`.
+  `gh pr merge`; register successful standard worktree creation commands so
+  cleanup is scoped to the current CLI session.
 - `Stop`: if every ledger worktree is done, continue the agent with a generated
   work briefing and the exact PR question until `confirm-pr --confirmed`; after
   confirmation it continues until merge is recorded; after merge it continues
@@ -113,6 +119,8 @@ block `git push --no-verify` in AI tool calls.
 - Cleanup never touches a path absent from the current session ledger.
 - Cleanup never touches a path without a matching owner marker.
 - Cleanup never touches an owned worktree until PR merge is recorded.
+- Standard `make wt.new` worktrees enter the ledger from the successful hook
+  event, so cleanup removes only worktrees created or registered by that session.
 - Worktree inspection uses `git worktree list --porcelain -z`.
 - Hook command parsing uses `shlex` tokenization and Git argument structure for
   common shell command forms, but shell hooks remain defense in depth rather

@@ -953,6 +953,50 @@ def gh_pr_action(tokens: list[str]) -> str | None:
     return None
 
 
+def worktree_create_branch(command: str) -> str | None:
+    for tokens in shell_segments(command):
+        for token in tokens:
+            if token.startswith("BR=") and len(token) > 3:
+                return token[3:]
+            if token.startswith("BRANCH=") and len(token) > 7:
+                return token[7:]
+        for flag in ("--branch", "-b"):
+            if flag in tokens:
+                idx = tokens.index(flag)
+                if idx + 1 < len(tokens):
+                    return tokens[idx + 1]
+        gargs = git_invocation(tokens)
+        if gargs and len(gargs) >= 2 and gargs[0] == "worktree" and gargs[1] == "add":
+            for flag in ("-b", "-B"):
+                if flag in gargs:
+                    idx = gargs.index(flag)
+                    if idx + 1 < len(gargs):
+                        return gargs[idx + 1]
+            positional = [arg for arg in gargs[2:] if not arg.startswith("-")]
+            if len(positional) >= 2:
+                return positional[-1]
+    return None
+
+
+def maybe_register_created_worktree(root: Path, session_id: str, ledger: dict[str, Any], command: str) -> dict[str, Any] | None:
+    branch = worktree_create_branch(command)
+    if not branch:
+        return None
+    known = {
+        real(Path(str(wt["path"]))): wt
+        for wt in list_git_worktrees(root)
+        if wt.get("path") and wt.get("branch") == branch
+    }
+    if not known:
+        return None
+    wt_path = Path(next(iter(known))).resolve(strict=False)
+    marker = write_owner_marker(root, session_id, wt_path, branch, None)
+    upsert_worktree(ledger, path=wt_path, branch=branch, base=None, owner_marker=marker)
+    item = find_ledger_item(ledger, wt_path)
+    append_event(ledger, "register", {"path": real(wt_path), "branch": branch, "source": "hook"})
+    return item
+
+
 def rm_rf_targets(tokens: list[str]) -> list[str]:
     if not tokens or tokens[0] != "rm":
         return []
@@ -1097,14 +1141,18 @@ def hook_post_tool(args: argparse.Namespace) -> int:
     command = tool_input.get("command")
     if not isinstance(command, str):
         return hook_json({})
-    reason = classify_completion_reason(command)
-    if not reason:
-        return hook_json({})
     cwd = Path(str(data.get("cwd") or os.getcwd())).resolve(strict=False)
     try:
         root = resolve_guard_root(cwd)
         session_id = current_session_id(data, args.session_id)
         ledger = load_ledger(root, session_id, create=True)
+        created = maybe_register_created_worktree(root, session_id, ledger, command)
+        if created:
+            save_ledger(root, ledger)
+            render_status(root, ledger)
+        reason = classify_completion_reason(command)
+        if not reason:
+            return hook_json({})
         item = worktree_from_command_or_cwd(command, cwd, ledger)
         if item:
             verify_owner_marker(item, session_id, root)

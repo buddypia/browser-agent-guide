@@ -158,6 +158,44 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         self.assertTrue(outside.exists())
         subprocess.run(["git", "worktree", "remove", str(outside), "--force"], cwd=self.repo, check=True)
 
+    def test_post_tool_registers_standard_worktree_create(self) -> None:
+        wt = self.repo / ".worktrees" / "feature" / "hooked"
+        outside = self.repo / ".worktrees" / "feature" / "outside"
+
+        run(["init"], self.repo)
+        subprocess.run(["git", "worktree", "add", str(wt), "-b", "feature/hooked"], cwd=self.repo, check=True, stdout=subprocess.PIPE)
+        subprocess.run(["git", "worktree", "add", str(outside), "-b", "feature/outside"], cwd=self.repo, check=True, stdout=subprocess.PIPE)
+
+        payload = json.dumps(
+            {
+                "session_id": SESSION,
+                "cwd": str(self.repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "make wt.new BR=feature/hooked"},
+                "tool_response": {"exit_code": 0},
+            }
+        )
+        run(["hook", "post-tool"], self.repo, stdin=payload)
+
+        ledger = json.loads((self.repo / ".tmp/worktree-guard-ledger/test-session.json").read_text())
+        self.assertEqual(len(ledger["worktrees"]), 1)
+        self.assertEqual(ledger["worktrees"][0]["branch"], "feature/hooked")
+        self.assertTrue((wt / ".tmp/.agent_worktree_owner.json").exists())
+
+        early_cleanup = run(["cleanup", "--confirmed"], self.repo, check=False)
+        self.assertNotEqual(early_cleanup.returncode, 0)
+        self.assertTrue(wt.exists())
+        self.assertTrue(outside.exists())
+
+        run(["mark-done", str(wt), "--reason", "manual"], self.repo)
+        run(["confirm-pr", "--confirmed"], self.repo)
+        run(["mark-merged", str(wt)], self.repo)
+        cleanup = run(["cleanup", "--confirmed"], self.repo)
+        self.assertIn("cleaned 1 worktree", cleanup.stdout)
+        self.assertFalse(wt.exists())
+        self.assertTrue(outside.exists())
+        subprocess.run(["git", "worktree", "remove", str(outside), "--force"], cwd=self.repo, check=True)
+
 
 if __name__ == "__main__":
     unittest.main()
