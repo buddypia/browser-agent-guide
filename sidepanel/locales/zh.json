@@ -315,10 +315,10 @@
   "opt.backup.h2": "备份",
   "opt.backup.export": "导出",
   "opt.backup.import": "导入",
-  "toolbar.markGroup": "在页面做标记",
-  "toolbar.inspectGroup": "查看·导出",
+  "toolbar.markGroup": "备注·绘制",
+  "toolbar.inspectGroup": "查看·复制",
   "empty.chipShorten": "把标题改短",
   "empty.chipEmphasize": "让这个按钮更醒目",
-  "empty.chipMark": "先标记目标…",
+  "empty.chipMark": "从批注开始…",
   "empty.startPointer": "↓ 在下方输入并发送"
 }

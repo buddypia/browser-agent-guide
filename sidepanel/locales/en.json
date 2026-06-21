@@ -315,10 +315,10 @@
   "opt.backup.h2": "Backup",
   "opt.backup.export": "Export",
   "opt.backup.import": "Import",
-  "toolbar.markGroup": "Mark the page",
-  "toolbar.inspectGroup": "Inspect & export",
+  "toolbar.markGroup": "Notes & drawings",
+  "toolbar.inspectGroup": "Inspect & copy",
   "empty.chipShorten": "Shorten the heading",
   "empty.chipEmphasize": "Make this button stand out",
-  "empty.chipMark": "Mark a target first…",
+  "empty.chipMark": "Start with a note…",
   "empty.startPointer": "↓ Type below and Send"
 }

@@ -315,10 +315,10 @@
   "opt.backup.h2": "バックアップ",
   "opt.backup.export": "エクスポート",
   "opt.backup.import": "インポート",
-  "toolbar.markGroup": "ページに目印",
-  "toolbar.inspectGroup": "調べる・書き出す",
+  "toolbar.markGroup": "補足・お描き",
+  "toolbar.inspectGroup": "確認・コピー",
   "empty.chipShorten": "見出しを短く",
   "empty.chipEmphasize": "このボタンを目立たせて",
-  "empty.chipMark": "まず目印を付ける…",
+  "empty.chipMark": "補足から始める…",
   "empty.startPointer": "↓ 下に入力して送信"
 }
