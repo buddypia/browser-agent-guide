@@ -315,10 +315,10 @@
   "opt.backup.h2": "백업",
   "opt.backup.export": "내보내기",
   "opt.backup.import": "가져오기",
-  "toolbar.markGroup": "페이지에 표시",
-  "toolbar.inspectGroup": "확인·내보내기",
+  "toolbar.markGroup": "메모·그리기",
+  "toolbar.inspectGroup": "확인·복사",
   "empty.chipShorten": "제목을 짧게",
   "empty.chipEmphasize": "이 버튼을 강조",
-  "empty.chipMark": "먼저 대상에 표시…",
+  "empty.chipMark": "메모부터 시작…",
   "empty.startPointer": "↓ 아래에 입력하고 보내기"
 }
