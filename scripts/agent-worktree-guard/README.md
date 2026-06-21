@@ -20,6 +20,8 @@ agent-worktree-guard init
 agent-worktree-guard add <path> [base]
 agent-worktree-guard register <path>
 agent-worktree-guard mark-done <path> --reason <commit|push|pr|manual>
+agent-worktree-guard confirm-pr --confirmed
+agent-worktree-guard mark-merged [path] [--pr <number-or-url>]
 agent-worktree-guard audit
 agent-worktree-guard cleanup --confirmed
 agent-worktree-guard status
@@ -29,9 +31,23 @@ agent-worktree-guard status
 `.tmp/.agent_worktree_owner.json` inside the new worktree, and adds a pending
 line to `.tmp/.worktree_status.md`.
 
-`cleanup` refuses to run without `--confirmed`. It removes only ledger entries
-whose owner marker matches the same session and ledger root. It uses
-`git worktree remove` first; `--force` is a separate explicit flag.
+Successful standard worktree creation commands such as `make wt.new
+BR=feature/x` and `worktree-new.mjs --branch feature/x` are also registered from
+the PostToolUse hook. That keeps the cleanup ledger aligned with the normal
+Claude/Codex/Antigravity worktree entrypoint.
+
+`confirm-pr --confirmed` is the deterministic marker the AI must run only after
+it has briefed the work and the human answered Yes / 進行 to PR creation.
+
+`mark-merged` is a recovery command for cases where a successful `gh pr merge`
+was not observed by the PostToolUse hook. Normal Claude/Codex/Antigravity
+sessions record merge automatically after a successful `gh pr merge`.
+
+`cleanup` refuses to run without `--confirmed`, and it also refuses to remove a
+worktree until PR merge is recorded. It removes only ledger entries whose owner
+marker matches the same session and ledger root. It uses `git worktree remove`
+first; `--force` is a separate explicit Git worktree removal flag, not a policy
+bypass.
 
 ## Runtime Files
 
@@ -55,11 +71,16 @@ generated `.claude/settings.json` includes:
 
 - `SessionStart`: inject ledger state.
 - `PreToolUse` for Bash: block raw `git worktree add/remove`, `rm -rf` aimed at
-  Git worktree roots, and `git push --no-verify`.
+  Git worktree roots, `git push --no-verify`, and `gh pr create/merge` before
+  the human PR confirmation marker exists.
 - `PostToolUse` for Bash: mark ledger worktrees done after successful
-  `git commit`, `git push`, or `gh pr create`.
-- `Stop`: if every ledger worktree is done and PR confirmation has not happened,
-  continue the agent with the exact PR prompt.
+  `git commit`, `git push`, or `gh pr create`; record merge after successful
+  `gh pr merge`; register successful standard worktree creation commands so
+  cleanup is scoped to the current CLI session.
+- `Stop`: if every ledger worktree is done, continue the agent with a generated
+  work briefing and the exact PR question until `confirm-pr --confirmed`; after
+  confirmation it continues until merge is recorded; after merge it continues
+  until `cleanup --confirmed` removes the worktree.
 - `WorktreeCreate` / `WorktreeRemove`: route Claude `--worktree` lifecycle
   through the same ledger and owner-marker checks.
 
@@ -67,6 +88,11 @@ Codex is wired in `.codex/hooks.json` with the same SessionStart, PreToolUse,
 PostToolUse, and Stop behavior. Codex project hooks still require the normal
 Codex trust review, and shell interception is not a complete security boundary,
 so the wrapper CLI and Git hook are kept as additional layers.
+
+Antigravity is wired in `.agents/hooks.json` with the same shared guard for
+`run_command` SessionStart/PreToolUse/PostToolUse/Stop coverage. Local
+`.agents/config.json` remains ignored because `worktree-init.mjs` writes
+per-machine `GIT_WORK_TREE` / `GIT_DIR` values there.
 
 ## Git Hook
 
@@ -92,6 +118,9 @@ block `git push --no-verify` in AI tool calls.
 
 - Cleanup never touches a path absent from the current session ledger.
 - Cleanup never touches a path without a matching owner marker.
+- Cleanup never touches an owned worktree until PR merge is recorded.
+- Standard `make wt.new` worktrees enter the ledger from the successful hook
+  event, so cleanup removes only worktrees created or registered by that session.
 - Worktree inspection uses `git worktree list --porcelain -z`.
 - Hook command parsing uses `shlex` tokenization and Git argument structure for
   common shell command forms, but shell hooks remain defense in depth rather
@@ -102,3 +131,6 @@ block `git push --no-verify` in AI tool calls.
 すべてのworktreeの作業が完了しました。PR（プルリクエスト）を作成しますか？
 (모든 worktree 작업이 완료되었습니다. PR(풀 리퀘스트)을 생성하시겠습니까?)
 ```
+
+The hook output must also include the generated work briefing before that human
+decision, so the user can answer from evidence instead of a bare yes/no prompt.

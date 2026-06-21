@@ -4,8 +4,9 @@
 
 Implement a ledgered worktree guard for AI sessions. The guard must record only
 worktrees owned by the current session, block raw unsafe worktree operations in
-Claude/Codex hooks, update a local checklist after completion events, and allow
-cleanup only after explicit confirmation with matching owner markers.
+Claude/Codex/Antigravity hooks, update a local checklist after completion
+events, brief the completed work before asking whether to create a PR, and allow
+cleanup only after explicit confirmation, PR merge, and matching owner markers.
 
 ## Why
 
@@ -20,7 +21,7 @@ layers: wrapper CLI, Claude/Codex hooks, and a Git pre-push template.
 - Per-session ledger under `.tmp/worktree-guard-ledger/`.
 - Checklist under `.tmp/.worktree_status.md`.
 - Per-worktree owner marker under `.tmp/.agent_worktree_owner.json`.
-- Claude Code, Codex, and Git hook integration.
+- Claude Code, Codex, Antigravity, and Git hook integration.
 - Safety documentation and focused lifecycle tests.
 
 ## Out Of Scope

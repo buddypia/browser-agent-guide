@@ -24,6 +24,7 @@ root, not a generated project under `output/<slug>`.
 | `.claude/scripts/_migrations/generate-unified-registry.mjs` | Keep registry migration event allowlist aligned. |
 | `.claude/settings.json` | Generated hook settings from registry. |
 | `.codex/hooks.json` | Codex hook entries. |
+| `.agents/hooks.json` | Antigravity hook entries. |
 | `.githooks/pre-push` | Tracked Git pre-push template. |
 | `.gitignore` | Runtime ledger/status/marker ignore entries. |
 | `data/schemas/hook-registry.schema.json` | Accept official worktree lifecycle events in registry schema. |
@@ -62,10 +63,12 @@ Hook surfaces:
 | --- | --- | --- | --- |
 | Ledger | `session_id` | string | Sanitized hook/session id. |
 | Ledger | `pr_confirmation_prompted` | boolean | Whether the required PR prompt was already emitted. |
+| Ledger | `pr_confirmation_confirmed` | boolean | Whether a human Yes/進行 was recorded after the briefing. |
 | Ledger worktree | `path` | string | Absolute worktree path. |
 | Ledger worktree | `branch` | string/null | Checked out branch. |
 | Ledger worktree | `done` | boolean | Checklist completion state. |
 | Ledger worktree | `done_reason` | enum/null | `commit`, `push`, `pr`, or `manual`. |
+| Ledger worktree | `pr_merged_at` | string/null | UTC timestamp set only after successful PR merge or verified manual recovery. |
 | Owner marker | `session_id` | string | Owning session. |
 | Owner marker | `ledger_root` | string | Ledger root to prevent cross-repo cleanup. |
 | Owner marker | `worktree_path` | string | Worktree path the marker belongs to. |
@@ -87,7 +90,7 @@ No HTTP or application API changes.
 ### 0.7 AI Logic & Prompts
 
 When all ledger worktrees are complete and PR confirmation has not been
-prompted, the guard must emit exactly:
+confirmed, the guard must emit a generated work briefing and include exactly:
 
 ```text
 すべてのworktreeの作業が完了しました。PR（プルリクエスト）を作成しますか？
@@ -102,6 +105,7 @@ PreToolUse blocks:
 - raw `git worktree remove`
 - `rm -rf` aimed at a Git worktree root
 - `git push --no-verify`
+- `gh pr create` / `gh pr merge` before `confirm-pr --confirmed`
 
 ### 0.9 Observability
 
@@ -133,10 +137,12 @@ natural-language instructions.
 | --- | --- | --- |
 | FR-00401 | Provide `agent-worktree-guard` and `awtg` CLI wrappers. | `init`, `add`, `register`, `mark-done`, `audit`, `cleanup --confirmed`, and `status` run from the wrapper path. |
 | FR-00402 | Record only current-session worktrees. | Ledger entries are created only by `add`/`register`/hook-owned creation and include matching owner markers. |
-| FR-00403 | Enforce unsafe-operation blocks through hooks. | Claude/Codex PreToolUse denies raw worktree add/remove, worktree-root `rm -rf`, and `git push --no-verify`. |
+| FR-00403 | Enforce unsafe-operation blocks through hooks. | Claude/Codex/Antigravity PreToolUse denies raw worktree add/remove, worktree-root `rm -rf`, `git push --no-verify`, and PR create/merge before confirmation. |
 | FR-00404 | Update checklist after completion events. | `mark-done` and PostToolUse completion events set the Markdown item to `[x]`. |
-| FR-00405 | Prompt for PR confirmation after all work is complete. | `audit`/Stop emits the exact Japanese/Korean prompt once per ledger. |
-| FR-00406 | Cleanup only owned ledger worktrees. | `cleanup --confirmed` verifies marker/session/root and leaves unregistered worktrees alone. |
+| FR-00405 | Prompt for PR confirmation after all work is complete. | `audit`/Stop emits a generated work briefing plus the exact Japanese/Korean prompt until `confirm-pr --confirmed`. |
+| FR-00406 | Cleanup only owned, merged ledger worktrees. | `cleanup --confirmed` verifies marker/session/root, requires `pr_merged_at`, and leaves unregistered worktrees alone. |
+| FR-00407 | Support Antigravity CLI hooks. | `.agents/hooks.json` wires SessionStart/PreToolUse/PostToolUse/Stop for `run_command` through the shared guard. |
+| FR-00408 | Register standard worktree entrypoints. | Successful `make wt.new BR=...` / `worktree-new.mjs --branch ...` PostToolUse events create the same ledger owner marker used by cleanup. |
 
 ## 3. Verification
 
@@ -145,6 +151,7 @@ Required checks:
 - `python3 -m py_compile scripts/agent-worktree-guard/guard.py scripts/agent-worktree-guard/test_guard.py`
 - `python3 scripts/agent-worktree-guard/test_guard.py`
 - `python3 -m json.tool .codex/hooks.json >/dev/null`
+- `python3 -m json.tool .agents/hooks.json >/dev/null`
 - `node .claude/scripts/regen-hooks-settings.mjs --check`
 - Acceptance commands listed in the user request.
 
