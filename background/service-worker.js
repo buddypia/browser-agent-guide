@@ -8,6 +8,7 @@ import { findMatchingRules } from '../lib/site-matcher.js';
 import { callAI } from '../lib/ai-client.js';
 import { buildSystemPrompt } from '../lib/prompt.js';
 import { slugFromCapture } from '../lib/slug.js';
+import { mergeRecipeActions } from '../lib/recipe-merge.js';
 import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18n.js';
 
 // ---- i18n: ロケール辞書(sidepanel/locales)を拡張オリジンで読み、同期 t() で解決する ----
@@ -378,7 +379,7 @@ async function rememberPageRule({ url, title, source = 'chat', scope = 'page', a
   }
 
   const currentRecipe = Array.isArray(recipes[rule.id]) ? [...recipes[rule.id]] : [];
-  const mergedRecipe = mergeRecipeActions(currentRecipe, actions);
+  const mergedRecipe = mergeRecipeActions(currentRecipe, actions, RECIPE_VERBS);
   recipes[rule.id] = mergedRecipe;
 
   await saveSettings({
@@ -426,43 +427,6 @@ function learnedRuleId(target) {
     hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
   }
   return `learned-${target.matchType}-${hash.toString(36)}`;
-}
-
-function mergeRecipeActions(existing, actions) {
-  const next = [...existing];
-  const seen = new Set(existing.map(recipeKey));
-  for (const action of actions || []) {
-    if (!action || !RECIPE_VERBS.has(action.verb)) continue;
-    const recipeAction = {
-      verb: action.verb,
-      args: clonePlain(action.args || {}),
-      reason: action.reason || 'チャットで覚えた変更',
-    };
-    const key = recipeKey(recipeAction);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    next.push(recipeAction);
-  }
-  return next;
-}
-
-function recipeKey(action) {
-  return JSON.stringify({ verb: action?.verb || '', args: sortKeys(action?.args || {}) });
-}
-
-function sortKeys(value) {
-  if (Array.isArray(value)) return value.map(sortKeys);
-  if (!value || typeof value !== 'object') return value;
-  return Object.keys(value)
-    .sort()
-    .reduce((out, key) => {
-      out[key] = sortKeys(value[key]);
-      return out;
-    }, {});
-}
-
-function clonePlain(value) {
-  return JSON.parse(JSON.stringify(value ?? {}));
 }
 
 function pagePattern(url) {
