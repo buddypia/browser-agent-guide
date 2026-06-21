@@ -349,7 +349,7 @@ function renderEmptyHint() {
     chip.addEventListener('click', () => usePrompt(t(key)));
     chips.appendChild(chip);
   });
-  // 「まず目印を付ける」は composer ではなく Mark 行(補足を付ける)へ誘導する。
+  // 「補足から始める」は composer ではなく補足ボタンへ誘導する。
   const markChip = document.createElement('button');
   markChip.type = 'button';
   markChip.className = 'starter-chip meta';
