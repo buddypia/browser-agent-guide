@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "service": "node scripts/install-service.mjs",
     "test": "node --test 'test/*.test.mjs'"
   },
   "dependencies": {
