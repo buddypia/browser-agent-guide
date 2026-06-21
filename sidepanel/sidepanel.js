@@ -55,6 +55,9 @@ let state = {
   activeTabState: null,
   annotations: [],
   busy: false,
+  // 補足(picker)/お描き(drawing)モードがページ側で有効か。両モードは content 側で
+  // 排他なので 1 フラグで扱い、サイドパネルにフォーカスがある状態の ESC を拾うために使う。
+  pickerActive: false,
 };
 
 function t(key, values) {
@@ -169,6 +172,9 @@ async function setLocal(key, value) {
 
 async function refreshState() {
   try {
+    // 別タブ切替・ページ遷移などで再取得が走る時点で、ページ側の picker/draw は
+    // 無効化されている。古い true が残って ESC が空振りの停止を送らないようリセットする。
+    state.pickerActive = false;
     const s = await send({ type: 'GET_ACTIVE_TAB_STATE' });
     state.activeTabState = s;
     state.tabId = s.tabId;
@@ -209,6 +215,12 @@ function showBanner(html, ok) {
   els.banner.hidden = false;
   els.banner.innerHTML = html;
   els.banner.classList.toggle('ok', !!ok);
+}
+
+function hideBanner() {
+  els.banner.hidden = true;
+  els.banner.innerHTML = '';
+  els.banner.classList.remove('ok');
 }
 
 // ---- 履歴の保存・復元 ----
@@ -666,6 +678,18 @@ els.input.addEventListener('keydown', (e) => {
   }
 });
 
+// 補足(picker)/お描き(drawing)モード中の ESC で終了する。これらはサイドパネルの
+// ボタンから開始するため、フォーカスがサイドパネル(別ドキュメント)に残り、ページ側の
+// keydown ハンドラに ESC が届かない。フォーカスが実際に居るこのドキュメントで拾い、
+// 配線済みの STOP_PICKER/STOP_DRAWING を送って確実に終了させる(content 側は冪等)。
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !state.pickerActive) return;
+  state.pickerActive = false;
+  send({ type: 'STOP_PICKER', tabId: state.tabId }).catch(() => {});
+  send({ type: 'STOP_DRAWING', tabId: state.tabId }).catch(() => {});
+  hideBanner();
+});
+
 els.languageSelect.addEventListener('change', (e) => {
   changeLanguage(e.target.value);
 });
@@ -675,6 +699,7 @@ els.btnPick.addEventListener('click', async () => {
   if (state.tabId == null) await refreshState();
   try {
     await send({ type: 'START_PICKER', tabId: state.tabId });
+    state.pickerActive = true;
     showBanner(escapeHtml(t('picker.started')), true);
   } catch (e) {
     addMessage('error', t('errors.pickerStartFailed', { message: e.message }));
@@ -686,6 +711,7 @@ els.btnDraw.addEventListener('click', async () => {
   if (state.tabId == null) await refreshState();
   try {
     await send({ type: 'START_DRAWING', tabId: state.tabId });
+    state.pickerActive = true;
     showBanner(escapeHtml(t('drawing.started')), true);
   } catch (e) {
     addMessage('error', t('errors.drawingStartFailed', { message: e.message }));
