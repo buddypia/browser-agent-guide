@@ -65,6 +65,10 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         self.assertTrue((wt / ".tmp/.agent_worktree_owner.json").exists())
         self.assertIn("- [ ]", (self.repo / ".tmp/.worktree_status.md").read_text(encoding="utf-8"))
 
+        (wt / "feature.txt").write_text("work\n", encoding="utf-8")
+        subprocess.run(["git", "add", "feature.txt"], cwd=wt, check=True)
+        subprocess.run(["git", "commit", "-m", "feature work"], cwd=wt, check=True, stdout=subprocess.PIPE)
+
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=wt, text=True, stdout=subprocess.PIPE, check=True).stdout.strip()
         pre_push = run(
             ["git-hook", "pre-push"],
@@ -93,9 +97,99 @@ class AgentWorktreeGuardTest(unittest.TestCase):
 
         audit = run(["audit"], self.repo)
         self.assertIn(PROMPT, audit.stdout)
+        self.assertIn("Work briefing", audit.stdout)
+        self.assertIn("agent-worktree-guard confirm-pr --confirmed", audit.stdout)
+
+        pr_create_payload = json.dumps(
+            {
+                "session_id": SESSION,
+                "cwd": str(wt),
+                "tool_name": "Bash",
+                "tool_input": {"command": "gh pr create --title test --body test"},
+            }
+        )
+        pr_denied = run(["hook", "pre-tool"], self.repo, stdin=pr_create_payload)
+        self.assertIn("permissionDecision", pr_denied.stdout)
+        self.assertIn("confirm-pr --confirmed", pr_denied.stdout)
+
+        antigravity_payload = json.dumps(
+            {
+                "session_id": SESSION,
+                "cwd": str(wt),
+                "tool": {
+                    "name": "run_command",
+                    "input": {"command": "gh pr create --title test --body test"},
+                },
+            }
+        )
+        antigravity_denied = run(["hook", "pre-tool"], self.repo, stdin=antigravity_payload)
+        self.assertIn("permissionDecision", antigravity_denied.stdout)
+        self.assertIn("confirm-pr --confirmed", antigravity_denied.stdout)
+
+        early_cleanup = run(["cleanup", "--confirmed"], self.repo, check=False)
+        self.assertNotEqual(early_cleanup.returncode, 0)
+        self.assertIn("after the PR merge is recorded", early_cleanup.stderr)
+
+        confirm = run(["confirm-pr", "--confirmed"], self.repo)
+        self.assertIn("PR confirmation recorded", confirm.stdout)
+
+        pr_allowed = run(["hook", "pre-tool"], self.repo, stdin=pr_create_payload)
+        self.assertEqual(pr_allowed.stdout.strip(), "")
+
+        merge_payload = json.dumps(
+            {
+                "session_id": SESSION,
+                "cwd": str(wt),
+                "tool_name": "Bash",
+                "tool_input": {"command": "gh pr merge 1 --squash"},
+                "tool_response": {"exit_code": 0},
+            }
+        )
+        merged = run(["hook", "post-tool"], self.repo, stdin=merge_payload)
+        self.assertIn("Cleanup is now mandatory", merged.stdout)
+        ledger = json.loads((self.repo / ".tmp/worktree-guard-ledger/test-session.json").read_text())
+        self.assertTrue(ledger["worktrees"][0]["pr_merged_at"])
 
         outside = self.repo / ".worktrees" / "feature" / "outside"
         subprocess.run(["git", "worktree", "add", str(outside), "-b", "feature/outside"], cwd=self.repo, check=True)
+        cleanup = run(["cleanup", "--confirmed"], self.repo)
+        self.assertIn("cleaned 1 worktree", cleanup.stdout)
+        self.assertFalse(wt.exists())
+        self.assertTrue(outside.exists())
+        subprocess.run(["git", "worktree", "remove", str(outside), "--force"], cwd=self.repo, check=True)
+
+    def test_post_tool_registers_standard_worktree_create(self) -> None:
+        wt = self.repo / ".worktrees" / "feature" / "hooked"
+        outside = self.repo / ".worktrees" / "feature" / "outside"
+
+        run(["init"], self.repo)
+        subprocess.run(["git", "worktree", "add", str(wt), "-b", "feature/hooked"], cwd=self.repo, check=True, stdout=subprocess.PIPE)
+        subprocess.run(["git", "worktree", "add", str(outside), "-b", "feature/outside"], cwd=self.repo, check=True, stdout=subprocess.PIPE)
+
+        payload = json.dumps(
+            {
+                "session_id": SESSION,
+                "cwd": str(self.repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "make wt.new BR=feature/hooked"},
+                "tool_response": {"exit_code": 0},
+            }
+        )
+        run(["hook", "post-tool"], self.repo, stdin=payload)
+
+        ledger = json.loads((self.repo / ".tmp/worktree-guard-ledger/test-session.json").read_text())
+        self.assertEqual(len(ledger["worktrees"]), 1)
+        self.assertEqual(ledger["worktrees"][0]["branch"], "feature/hooked")
+        self.assertTrue((wt / ".tmp/.agent_worktree_owner.json").exists())
+
+        early_cleanup = run(["cleanup", "--confirmed"], self.repo, check=False)
+        self.assertNotEqual(early_cleanup.returncode, 0)
+        self.assertTrue(wt.exists())
+        self.assertTrue(outside.exists())
+
+        run(["mark-done", str(wt), "--reason", "manual"], self.repo)
+        run(["confirm-pr", "--confirmed"], self.repo)
+        run(["mark-merged", str(wt)], self.repo)
         cleanup = run(["cleanup", "--confirmed"], self.repo)
         self.assertIn("cleaned 1 worktree", cleanup.stdout)
         self.assertFalse(wt.exists())
