@@ -43,6 +43,7 @@ npx playwright test -c playwright.config.mjs -g "title substring"        # one t
 ```bash
 npm install                      # daemon deps (@modelcontextprotocol/sdk, ws, zod)
 npm start                        # node src/index.js  (default inbox = <auto-detected Downloads>/ai-inbox, port 8765, host 127.0.0.1)
+npm run service -- [--write] [--port N …]  # print (or --write) a launchd/systemd unit to run the daemon persistently
 npm test                         # node --test 'test/*.test.mjs'  (node:test)
 node --test test/inbox.test.mjs  # single daemon test file
 node scripts/e2e-smoke.mjs       # real-binary E2E: spawn daemon, WS push -> MCP get, on a temp inbox
