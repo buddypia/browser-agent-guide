@@ -193,14 +193,14 @@ function buildDenyMessage(branch, safeKey, projectDir, cwd, chained, reason = 'm
     '',
     ...(reason === 'quality_label_missing'
       ? [
-          'R-CM-030 Rule 8 Pre-Ship Quality Gate: marker 파일에 quality_gate 라벨 영속화 필수.',
+          'Pre-Ship Quality Gate: marker 파일에 quality_gate 라벨 영속화 필수.',
           'silent skip 차단 (회고 #1 — 당시 명칭 simplify agent 누락 누적 2회. 2026-05-27 사용자 결정으로 /simplify 완전 폐기 + simplifit 스킬 deprecate 후 /code-review 단일 진입점).',
           '',
           'helper CLI 의 --quality <label> 인자 누락 시 발생합니다.',
           '  label 종류:',
           '    agent_go         — /code-review --fix + code-reviewer agent 둘 다 Go',
           '    self_review_pass — agent 호출 실패/skip 시 자가 점검 통과 (Panel Decisions 사유 명시)',
-          '    trivial_skip     — R-CM-030 Rule 10 trivial (≤2 파일 + ≤20 LOC + non-substantive)',
+          '    trivial_skip     — trivial 변경 (≤2 파일 + ≤20 LOC + non-substantive)',
           '',
           '재시도:',
           `  node ${helperPath} ${branch || '--staged'} --quality <label>`,

@@ -17,7 +17,6 @@
  *
  * 동작:
  *   - user abort / context limit → passthrough (사용자 명시 중단 존중)
- *   - .tmp/create-pr-active 신선(30min) → passthrough (/create-pr 진행 중)
  *   - 본 세션 소유(owned, R-CM-036) + uncommitted == 0 + unmerged ≥ 1 + REVIEW.md invalid → BLOCK
  *   - uncommitted > 0 인 worktree → skip (먼저 commit — worktree-shipping-guard 담당)
  *   - 타 세션 / orphan 소유 worktree → 차단 안 함 (cross-session 오차단 회피, stderr 알림)
@@ -33,8 +32,7 @@
  *   worktree-shipping-guard 와 같은 lib(worktree-path / worktree-plan-path)만 공유한다.
  */
 
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   output,
   safeHookMainWithProfile,
@@ -53,25 +51,11 @@ import {
   validateReport,
 } from '../scripts/lib/review-report.mjs';
 
-const CREATE_PR_ACTIVE_TTL_MS = 30 * 60 * 1000; // 30 min — /create-pr 진행 중 마커 (shipping-guard 정합)
 const ESCAPE_HATCH_PATTERNS = [/^hotfix\//, /^hotfix-/];
 
 export function isEscapeHatchBranch(branch) {
   if (!branch) return false;
   return ESCAPE_HATCH_PATTERNS.some((p) => p.test(branch));
-}
-
-/**
- * 파일 mtime freshness 검사. 부재 / stat 실패 → false. (shipping-guard 와 동형이나
- * hook 간 import 금지(R-CM-006)라 로컬 정의 — 8줄, 공유 lib 도입은 과설계.)
- */
-export function isFresh(absPath, ttlMs) {
-  if (!existsSync(absPath)) return false;
-  try {
-    return Date.now() - statSync(absPath).mtime.getTime() <= ttlMs;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -154,7 +138,6 @@ export function readReport(worktreePath, branch, _existsSync = existsSync, _read
  * @returns {{ block: boolean, candidates: Array, not_owned: Array, reason: string }}
  */
 export function evaluate(projectDir, opts = {}) {
-  const _isFresh = opts._isFresh || isFresh;
   const _safeGit = opts._safeGit || safeGit;
   const _countUnmerged = opts._countUnmerged || ((p) => countUnmergedCommits(p, _safeGit));
   const _countUncommitted = opts._countUncommitted || ((p) => countUncommittedChanges(p, _safeGit));
@@ -163,12 +146,6 @@ export function evaluate(projectDir, opts = {}) {
   const _classifyOwnership =
     opts._classifyOwnership ||
     ((wtPath, branch) => classifyOwnership(wtPath, branch, { sessionId: opts.sessionId, cwd: opts.cwd }));
-
-  // /create-pr 진행 중 → 통과
-  const activeFlag = join(projectDir, '.tmp', 'create-pr-active');
-  if (_isFresh(activeFlag, CREATE_PR_ACTIVE_TTL_MS)) {
-    return { block: false, candidates: [], not_owned: [], reason: 'create-pr-active 신선' };
-  }
 
   const wtOut = _safeGit('worktree list --porcelain', projectDir, { timeout: 3000 });
   if (wtOut === null) {
@@ -259,7 +236,7 @@ export function buildBlockMessage(projectDir, candidates) {
   }
   lines.push('  3. REVIEW.md の要点をチャットにも提示し、ユーザーに「進行 / 停止 / 修正必要」を確認:');
   lines.push('       - Claude Code: AskUserQuestion / Codex・Gemini: 同等の3択を明示確認');
-  lines.push('  4. 「進行」承認後にのみ /create-pr ship-worktree → squash merge → cleanup へ進む。');
+  lines.push('  4. 「進行」承認後にのみ gh で ship: gh pr create → mark-pre-ship-confirmed → gh pr merge → cleanup へ進む。');
   lines.push('');
   lines.push('注: REVIEW.md は `.tmp/` 配下(gitignore)で、tracked diff / uncommitted 状態に影響しません。');
   lines.push('hotfix/* worktree は本 gate 免除。緊急時は ECC_DISABLED_HOOKS=worktree-review-report-guard。');
