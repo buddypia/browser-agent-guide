@@ -17,10 +17,11 @@ from pathlib import Path
 from typing import Any
 
 
-PROMPT = (
+PROMPT_QUESTION = (
     "すべてのworktreeの作業が完了しました。PR（プルリクエスト）を作成しますか？\n"
     "(모든 worktree 작업이 완료되었습니다. PR(풀 리퀘스트)을 생성하시겠습니까?)"
 )
+PROMPT = PROMPT_QUESTION
 
 TOOL_NAME = "Agent Worktree Guard"
 SCHEMA_VERSION = "1.0"
@@ -165,6 +166,8 @@ def empty_ledger(root: Path, session_id: str) -> dict[str, Any]:
         "updated_at": now,
         "pr_confirmation_prompted": False,
         "pr_confirmation_prompted_at": None,
+        "pr_confirmation_confirmed": False,
+        "pr_confirmation_confirmed_at": None,
         "worktrees": [],
         "events": [],
     }
@@ -229,6 +232,10 @@ def render_status(root: Path, ledger: dict[str, Any]) -> None:
         suffix = f" - {status}"
         if reason:
             suffix += f" ({reason})"
+        if item.get("pr_created_at"):
+            suffix += " / pr-created"
+        if item.get("pr_merged_at"):
+            suffix += " / pr-merged"
         rows.append(f"- [{checked}] `{branch}` - `{item.get('path')}`{suffix}")
     rows.append("")
     path.write_text("\n".join(rows), encoding="utf-8")
@@ -363,6 +370,8 @@ def upsert_worktree(
                 "updated_at": now,
             }
         )
+        existing.setdefault("pr_created_at", None)
+        existing.setdefault("pr_merged_at", None)
         return
     ledger.setdefault("worktrees", []).append(
         {
@@ -377,6 +386,8 @@ def upsert_worktree(
             "created_at": now,
             "updated_at": now,
             "cleaned_at": None,
+            "pr_created_at": None,
+            "pr_merged_at": None,
         }
     )
 
@@ -466,20 +477,242 @@ def cmd_mark_done(args: argparse.Namespace) -> int:
     return 0
 
 
+def git_text(args: list[str], cwd: Path, *, timeout: int = 3000) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout / 1000,
+            check=False,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def relative_display(path: Path, root: Path) -> str:
+    try:
+        return str(path.resolve(strict=False).relative_to(root.resolve(strict=False)))
+    except ValueError:
+        return real(path)
+
+
+def candidate_bases(item: dict[str, Any]) -> list[str]:
+    bases: list[str] = []
+    raw = item.get("base")
+    if isinstance(raw, str) and raw and raw != "HEAD":
+        bases.append(raw)
+    bases.extend(["origin/main", "main", "HEAD~1"])
+    seen: set[str] = set()
+    return [b for b in bases if not (b in seen or seen.add(b))]
+
+
+def first_git_range(worktree: Path, item: dict[str, Any]) -> tuple[str | None, str | None]:
+    for base in candidate_bases(item):
+        out = git_text(["rev-list", "--count", f"{base}..HEAD"], worktree)
+        if out is not None and out.isdigit():
+            return base, out
+    return None, None
+
+
+def clipped_lines(text: str | None, limit: int) -> list[str]:
+    if not text:
+        return []
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) <= limit:
+        return lines
+    return [*lines[:limit], f"... ({len(lines) - limit} more)"]
+
+
+def render_worktree_brief(root: Path, item: dict[str, Any]) -> list[str]:
+    wt_path = Path(str(item["path"]))
+    branch = item.get("branch") or "(detached)"
+    base, commit_count = first_git_range(wt_path, item)
+    done_reason = item.get("done_reason") or "done"
+    lines = [
+        f"- branch: {branch}",
+        f"  path: {relative_display(wt_path, root)}",
+        f"  state: {item.get('status', 'open')} / {done_reason}",
+    ]
+    if commit_count is not None:
+        lines.append(f"  commits ahead of {base}: {commit_count}")
+    else:
+        lines.append("  commits ahead: unavailable")
+
+    if base:
+        log = clipped_lines(git_text(["log", "--oneline", "--max-count=5", f"{base}..HEAD"], wt_path), 5)
+        if log:
+            lines.append("  recent commits:")
+            lines.extend([f"    {line}" for line in log])
+        changed = clipped_lines(git_text(["diff", "--name-status", f"{base}...HEAD"], wt_path), 12)
+        if changed:
+            lines.append("  changed files:")
+            lines.extend([f"    {line}" for line in changed])
+    return lines
+
+
+def build_pr_briefing(root: Path, items: list[dict[str, Any]]) -> str:
+    lines = [
+        PROMPT_QUESTION,
+        "",
+        "作業ブリーフィング / Work briefing:",
+    ]
+    for item in items:
+        lines.extend(render_worktree_brief(root, item))
+    lines.extend(
+        [
+            "",
+            "Human decision required:",
+            "  - Yes / 進行: PR 作成を許可。AI は `agent-worktree-guard confirm-pr --confirmed` を実行してから `gh pr create` へ進む。",
+            "  - Stop / 停止: PR 作成・merge・cleanup を行わない。",
+            "  - Fix needed / 修正必要: worktree に戻って追加修正する。",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def build_merge_required_message(root: Path, items: list[dict[str, Any]]) -> str:
+    lines = [
+        "[agent-worktree-guard] PR confirmation recorded, but the PR has not been merged yet.",
+        "",
+        "Next required steps:",
+        "  1. Create or reuse the PR from the owned worktree.",
+        "  2. Complete the existing Pre-Ship Human Review Panel before `gh pr merge`.",
+        "  3. After `gh pr merge` succeeds, this guard records the worktree as merged.",
+        "",
+        "Waiting worktrees:",
+    ]
+    for item in items:
+        lines.append(f"  - {item.get('branch')}: {relative_display(Path(str(item['path'])), root)}")
+    return "\n".join(lines)
+
+
+def build_cleanup_required_message(root: Path, items: list[dict[str, Any]]) -> str:
+    lines = [
+        "[agent-worktree-guard] PR merge is recorded. Cleanup is now mandatory.",
+        "",
+        "Run:",
+        "  agent-worktree-guard cleanup --confirmed",
+        "",
+        "Merged worktrees waiting for cleanup:",
+    ]
+    for item in items:
+        lines.append(f"  - {item.get('branch')}: {relative_display(Path(str(item['path'])), root)}")
+    return "\n".join(lines)
+
+
 def audit_result(ledger: dict[str, Any]) -> dict[str, Any]:
     active = [item for item in ledger.get("worktrees", []) if item.get("status") != "cleaned"]
     incomplete = [item for item in active if not item.get("done")]
     all_done = bool(active) and not incomplete
-    prompt_needed = all_done and not bool(ledger.get("pr_confirmation_prompted"))
-    return {"active": active, "incomplete": incomplete, "all_done": all_done, "prompt_needed": prompt_needed}
+    confirmed = bool(ledger.get("pr_confirmation_confirmed"))
+    unmerged = [item for item in active if item.get("done") and not item.get("pr_merged_at")]
+    merged = [item for item in active if item.get("pr_merged_at")]
+    prompt_needed = all_done and not confirmed
+    merge_needed = all_done and confirmed and bool(unmerged)
+    cleanup_needed = all_done and confirmed and not unmerged and bool(merged)
+    return {
+        "active": active,
+        "incomplete": incomplete,
+        "all_done": all_done,
+        "confirmed": confirmed,
+        "unmerged": unmerged,
+        "merged": merged,
+        "prompt_needed": prompt_needed,
+        "merge_needed": merge_needed,
+        "cleanup_needed": cleanup_needed,
+    }
 
 
 def mark_prompted(root: Path, ledger: dict[str, Any]) -> None:
-    ledger["pr_confirmation_prompted"] = True
-    ledger["pr_confirmation_prompted_at"] = utc_now()
-    append_event(ledger, "pr-confirmation-prompted", {"message": PROMPT})
+    if not ledger.get("pr_confirmation_prompted"):
+        ledger["pr_confirmation_prompted"] = True
+        ledger["pr_confirmation_prompted_at"] = utc_now()
+        append_event(ledger, "pr-confirmation-prompted", {"message": PROMPT_QUESTION})
     save_ledger(root, ledger)
     render_status(root, ledger)
+
+
+def cmd_confirm_pr(args: argparse.Namespace) -> int:
+    if not args.confirmed:
+        raise GuardError("confirm-pr requires --confirmed after a human Yes/進行 decision")
+    root = resolve_guard_root(Path(args.repo).resolve() if args.repo else None)
+    session_id = current_session_id(explicit=args.session_id)
+    ledger = load_ledger(root, session_id)
+    result = audit_result(ledger)
+    if not result["active"]:
+        raise GuardError("No active worktrees in this session ledger")
+    if result["incomplete"]:
+        raise GuardError("Cannot confirm PR while ledger worktrees are still incomplete")
+    for item in result["active"]:
+        verify_owner_marker(item, session_id, root)
+    ledger["pr_confirmation_prompted"] = True
+    ledger["pr_confirmation_prompted_at"] = ledger.get("pr_confirmation_prompted_at") or utc_now()
+    ledger["pr_confirmation_confirmed"] = True
+    ledger["pr_confirmation_confirmed_at"] = utc_now()
+    append_event(ledger, "pr-confirmation-confirmed", {"source": "human"})
+    save_ledger(root, ledger)
+    render_status(root, ledger)
+    print("PR confirmation recorded. Proceed with PR create/merge, then cleanup after merge.")
+    return 0
+
+
+def select_ledger_item(
+    ledger: dict[str, Any],
+    root: Path,
+    *,
+    path_arg: str | None = None,
+    cwd: Path | None = None,
+) -> dict[str, Any] | None:
+    if path_arg:
+        target = Path(path_arg).expanduser()
+        if not target.is_absolute():
+            target = (root / target).resolve(strict=False)
+        return find_ledger_item(ledger, target)
+    if cwd:
+        matches = [
+            item
+            for item in ledger.get("worktrees", [])
+            if is_relative_to(cwd, Path(str(item["path"]))) and item.get("status") != "cleaned"
+        ]
+        if len(matches) == 1:
+            return matches[0]
+    open_items = [item for item in ledger.get("worktrees", []) if item.get("status") != "cleaned"]
+    if len(open_items) == 1:
+        return open_items[0]
+    return None
+
+
+def mark_item_merged(ledger: dict[str, Any], item: dict[str, Any], *, source: str, pr: str | None = None) -> None:
+    now = utc_now()
+    item["done"] = True
+    item["status"] = "merged"
+    item["done_reason"] = item.get("done_reason") or "pr"
+    item["pr_merged_at"] = item.get("pr_merged_at") or now
+    item["updated_at"] = now
+    if pr:
+        item["pr"] = pr
+    append_event(ledger, "mark-merged", {"path": item["path"], "branch": item.get("branch"), "source": source, "pr": pr})
+
+
+def cmd_mark_merged(args: argparse.Namespace) -> int:
+    root = resolve_guard_root(Path(args.repo).resolve() if args.repo else None)
+    session_id = current_session_id(explicit=args.session_id)
+    ledger = load_ledger(root, session_id)
+    item = select_ledger_item(ledger, root, path_arg=args.path, cwd=Path.cwd().resolve(strict=False))
+    if not item:
+        raise GuardError("Could not resolve a single active ledger worktree to mark merged")
+    verify_owner_marker(item, session_id, root)
+    mark_item_merged(ledger, item, source="manual", pr=args.pr)
+    save_ledger(root, ledger)
+    render_status(root, ledger)
+    print(f"marked merged: {item['path']}")
+    return 0
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
@@ -495,9 +728,13 @@ def cmd_audit(args: argparse.Namespace) -> int:
         except GuardError as exc:
             eprint(f"[agent-worktree-guard] {exc}")
     if result["prompt_needed"]:
-        print(PROMPT)
+        print(build_pr_briefing(root, result["active"]))
         if not args.no_mark_prompted:
             mark_prompted(root, ledger)
+    elif result["merge_needed"]:
+        print(build_merge_required_message(root, result["unmerged"]))
+    elif result["cleanup_needed"]:
+        print(build_cleanup_required_message(root, result["merged"]))
     else:
         print(
             f"Agent Worktree Guard: {len(result['active'])} active, "
@@ -529,6 +766,14 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         selected = [item for item in selected if item.get("realpath") == real(target)]
         if not selected:
             raise GuardError(f"Worktree is not in this session ledger: {target}")
+
+    not_merged = [item for item in selected if item.get("status") != "cleaned" and not item.get("pr_merged_at")]
+    if not_merged:
+        details = ", ".join(str(item.get("branch") or item.get("path")) for item in not_merged)
+        raise GuardError(
+            "cleanup is allowed only after the PR merge is recorded. "
+            f"Run `gh pr merge` first or `agent-worktree-guard mark-merged <path>` after verifying GitHub. Pending: {details}"
+        )
 
     removed = []
     for item in selected:
@@ -603,11 +848,14 @@ def read_stdin_json() -> dict[str, Any]:
 
 def normalize_tool_name(data: dict[str, Any]) -> str:
     if data.get("tool_name"):
-        return str(data["tool_name"])
+        name = str(data["tool_name"])
+        if name in {"shell", "run_shell", "run_shell_command", "exec_command", "run_command"}:
+            return "Bash"
+        return name
     tool = data.get("tool")
     if isinstance(tool, dict) and tool.get("name"):
         name = str(tool["name"])
-        if name in {"shell", "run_shell", "run_shell_command", "exec_command"}:
+        if name in {"shell", "run_shell", "run_shell_command", "exec_command", "run_command"}:
             return "Bash"
         return name
     return ""
@@ -685,6 +933,26 @@ def git_invocation(tokens: list[str]) -> list[str] | None:
     return args[i:]
 
 
+def gh_pr_action(tokens: list[str]) -> str | None:
+    if not tokens:
+        return None
+    try:
+        idx = tokens.index("gh")
+    except ValueError:
+        return None
+    args = tokens[idx + 1 :]
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "pr" and i + 1 < len(args):
+            return args[i + 1]
+        if arg in {"--repo", "-R", "--hostname"}:
+            i += 2
+            continue
+        i += 1
+    return None
+
+
 def rm_rf_targets(tokens: list[str]) -> list[str]:
     if not tokens or tokens[0] != "rm":
         return []
@@ -729,6 +997,17 @@ def detect_pretool_violation(command: str, root: Path, session_id: str, cwd: Pat
         if gargs and gargs and gargs[0] == "push" and "--no-verify" in gargs:
             return "`git push --no-verify` is blocked by Agent Worktree Guard."
 
+        pr_action = gh_pr_action(tokens)
+        if pr_action in {"create", "merge"}:
+            result = audit_result(ledger)
+            if result["active"] and not result["confirmed"]:
+                return (
+                    "PR operations are blocked until the work briefing is shown and the human answers Yes/進行.\n\n"
+                    f"{build_pr_briefing(root, result['active'])}\n\n"
+                    "After the human confirms, run:\n"
+                    "  agent-worktree-guard confirm-pr --confirmed"
+                )
+
         for target in rm_rf_targets(tokens):
             target_path = path_from_token(target, cwd)
             for wt in worktrees:
@@ -768,8 +1047,11 @@ def classify_completion_reason(command: str) -> str | None:
                 return "commit"
             if gargs and gargs[0] == "push":
                 return "push"
-        if len(tokens) >= 3 and tokens[0] == "gh" and tokens[1] == "pr" and tokens[2] == "create":
+        pr_action = gh_pr_action(tokens)
+        if pr_action == "create":
             return "pr"
+        if pr_action == "merge":
+            return "merge"
     return None
 
 
@@ -799,7 +1081,11 @@ def maybe_prompt_after_completion(root: Path, ledger: dict[str, Any]) -> dict[st
     result = audit_result(ledger)
     if result["prompt_needed"]:
         mark_prompted(root, ledger)
-        return hook_block(PROMPT)
+        return hook_block(build_pr_briefing(root, result["active"]))
+    if result["merge_needed"]:
+        return hook_block(build_merge_required_message(root, result["unmerged"]))
+    if result["cleanup_needed"]:
+        return hook_block(build_cleanup_required_message(root, result["merged"]))
     return {}
 
 
@@ -822,11 +1108,16 @@ def hook_post_tool(args: argparse.Namespace) -> int:
         item = worktree_from_command_or_cwd(command, cwd, ledger)
         if item:
             verify_owner_marker(item, session_id, root)
-            item["done"] = True
-            item["status"] = "done"
-            item["done_reason"] = reason
-            item["updated_at"] = utc_now()
-            append_event(ledger, "mark-done", {"path": item["path"], "reason": reason, "source": "hook"})
+            if reason == "merge":
+                mark_item_merged(ledger, item, source="hook")
+            else:
+                item["done"] = True
+                item["status"] = "done"
+                item["done_reason"] = reason
+                item["updated_at"] = utc_now()
+                if reason == "pr":
+                    item["pr_created_at"] = utc_now()
+                append_event(ledger, "mark-done", {"path": item["path"], "reason": reason, "source": "hook"})
             save_ledger(root, ledger)
             render_status(root, ledger)
         return hook_json(maybe_prompt_after_completion(root, ledger))
@@ -861,6 +1152,9 @@ def hook_session_start(args: argparse.Namespace) -> int:
             f"- session: {ledger['session_id']}\n"
             f"- active worktrees: {len(result['active'])}\n"
             f"- incomplete worktrees: {len(result['incomplete'])}\n"
+            f"- awaiting PR confirmation: {'yes' if result['prompt_needed'] else 'no'}\n"
+            f"- awaiting PR merge: {len(result['unmerged']) if result['merge_needed'] else 0}\n"
+            f"- awaiting cleanup: {len(result['merged']) if result['cleanup_needed'] else 0}\n"
             "- cleanup is allowed only through `agent-worktree-guard cleanup --confirmed`."
         )
         return hook_json(hook_context("SessionStart", message))
@@ -959,6 +1253,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_done.add_argument("path")
     p_done.add_argument("--reason", required=True, choices=["commit", "push", "pr", "manual"])
 
+    p_confirm = sub.add_parser("confirm-pr")
+    p_confirm.add_argument("--confirmed", action="store_true")
+
+    p_merged = sub.add_parser("mark-merged")
+    p_merged.add_argument("path", nargs="?")
+    p_merged.add_argument("--pr")
+
     p_audit = sub.add_parser("audit")
     p_audit.add_argument("--create", action="store_true")
     p_audit.add_argument("--no-mark-prompted", action="store_true")
@@ -994,6 +1295,10 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_register(args)
         if args.command == "mark-done":
             return cmd_mark_done(args)
+        if args.command == "confirm-pr":
+            return cmd_confirm_pr(args)
+        if args.command == "mark-merged":
+            return cmd_mark_merged(args)
         if args.command == "audit":
             return cmd_audit(args)
         if args.command == "cleanup":
