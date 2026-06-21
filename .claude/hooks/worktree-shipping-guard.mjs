@@ -5,13 +5,12 @@
  *
  * worktree 안에 uncommitted 변경 또는 unmerged commit 이 있으면 Stop 을 BLOCK 한다.
  * uncommitted 변경은 먼저 commit 하도록, unmerged commit 은 사용자에게 PR/merge 진행 여부를
- * 확인한 뒤 명시 컨펌이 있을 때만 `/create-pr ship-worktree` 실행을 유도한다.
+ * 확인한 뒤 명시 컨펌이 있을 때만 gh ship (gh pr create → gh pr merge) 을 유도한다.
  *
  * 정책 SSOT: R-CM-030 (worktree-auto-ship.md) + R-CM-036 (worktree-session-ownership.md)
  *
  * 동작:
  *   - user abort / context limit → passthrough (사용자 명시 중단 존중)
- *   - .tmp/create-pr-active 신선 (30min) → passthrough (/create-pr 진행 중)
  *   - 모든 worktree 가 다음 중 하나면 → passthrough
  *       · main 브랜치 (worktree list 의 첫 entry)
  *       · hotfix/* / hotfix-* 브랜치 (escape hatch, R-CM-008 정합)
@@ -57,7 +56,6 @@ import { resolveWorktreeRoot } from '../scripts/lib/worktree-path.mjs';
 // 기존 import 계약(테스트 + 외부 import) 보존을 위해 로컬 바인딩 re-export.
 export { parseWorktreeList };
 
-const CREATE_PR_ACTIVE_TTL_MS = 30 * 60 * 1000; // 30 min — /create-pr 진행 중 마커
 const ATTEMPT_MARKER_TTL_MS = 5 * 60 * 1000; // 5 min — 한 번 시도 후 사용자 보고/멈춤
 const ESCAPE_HATCH_PATTERNS = [/^hotfix\//, /^hotfix-/];
 
@@ -183,7 +181,7 @@ export function touchAttemptMarker(projectDir, branch) {
  */
 /**
  * worktree 안에 PLAN.md 가 존재하는지 검사 (M1 — stop loop 회피용 사전 안내).
- *   ship-worktree 는 PLAN.md 미존재 시 거부 → 5분 마커 후 재차단 무한 반복 위험.
+ *   ship (mark-pre-ship-confirmed) 은 PLAN.md 부재/미체크박스 시 거부 → 5분 마커 후 재차단 무한 반복 위험.
  *   본 검사는 BLOCK 메시지에 plan_missing 정보를 실어 AI 가 자동 작성하도록 유도.
  */
 export function isPlanPresent(worktreePath, opts = {}) {
@@ -258,12 +256,6 @@ export function evaluate(projectDir, opts = {}) {
   const _classifyOwnership =
     opts._classifyOwnership ||
     ((wtPath, branch) => classifyOwnership(wtPath, branch, { sessionId: opts.sessionId, cwd: opts.cwd }));
-
-  // /create-pr 진행 중 → 통과
-  const activeFlag = join(projectDir, '.tmp', 'create-pr-active');
-  if (_isFresh(activeFlag, CREATE_PR_ACTIVE_TTL_MS)) {
-    return { block: false, candidates: [], skipped_attempt: [], not_owned: [], reason: 'create-pr-active 신선' };
-  }
 
   // worktree 목록
   const wtOut = _safeGit('worktree list --porcelain', projectDir, { timeout: 3000 });
@@ -362,7 +354,7 @@ export function buildBlockMessage(projectDir, candidates) {
     '[worktree-shipping-guard] Stop 차단: 완료되지 않은 worktree 작업이 있습니다.',
     '',
     '사용자 정책 (R-CM-030): worktree 에서 시스템 코드 변경을 수행했다면 최종 응답 전 반드시 commit 을 남겨야 합니다.',
-    'commit 된 작업은 사용자 컨펌 후 /create-pr ship-worktree → squash merge → cleanup 까지 진행되어야 합니다.',
+    'commit 된 작업은 사용자 컨펌 후 gh pr create → gh pr merge (squash) → cleanup 까지 진행되어야 합니다.',
     '',
     '대상 worktree:',
   ];
@@ -388,7 +380,7 @@ export function buildBlockMessage(projectDir, candidates) {
   if (candidates.some((c) => c.plan_missing)) {
     lines.push('');
     lines.push('PLAN.md 부재 worktree (M1 stop loop 회피):');
-    lines.push('  - ship-worktree 는 PLAN.md 미체크박스 검증을 자체 수행 — PLAN.md 부재 시 거부.');
+    lines.push('  - mark-pre-ship-confirmed.mjs 가 PLAN.md 미체크박스 검증을 수행 — PLAN.md 부재/미체크 시 거부.');
     lines.push('  - 위치: `.tmp/worktree-<safeBranch>/PLAN.md` (worktree 루트 아님, R-CM-008/R-CM-030 — 머지 누출 차단).');
     lines.push('  - 위 worktree 에 PLAN.md 를 먼저 작성 (목표 / 체크리스트 / 검증 / handoff) 후 ship 호출.');
     lines.push('  - 또는 사용자에게 작업 의도 확인 후 worktree 자체 폐기.');
@@ -409,7 +401,7 @@ export function buildBlockMessage(projectDir, candidates) {
   const stale = candidates.filter((c) => Array.isArray(c.stale_reasons) && c.stale_reasons.length);
   if (stale.length > 0) {
     lines.push('');
-    lines.push('base freshness 경고 (Layer 2 — 차단 X, 사후 게이트는 ship-worktree non-FF 검사):');
+    lines.push('base freshness 경고 (Layer 2 — 차단 X, ship 직전 rebase 권장):');
     for (const c of stale) {
       lines.push(`  - ${relativizePath(c.path, projectDir)}: ${c.stale_reasons.join(', ')}`);
     }

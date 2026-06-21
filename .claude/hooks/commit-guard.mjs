@@ -12,9 +12,6 @@
  *   - worktree commit        → 허용
  *   - git commit --dry-run   → 허용 (검증용)
  *
- * 예외:
- *   - .tmp/create-pr-active 파일 존재 시 commit + branch create 허용 (단 amend 는 항상 차단)
- *
  * 차단 대상:
  *   - git commit (main 브랜치에서)
  *   - git commit --amend (모든 브랜치)
@@ -31,8 +28,8 @@
  *
  * 설계 (테스트 가능성):
  *   - isGitCommit / isGitAmend / isGitBranchCreate: 순수 함수, 명령 문자열 검사만
- *   - decide({ command, branch, isCreatePrActive }): 순수 함수, 정책 결정 SSOT
- *   - run(data): I/O (브랜치 검출, state 파일 확인) 후 decide() 호출
+ *   - decide({ command, branch, isWorktree }): 순수 함수, 정책 결정 SSOT
+ *   - run(data): I/O (브랜치 검출) 후 decide() 호출
  */
 
 import {
@@ -44,11 +41,6 @@ import {
 } from '../scripts/lib/utils.mjs';
 import { HookOutput } from '../scripts/lib/hook-output.mjs';
 import { anchoredPattern } from '../scripts/lib/hook-anchors.mjs';
-import { existsSync } from 'fs';
-import { join } from 'path';
-
-const PROJECT_DIR = resolveProjectDir();
-const STATE_FILE = join(PROJECT_DIR, '.tmp', 'create-pr-active');
 
 // --- Pattern constants ---
 // anchor (명령 시작 / chain operator / newline 직후만 매칭) 는 hook-anchors.mjs SSOT.
@@ -133,20 +125,20 @@ export function isGitBranchCreate(command) {
  * 정책 결정 SSOT. 순수 함수.
  *
  * 결정 우선순위:
- *   1. amend         → 항상 deny (create-pr active 도 우회 불가, 보안 일관성)
- *   2. create-pr     → passthrough (commit + branch create 허용)
+ *   1. amend         → 항상 deny (worktree 안에서도 우회 불가, 보안 일관성)
+ *   2. worktree      → passthrough (commit + branch create 허용)
  *   3. branch create → 항상 deny
  *   4. main + commit → deny (worktree commit 허용)
  *   5. 그 외          → passthrough
  *
- * @param {{ command: string, branch: string, isCreatePrActive: boolean }} ctx
+ * @param {{ command: string, branch: string, isWorktree: boolean }} ctx
  * @returns {{ action: 'deny' | 'passthrough', kind?: 'amend' | 'branch_create' | 'main_commit' }}
  */
-export function decide({ command, branch, isCreatePrActive, isWorktree }) {
+export function decide({ command, branch, isWorktree }) {
   if (isGitAmend(command)) {
     return { action: 'deny', kind: 'amend' };
   }
-  if (isCreatePrActive || isWorktree) {
+  if (isWorktree) {
     return { action: 'passthrough' };
   }
   if (isGitBranchCreate(command)) {
@@ -177,7 +169,7 @@ function buildDenyMessage(kind) {
       `대안 (표준 진입점 — fetch + ff main + worktree add origin/main 기준):\n` +
       `  make wt.new BR=feature/<task>\n` +
       `  # 또는: node .claude/scripts/worktree-new.mjs --branch feature/<task>\n` +
-      `또는 /create-pr 스킬 — feature 브랜치 + PR + squash merge 자동 처리.\n`
+      `ship 은 gh 로 직접: worktree commit → gh pr create → 사용자 컨펌 → gh pr merge.\n`
     );
   }
   // main_commit
@@ -194,7 +186,7 @@ function buildDenyMessage(kind) {
     `[대안 — 사용자 직접] cd 후 git commit (사용자 shell 에서):\n` +
     `  cd .worktrees/feature/<task>\n` +
     `  git commit -m "<msg>"\n\n` +
-    `또는 /create-pr 스킬 — 자동 처리.\n`
+    `ship 은 gh 로 직접: worktree commit → gh pr create → 사용자 컨펌 → gh pr merge.\n`
   );
 }
 
@@ -218,13 +210,12 @@ export async function run(data) {
 
     const projectDir = resolveProjectDir(data);
     const branch = safeGit('branch --show-current', projectDir, { timeout: 2000 }) || '';
-    const isCreatePrActive = existsSync(STATE_FILE);
     // cwd-based worktree detection (destructive-git-guard L109과 일관).
     // hook이 worktree 안에서 실행되면 branch != main 이지만, 이 변수로
     // decide() 의 worktree-passthrough 분기가 명시적으로 활성화된다.
     const isWorktree = process.cwd().includes('/.worktrees/');
 
-    const result = decide({ command, branch, isCreatePrActive, isWorktree });
+    const result = decide({ command, branch, isWorktree });
 
     if (result.action === 'deny') {
       return HookOutput.deny(buildDenyMessage(result.kind));

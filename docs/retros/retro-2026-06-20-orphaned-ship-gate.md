@@ -57,6 +57,6 @@ printf '{"tool_name":"Bash","tool_input":{"command":"gh pr view 1"},"cwd":"/tmp/
 ```
 
 ## Next
-- [ ] Add a ③ dead-trigger / orphaned-guard detector — done-condition: a check (CI-time or a periodic audit) that flags any hook whose trigger pattern cannot match any plausible command / references a path absent from the tree, so a future dependency removal cannot silently inert a guard.
-- [ ] Resolve the `.tmp/create-pr-active` marker web (separate sub-incident): decide per guard whether to drop the dead carve-out or re-introduce a producer in the gh-based flow; fix `worktree-new.mjs:336` stale "/create-pr ship-worktree" guidance. Lower urgency (fails safe).
-- [ ] Sweep remaining historical `R-CM-030` references in `pre-ship-review-guard.mjs` (quality-gate rationale comment) now that the policy doc is deleted — cosmetic.
+- [x] Add a ③ dead-trigger / orphaned-guard detector — closed by `retro-2026-06-20-dead-trigger-detector.md` (PR #19): `check-hook-refs.mjs` lint + governance test asserting zero dangling refs.
+- [x] Resolve the `.tmp/create-pr-active` marker web — **dropped the dead carve-out** (no producer exists, so every branch was unreachable) from `commit-guard`, `destructive-git-guard`, `worktree-review-report-guard`, `worktree-shipping-guard`, `worktree-session-owner-guard`; fixed `worktree-new.mjs` stale "/create-pr ship-worktree" guidance + removed the now-dead carve-out unit test. No producer re-introduced: the gh-based ship flow has no in-progress marker (verified — PRs #21/#23 shipped with the carve-out never firing). Behavior-preserving: guard deny paths unchanged (smoke-verified). (this PR)
+- [x] Sweep remaining historical `R-CM-030` references in `pre-ship-review-guard.mjs` (quality-gate rationale comment) — replaced the dead "R-CM-030 Rule 8/Rule 10" doc-citations with self-describing labels; kept the accurate ops.mjs→gh migration history. (this PR)

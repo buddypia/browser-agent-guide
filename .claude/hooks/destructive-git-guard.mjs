@@ -34,8 +34,6 @@
  * - git checkout <branch-name> (브랜치 전환)
  */
 
-import { existsSync, statSync } from 'fs';
-import { join } from 'path';
 import { readStdin, output, safeHookMainWithProfile } from '../scripts/lib/utils.mjs';
 import { HookOutput } from '../scripts/lib/hook-output.mjs';
 // heredoc body 제거 — `cat <<EOF\ngit stash clear\nEOF` 같은 데이터 컨텍스트의 destructive
@@ -112,28 +110,6 @@ const DESTRUCTIVE_PATTERNS = [
   },
 ];
 
-// ── create-pr Safe Command Allowlist ──
-//
-// create-pr 플로우 진행 중 (.tmp/create-pr-active 존재 시)
-// 아래 패턴만 추가 허용. 그 외 파괴적 명령은 플래그 유무와 무관하게 차단.
-//
-// 안전성 근거:
-//   git merge --ff-only:  HEAD 전진만 수행. 히스토리 변경 불가. 충돌 시 git 거부.
-//   git worktree remove:  격리된 worktree 디렉토리만 삭제.
-//
-// 제거된 항목:
-//   git reset HEAD -- <path>: DESTRUCTIVE_PATTERNS 자체가 --hard/--merge/--keep만
-//   차단하므로 unstage는 플래그 없이도 항상 허용됨. (v2.1)
-//
-// 플래그 누수 시 영향:
-//   위 2개 명령은 데이터 파괴가 불가능하므로 보안 영향 없음.
-const CREATE_PR_SAFE_PATTERNS = [
-  /\bgit\s+merge\s+--ff-only\b/i,
-  /\bgit\s+worktree\s+remove\b/i,
-];
-
-const CREATE_PR_ACTIVE_TTL_MS = 30 * 60 * 1000;
-
 const WORKTREE_SHIPPING_BRANCH_PREFIXES = [
   'feature',
   'fix',
@@ -148,20 +124,6 @@ const WORKTREE_SHIPPING_BRANCH_PREFIXES = [
   'hotfix',
   'release',
 ];
-
-function isCreatePrSafeCommand(command) {
-  return CREATE_PR_SAFE_PATTERNS.some(p => p.test(command));
-}
-
-function isFreshCreatePrFlag(flagPath, now = Date.now()) {
-  try {
-    if (!existsSync(flagPath)) return false;
-    const ageMs = now - statSync(flagPath).mtimeMs;
-    return ageMs <= CREATE_PR_ACTIVE_TTL_MS;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * `git commit -m <body>` 의 메시지 본문을 검사 대상에서 제외한다.
@@ -453,7 +415,7 @@ export function checkDestructiveGit(command) {
     return {
       blocked: true,
       kind: 'worktree-shipping',
-      description: 'worktree branch fast-forward merge는 create-pr ship-worktree 경로로만 수행해야 합니다',
+      description: 'worktree branch fast-forward merge는 gh ship 경로(gh pr create → gh pr merge)로만 수행해야 합니다',
       matched: extractFastForwardMergeTarget(command),
     };
   }
@@ -499,13 +461,6 @@ export async function run(data) {
     }
 
     const command = data.tool_input?.command || '';
-
-    // create-pr 플로우 진행 중: 안전 명령만 허용, 나머지는 일반 검사로 진행
-    const projectDir = process.env.CLAUDE_PROJECT_DIR || '';
-    const activeFlag = join(projectDir, '.tmp', 'create-pr-active');
-    if (isFreshCreatePrFlag(activeFlag) && isCreatePrSafeCommand(command)) {
-      return HookOutput.passthrough();
-    }
 
     const result = checkDestructiveGit(command);
 

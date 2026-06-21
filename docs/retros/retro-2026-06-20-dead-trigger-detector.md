@@ -52,6 +52,6 @@ node --test .claude/scripts/lib/__tests__/*.test.mjs                  # full gov
 ```
 
 ## Next
-- [ ] Resolve the `.tmp/create-pr-active` marker web (from parent ledger) — producer-less across 5 hooks; decide drop-carve-out vs re-introduce a producer in the gh flow; fix `worktree-new.mjs:336` stale guidance. Lower urgency (fails safe).
-- [ ] Cosmetic: sweep remaining historical `R-CM-030` references in `pre-ship-review-guard.mjs` now the policy doc is deleted.
+- [x] Resolve the `.tmp/create-pr-active` marker web (from parent ledger) — dropped the dead carve-out across all 5 hooks + fixed `worktree-new.mjs` stale guidance + removed the dead carve-out unit test. (closed with `retro-2026-06-20-orphaned-ship-gate.md` ## Next item 2)
+- [x] Cosmetic: sweep remaining historical `R-CM-030` references in `pre-ship-review-guard.mjs` — dead doc-citations replaced with self-describing labels. (parent ## Next item 3)
 - [ ] Optional hardening: add per-guard contract tests (canonical-command-still-fires) for the other command-gating hooks (`commit-guard`, `destructive-git-guard`, `worktree-*-guard`) to cover the regex-trigger-liveness vector the lint intentionally does not.

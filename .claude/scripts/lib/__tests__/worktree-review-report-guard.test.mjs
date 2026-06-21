@@ -47,7 +47,6 @@ function validReport() {
 
 function makeOpts(over = {}) {
   return {
-    _isFresh: () => false,
     _safeGit: (cmd) => (cmd.startsWith('worktree list') ? PORCELAIN : null),
     _countUnmerged: () => 1,
     _countUncommitted: () => 0,
@@ -93,12 +92,6 @@ test('orphan → passthrough', () => {
   const v = evaluate(PROJECT, makeOpts({ _classifyOwnership: () => 'orphan', _readReport: () => null }));
   assert.equal(v.block, false);
   assert.equal(v.not_owned.length, 1);
-});
-
-test('create-pr-active 신선 → passthrough', () => {
-  const v = evaluate(PROJECT, makeOpts({ _isFresh: () => true, _readReport: () => null }));
-  assert.equal(v.block, false);
-  assert.match(v.reason, /create-pr-active/);
 });
 
 test('stale report (stamp 불일치) → BLOCK + stale 플래그', () => {
