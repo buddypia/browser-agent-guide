@@ -529,6 +529,98 @@ def clipped_lines(text: str | None, limit: int) -> list[str]:
     return [*lines[:limit], f"... ({len(lines) - limit} more)"]
 
 
+def safe_branch_key(branch: str | None) -> str:
+    """branch を REVIEW.md ディレクトリ名の安全キーに変換 (`/`,`\\` → `__`)。
+    SSOT は .claude/scripts/lib/worktree-plan-path.mjs#safeBranchKey。Python から REVIEW.md を
+    読むため経路算出のみを最小複製する (検証ロジック本体は review-report.mjs のまま)。"""
+    return re.sub(r"[/\\]", "__", branch or "staged")
+
+
+def find_review_report(worktree_path: Path, branch: str | None) -> tuple[Path | None, str | None]:
+    """worktree-local の REVIEW.md (`.tmp/worktree-<safeBranch>/REVIEW.md`) を探す。
+    branch から導いたパスを最優先し、無ければ `.tmp/worktree-*/REVIEW.md` を glob で補完する
+    (branch 推論差異への頑健性)。中身が空のものは無視する。"""
+    candidates: list[Path] = []
+    if branch:
+        candidates.append(worktree_path / ".tmp" / f"worktree-{safe_branch_key(branch)}" / "REVIEW.md")
+    tmp_dir = worktree_path / ".tmp"
+    if tmp_dir.is_dir():
+        for sub in sorted(tmp_dir.glob("worktree-*/REVIEW.md")):
+            if sub not in candidates:
+                candidates.append(sub)
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if text.strip():
+            return path, text
+    return None, None
+
+
+def review_sections(content: str) -> list[tuple[str, list[str]]]:
+    """markdown を heading 境界で分解し `(heading, body行)` を返す。code fence 内の `#` は heading
+    扱いしない。review-report.mjs#splitSections の最小移植 (briefing 表示用)。"""
+    sections: list[tuple[str, list[str]]] = []
+    heading: str | None = None
+    body: list[str] = []
+    in_code = False
+    for line in content.splitlines():
+        if re.match(r"^\s*```", line):
+            in_code = not in_code
+            if heading is not None:
+                body.append(line)
+            continue
+        match = None if in_code else re.match(r"^\s{0,3}#{1,6}\s+(.*\S)\s*$", line)
+        if match:
+            if heading is not None:
+                sections.append((heading, body))
+            heading = match.group(1).strip()
+            body = []
+        elif heading is not None:
+            body.append(line)
+    if heading is not None:
+        sections.append((heading, body))
+    return sections
+
+
+def summarize_review_body(body: list[str], limit: int = 2) -> list[str]:
+    """body から HTML コメント(scaffold ガイド)と空行を除き、先頭 limit 行に clip。"""
+    cleaned: list[str] = []
+    for line in body:
+        stripped = re.sub(r"<!--.*?-->", "", line).strip()
+        if not stripped:
+            continue
+        cleaned.append(stripped)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def render_review_brief(root: Path, wt_path: Path, branch: str | None) -> list[str]:
+    """worktree の REVIEW.md(= 人間レビュー項目)を briefing 用に要約。
+    存在すれば概要/なぜ/何を/どうやって/影響/トレードオフ/残作業/ファイル構造/レビュー依頼の
+    各見出しと要点を出し、無ければ scaffold 作成を促す(Stop の review gate が完成まで block する)。"""
+    review_path, review_text = find_review_report(wt_path, branch)
+    if review_text:
+        lines = [f"  human review (REVIEW.md): {relative_display(review_path, root)}"]
+        for heading, raw_body in review_sections(review_text):
+            summary = summarize_review_body(raw_body)
+            if summary:
+                lines.append(f"    - {heading}: {summary[0]}")
+                lines.extend(f"      {extra}" for extra in summary[1:])
+            else:
+                lines.append(f"    - {heading}")
+        return lines
+    scaffold_branch = branch if branch else "<branch>"
+    return [
+        "  human review (REVIEW.md): 未作成 — 人間レビュー項目を作成してください:",
+        "    概要 / なぜ / 何を / どうやって / 影響 / トレードオフ / 残作業 / ファイル構造 / レビュー依頼",
+        f"    node .claude/scripts/mark-worktree-reviewed.mjs {scaffold_branch} --scaffold",
+        "    (Stop の worktree-review-report-guard が REVIEW.md 完成まで停止を block します)",
+    ]
+
+
 def render_worktree_brief(root: Path, item: dict[str, Any]) -> list[str]:
     wt_path = Path(str(item["path"]))
     branch = item.get("branch") or "(detached)"
@@ -553,6 +645,8 @@ def render_worktree_brief(root: Path, item: dict[str, Any]) -> list[str]:
         if changed:
             lines.append("  changed files:")
             lines.extend([f"    {line}" for line in changed])
+    branch_raw = item.get("branch")
+    lines.extend(render_review_brief(root, wt_path, branch_raw if isinstance(branch_raw, str) and branch_raw else None))
     return lines
 
 
@@ -758,9 +852,45 @@ def _clear_status(root: Path) -> None:
         status.unlink()
 
 
+def delete_local_branch(root: Path, branch: str | None) -> bool:
+    """merge 済みローカル branch を強制削除する。cleanup は pr_merged_at 記録後にのみ到達するため、
+    squash-merge でローカル main に ff されていなくても安全に削除できる(-D)。
+    削除失敗は致命にしない — worktree 除去という主目的は既に完了している。"""
+    if not branch or branch == "main":
+        return False
+    if not branch_exists(root, branch):
+        return False
+    return git(["branch", "-D", branch], root, check=False).returncode == 0
+
+
+_STASH_BRANCH_RE = re.compile(r"^[^:]*:\s*(?:WIP on|On)\s+([^:]+):")
+
+
+def drop_branch_stashes(root: Path, branch: str | None) -> list[str]:
+    """指定 branch を起点とする stash だけを drop する(他 branch の stash には触れない)。
+    index ずれを避けるため降順に drop し、drop した stash の説明文を返す(silent 破壊を避け報告する)。"""
+    if not branch:
+        return []
+    listing = git_text(["stash", "list"], root)
+    if not listing:
+        return []
+    targets: list[tuple[int, str]] = []
+    for line in listing.splitlines():
+        ref_match = re.match(r"^stash@\{(\d+)\}", line)
+        branch_match = _STASH_BRANCH_RE.match(line)
+        if ref_match and branch_match and branch_match.group(1).strip() == branch:
+            targets.append((int(ref_match.group(1)), line.strip()))
+    dropped: list[str] = []
+    for idx, desc in sorted(targets, key=lambda t: t[0], reverse=True):
+        if git(["stash", "drop", f"stash@{{{idx}}}"], root, check=False).returncode == 0:
+            dropped.append(desc)
+    return dropped
+
+
 def _remove_worktree_item(item: dict[str, Any], root: Path, session_id: str, *, force: bool) -> None:
     """1 件の worktree を git から除去し、ledger item を cleaned に更新する(save は呼び出し側)。
-    git remove に失敗したら owner marker を復元して raise する(原子性)。"""
+    git remove に失敗したら owner marker を復元して raise する(原子性)。worktree 除去後に、
+    merge 済みローカル branch と当該 branch を起点とする stash も掃除する(best-effort, 除去成功後)。"""
     marker_data = verify_owner_marker(item, session_id, root)
     marker = owner_path(Path(str(item["path"])))
     try:
@@ -782,6 +912,15 @@ def _remove_worktree_item(item: dict[str, Any], root: Path, session_id: str, *, 
     item["status"] = "cleaned"
     item["cleaned_at"] = utc_now()
     item["updated_at"] = utc_now()
+    # worktree 除去成功後にのみ branch / stash を掃除(原子性は worktree remove までで担保済み)。
+    branch = item.get("branch")
+    branch = branch if isinstance(branch, str) and branch else None
+    item["branch_deleted"] = delete_local_branch(root, branch)
+    item["stashes_dropped"] = drop_branch_stashes(root, branch)
+    if item["branch_deleted"]:
+        eprint(f"[agent-worktree-guard] deleted merged local branch: {branch}")
+    for desc in item["stashes_dropped"]:
+        eprint(f"[agent-worktree-guard] dropped stash for {branch}: {desc}")
 
 
 def discover_merged_across_sessions(
@@ -831,12 +970,27 @@ def discover_merged_across_sessions(
     return matches, ledgers, leftover_unmerged
 
 
+def cleanup_summary_line(count: int, items: list[dict[str, Any]]) -> str:
+    """`cleaned N worktree(s)` に branch / stash の掃除件数を付記する。
+    `cleaned N worktree` substring は保たれるので既存の assert と互換。"""
+    branches = sum(1 for it in items if it.get("branch_deleted"))
+    stashes = sum(len(it.get("stashes_dropped") or []) for it in items)
+    extra = []
+    if branches:
+        extra.append(f"branches deleted: {branches}")
+    if stashes:
+        extra.append(f"stashes dropped: {stashes}")
+    suffix = f" ({', '.join(extra)})" if extra else ""
+    return f"cleaned {count} worktree(s){suffix}"
+
+
 def cmd_cleanup(args: argparse.Namespace) -> int:
     if not args.confirmed:
         raise GuardError("cleanup requires --confirmed")
     root = resolve_guard_root(Path(args.repo).resolve() if args.repo else None)
     session_id = current_session_id(explicit=args.session_id)
     removed: list[str] = []
+    cleaned_items: list[dict[str, Any]] = []
 
     if args.path:
         target = Path(args.path).expanduser()
@@ -863,11 +1017,21 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                     f"Pending: {item.get('branch') or item.get('path')}"
                 )
             _remove_worktree_item(item, root, sid, force=args.force)
-            append_event(ledger, "cleanup", {"path": item["path"], "force": bool(args.force)})
+            append_event(
+                ledger,
+                "cleanup",
+                {
+                    "path": item["path"],
+                    "force": bool(args.force),
+                    "branch_deleted": bool(item.get("branch_deleted")),
+                    "stashes_dropped": len(item.get("stashes_dropped") or []),
+                },
+            )
             save_ledger(root, ledger)
             removed.append(item["path"])
+            cleaned_items.append(item)
         _clear_status(root)
-        print(f"cleaned {len(removed)} worktree(s)")
+        print(cleanup_summary_line(len(removed), cleaned_items))
         return 0
 
     # 引数なし: まず現 session ledger を処理(後方互換の主経路)。
@@ -887,8 +1051,18 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         )
     for item in selected:
         _remove_worktree_item(item, root, session_id, force=args.force)
-        append_event(ledger, "cleanup", {"path": item["path"], "force": bool(args.force)})
+        append_event(
+            ledger,
+            "cleanup",
+            {
+                "path": item["path"],
+                "force": bool(args.force),
+                "branch_deleted": bool(item.get("branch_deleted")),
+                "stashes_dropped": len(item.get("stashes_dropped") or []),
+            },
+        )
         removed.append(item["path"])
+        cleaned_items.append(item)
     if removed:
         save_ledger(root, ledger)
 
@@ -900,8 +1074,19 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         touched: set[str] = set()
         for sid, item in matches:
             _remove_worktree_item(item, root, sid, force=args.force)
-            append_event(ledgers[sid], "cleanup", {"path": item["path"], "force": bool(args.force), "cross_session": True})
+            append_event(
+                ledgers[sid],
+                "cleanup",
+                {
+                    "path": item["path"],
+                    "force": bool(args.force),
+                    "cross_session": True,
+                    "branch_deleted": bool(item.get("branch_deleted")),
+                    "stashes_dropped": len(item.get("stashes_dropped") or []),
+                },
+            )
             removed.append(item["path"])
+            cleaned_items.append(item)
             touched.add(sid)
         for sid in touched:
             save_ledger(root, ledgers[sid])
@@ -915,7 +1100,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
             )
 
     _clear_status(root)
-    print(f"cleaned {len(removed)} worktree(s)")
+    print(cleanup_summary_line(len(removed), cleaned_items))
     return 0
 
 
