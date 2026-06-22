@@ -752,61 +752,169 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _clear_status(root: Path) -> None:
+    status = status_path(root)
+    if status.exists():
+        status.unlink()
+
+
+def _remove_worktree_item(item: dict[str, Any], root: Path, session_id: str, *, force: bool) -> None:
+    """1 件の worktree を git から除去し、ledger item を cleaned に更新する(save は呼び出し側)。
+    git remove に失敗したら owner marker を復元して raise する(原子性)。"""
+    marker_data = verify_owner_marker(item, session_id, root)
+    marker = owner_path(Path(str(item["path"])))
+    try:
+        marker.unlink()
+        marker.parent.rmdir()
+        marker.parent.parent.rmdir()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+    cmd = ["worktree", "remove", str(item["path"])]
+    if force:
+        cmd.append("--force")
+    try:
+        git(cmd, root)
+    except GuardError:
+        atomic_write_json(marker, marker_data)
+        raise
+    item["status"] = "cleaned"
+    item["cleaned_at"] = utc_now()
+    item["updated_at"] = utc_now()
+
+
+def discover_merged_across_sessions(
+    root: Path,
+) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """全 git worktree を owner marker 経由で所属 session に解決し、その session ledger で
+    pr_merged_at あり & not cleaned のものを集める。current_session_id が解決できない
+    (メイン repo から手動 cleanup を実行するなど、env も marker も無い)状況でも、各 worktree の
+    owner marker を真実として merged worktree を確実に片付けられるようにするための横断検出。
+
+    returns (matches, ledgers, leftover_unmerged):
+      matches:          [(session_id, item)] — 片付け対象(merged & not cleaned)
+      ledgers:          {session_id: ledger}  — mutate 後に save する対象(load を共有しキャッシュ)
+      leftover_unmerged:[item]                — marker はあるが未 merged(fail-loud 警告用)
+    """
+    ledgers: dict[str, dict[str, Any]] = {}
+    matches: list[tuple[str, dict[str, Any]]] = []
+    leftover_unmerged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in list_git_worktrees(root):
+        path = entry.get("path")
+        if not path:
+            continue
+        wt = Path(str(path))
+        if real(wt) == real(root):
+            continue  # main checkout 自体は対象外
+        data = read_json(owner_path(wt), None)
+        if not isinstance(data, dict):
+            continue  # guard 管理外の worktree(marker 無し)は触らない
+        sid_raw = data.get("session_id")
+        if not sid_raw:
+            continue
+        sid = safe_session_id(str(sid_raw))
+        if sid not in ledgers:
+            ledgers[sid] = load_ledger(root, sid)
+        item = find_ledger_item(ledgers[sid], wt)
+        if not item or item.get("status") == "cleaned":
+            continue
+        key = str(item.get("realpath") or real(wt))
+        if key in seen:
+            continue
+        seen.add(key)
+        if item.get("pr_merged_at"):
+            matches.append((sid, item))
+        else:
+            leftover_unmerged.append(item)
+    return matches, ledgers, leftover_unmerged
+
+
 def cmd_cleanup(args: argparse.Namespace) -> int:
     if not args.confirmed:
         raise GuardError("cleanup requires --confirmed")
     root = resolve_guard_root(Path(args.repo).resolve() if args.repo else None)
     session_id = current_session_id(explicit=args.session_id)
-    ledger = load_ledger(root, session_id)
-    selected = ledger.get("worktrees", [])
+    removed: list[str] = []
+
     if args.path:
         target = Path(args.path).expanduser()
         if not target.is_absolute():
             target = (root / target).resolve(strict=False)
-        selected = [item for item in selected if item.get("realpath") == real(target)]
-        if not selected:
-            raise GuardError(f"Worktree is not in this session ledger: {target}")
+        # 対象 worktree の owner marker から所属 session を解決し、正しい ledger を引く。
+        # メイン repo から実行して current_session_id が "manual" に落ちても、marker を真実として
+        # その worktree を所有する session の ledger を見つける(取りこぼし防止の核心)。
+        owner = read_json(owner_path(target), None)
+        owner_sid = owner.get("session_id") if isinstance(owner, dict) else None
+        sid = safe_session_id(str(owner_sid)) if owner_sid else session_id
+        try:
+            ledger = load_ledger(root, sid)
+        except GuardError:
+            ledger = empty_ledger(root, sid)
+        item = find_ledger_item(ledger, target)
+        if item is None:
+            raise GuardError(f"Worktree is not in any session ledger: {target}")
+        if item.get("status") != "cleaned":
+            if not item.get("pr_merged_at"):
+                raise GuardError(
+                    "cleanup is allowed only after the PR merge is recorded. "
+                    "Run `gh pr merge` first or `agent-worktree-guard mark-merged <path>` after verifying GitHub. "
+                    f"Pending: {item.get('branch') or item.get('path')}"
+                )
+            _remove_worktree_item(item, root, sid, force=args.force)
+            append_event(ledger, "cleanup", {"path": item["path"], "force": bool(args.force)})
+            save_ledger(root, ledger)
+            removed.append(item["path"])
+        _clear_status(root)
+        print(f"cleaned {len(removed)} worktree(s)")
+        return 0
 
-    not_merged = [item for item in selected if item.get("status") != "cleaned" and not item.get("pr_merged_at")]
+    # 引数なし: まず現 session ledger を処理(後方互換の主経路)。
+    # 現 session の ledger が無い(メイン repo から手動実行で session_id を解決できないなど)場合は
+    # 空として扱い、下の横断検出に委ねる(存在しないだけでは失敗にしない)。
+    try:
+        ledger = load_ledger(root, session_id)
+    except GuardError:
+        ledger = empty_ledger(root, session_id)
+    selected = [item for item in ledger.get("worktrees", []) if item.get("status") != "cleaned"]
+    not_merged = [item for item in selected if not item.get("pr_merged_at")]
     if not_merged:
         details = ", ".join(str(item.get("branch") or item.get("path")) for item in not_merged)
         raise GuardError(
             "cleanup is allowed only after the PR merge is recorded. "
             f"Run `gh pr merge` first or `agent-worktree-guard mark-merged <path>` after verifying GitHub. Pending: {details}"
         )
-
-    removed = []
     for item in selected:
-        if item.get("status") == "cleaned":
-            continue
-        marker_data = verify_owner_marker(item, session_id, root)
-        marker = owner_path(Path(str(item["path"])))
-        try:
-            marker.unlink()
-            marker.parent.rmdir()
-            marker.parent.parent.rmdir()
-        except FileNotFoundError:
-            pass
-        except OSError:
-            pass
-        cmd = ["worktree", "remove", str(item["path"])]
-        if args.force:
-            cmd.append("--force")
-        try:
-            git(cmd, root)
-        except GuardError:
-            atomic_write_json(marker, marker_data)
-            raise
-        item["status"] = "cleaned"
-        item["cleaned_at"] = utc_now()
-        item["updated_at"] = utc_now()
-        removed.append(item["path"])
+        _remove_worktree_item(item, root, session_id, force=args.force)
         append_event(ledger, "cleanup", {"path": item["path"], "force": bool(args.force)})
+        removed.append(item["path"])
+    if removed:
+        save_ledger(root, ledger)
 
-    save_ledger(root, ledger)
-    status = status_path(root)
-    if status.exists():
-        status.unlink()
+    # 現 session で何も片付かなかった場合のみ、git worktree を owner marker 経由で横断解決し、
+    # 別 session 所有の merged worktree も片付ける。session_id を解決できず(メイン repo からの手動
+    # 実行など)空 ledger を見て黙って `cleaned 0` を返し、merged worktree を取りこぼすのを防ぐ。
+    if not removed:
+        matches, ledgers, leftover_unmerged = discover_merged_across_sessions(root)
+        touched: set[str] = set()
+        for sid, item in matches:
+            _remove_worktree_item(item, root, sid, force=args.force)
+            append_event(ledgers[sid], "cleanup", {"path": item["path"], "force": bool(args.force), "cross_session": True})
+            removed.append(item["path"])
+            touched.add(sid)
+        for sid in touched:
+            save_ledger(root, ledgers[sid])
+        # fail-loud: それでも 0 件で、marker 付き worktree が未 merged のまま残るなら明示警告
+        # (黙って 0 を返さず、merge → cleanup の正しい順序を促す)。
+        if not removed and leftover_unmerged:
+            details = ", ".join(str(i.get("branch") or i.get("path")) for i in leftover_unmerged)
+            eprint(
+                "[agent-worktree-guard] cleaned 0, but registered worktrees are not yet merged: "
+                f"{details}. Run `gh pr merge` (or `agent-worktree-guard mark-merged <path>`) first, then cleanup."
+            )
+
+    _clear_status(root)
     print(f"cleaned {len(removed)} worktree(s)")
     return 0
 

@@ -19,9 +19,9 @@ PROMPT = (
 )
 
 
-def run(args: list[str], cwd: Path, *, stdin: str | None = None, check: bool = True):
+def run(args: list[str], cwd: Path, *, stdin: str | None = None, check: bool = True, session: str = SESSION):
     result = subprocess.run(
-        [str(CLI), "--session-id", SESSION, *args],
+        [str(CLI), "--session-id", session, *args],
         cwd=cwd,
         input=stdin,
         text=True,
@@ -195,6 +195,49 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         self.assertFalse(wt.exists())
         self.assertTrue(outside.exists())
         subprocess.run(["git", "worktree", "remove", str(outside), "--force"], cwd=self.repo, check=True)
+
+    def _make_merged_worktree(self, name: str) -> Path:
+        wt = self.repo / ".worktrees" / "feature" / name
+        run(["add", str(wt)], self.repo)
+        (wt / "f.txt").write_text("work\n", encoding="utf-8")
+        subprocess.run(["git", "add", "f.txt"], cwd=wt, check=True)
+        subprocess.run(["git", "commit", "-m", "work"], cwd=wt, check=True, stdout=subprocess.PIPE)
+        run(["mark-done", str(wt), "--reason", "manual"], self.repo)
+        run(["confirm-pr", "--confirmed"], self.repo)
+        run(["mark-merged", str(wt)], self.repo)
+        return wt
+
+    def test_cleanup_cross_session_resolves_owner_marker(self) -> None:
+        # owned by test-session; a DIFFERENT session runs `cleanup` with no path
+        # (mimics a manual cleanup from main where session_id resolves to "manual"/empty).
+        run(["init"], self.repo)
+        wt = self._make_merged_worktree("owned")
+
+        result = run(["cleanup", "--confirmed"], self.repo, session="unrelated-session")
+        self.assertIn("cleaned 1 worktree", result.stdout)
+        self.assertFalse(wt.exists())
+        ledger = json.loads((self.repo / ".tmp/worktree-guard-ledger/test-session.json").read_text())
+        self.assertEqual(ledger["worktrees"][0]["status"], "cleaned")
+
+    def test_cleanup_by_path_resolves_owner_session(self) -> None:
+        run(["init"], self.repo)
+        wt = self._make_merged_worktree("bypath")
+
+        result = run(["cleanup", "--confirmed", "--path", str(wt)], self.repo, session="unrelated-session")
+        self.assertIn("cleaned 1 worktree", result.stdout)
+        self.assertFalse(wt.exists())
+
+    def test_cleanup_cross_session_warns_when_unmerged(self) -> None:
+        run(["init"], self.repo)
+        wt = self.repo / ".worktrees" / "feature" / "pending"
+        run(["add", str(wt)], self.repo)
+
+        # unmerged worktree owned by another session: must NOT be removed, and must warn loudly.
+        result = run(["cleanup", "--confirmed"], self.repo, session="unrelated-session")
+        self.assertIn("cleaned 0 worktree", result.stdout)
+        self.assertIn("not yet merged", result.stderr)
+        self.assertTrue(wt.exists())
+        subprocess.run(["git", "worktree", "remove", str(wt), "--force"], cwd=self.repo, check=True)
 
 
 if __name__ == "__main__":
