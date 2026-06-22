@@ -12,6 +12,7 @@ import { createMcpServer } from './server.js';
 import { createDiskEntryStore } from './store.js';
 import { readEntryImageBuffer } from './inbox.js';
 import { tokenEquals } from './token.js';
+import { imageUrlFor } from './image-url.js';
 
 const MAX_BODY = 8 * 1024 * 1024; // 8MB（tools/call の要求は小さい）
 
@@ -116,12 +117,11 @@ function serveImage(req, res, { kind, id, token, lookupStore }) {
 
 // id から loopback HTTP 取得先 URL を作る関数を返す。token 未設定（=ルート無効）なら undefined = URL 併走なし。
 // host は req.headers.host（クライアントが接続に使った authority）。同じ宛先で必ず到達できる。
-// 重要: token は URL に埋め込まない。/mcp は無認証なので、書き込み権限を持つ token を読み取り専用の
-// MCP レスポンスへ載せると権限昇格の経路になる。取得側は別途 ?token= を付与する（README 参照）。
+// URL の組み立ては image-url.js に集約（ws.js の ack と同じ形を共有し、token は埋め込まない）。
 function makeShotUrlFor(req, token) {
   if (!token) return undefined;
   const host = req.headers.host || '127.0.0.1';
-  return (id, kind = 'shot') => `http://${host}/${kind === 'raw' ? 'raw' : 'shot'}/${encodeURIComponent(id)}.png`;
+  return (id, kind = 'shot') => imageUrlFor(host, id, kind);
 }
 
 function readJsonBody(req) {

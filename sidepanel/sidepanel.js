@@ -736,18 +736,11 @@ els.btnCapture.addEventListener('click', async () => {
       items: res.items,
     });
     if (res.transport === 'daemon') {
-      addMessage(
-        'assistant',
-        [
-          t('capture.sentDaemon'),
-          '',
-          t('capture.savePath', { path: dir }),
-          meta,
-          '',
-          t('capture.daemonCliHint'),
-          t('capture.daemonScopeHint'),
-        ].join('\n')
-      );
+      const daemonLines = [t('capture.sentDaemon'), '', t('capture.savePath', { path: dir })];
+      // パス非依存の取得先 URL（daemon ack 由来）。inbox とブラウザの DL 先がズレても id だけで PNG を取れる。
+      if (res.imageUrl) daemonLines.push(t('capture.imageUrl', { url: res.imageUrl }));
+      daemonLines.push(meta, '', t('capture.daemonCliHint'), t('capture.daemonScopeHint'));
+      addMessage('assistant', daemonLines.join('\n'));
       showBanner(escapeHtml(t('capture.daemonSentBanner')), true);
     } else {
       const note = res.daemonError ? t('capture.fallbackNote', { message: res.daemonError }) : '';

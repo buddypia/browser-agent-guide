@@ -361,9 +361,15 @@ function entryFiles(entry, materialized) {
 // image と並走させるテキスト。先頭に絶対パス、続いて指示一覧（selector/intent）。
 export function buildEntryText(entry, annotation, { shotUrlFor } = {}) {
   const lines = [];
-  lines.push(`file_path: ${entry.shot}`);
-  // file_path を解決できない（inbox がブラウザ DL 先とズレた）時の代替取得先。取得には ?token= を付与する。
+  // file_path は実ファイルがある時だけ出す。memory-first の image 応答で disk materialize に失敗した時は
+  // 存在しないパスを広告せず、shot_url(?token=) を fallback として案内する（image バイトは別途メモリから返る）。
+  const shotPath = entry?.shot && existsSync(entry.shot) ? entry.shot : '';
+  if (shotPath) lines.push(`file_path: ${shotPath}`);
+  // file_path を解決できない（inbox がブラウザ DL 先とズレた / 未materialize）時の代替取得先。取得には ?token= を付与する。
   if (shotUrlFor) lines.push(`shot_url: ${shotUrlFor(entry.id, 'shot')}  (append ?token=<daemon token>)`);
+  if (!shotPath) {
+    lines.push('note: file_path は未materialize（disk 未書き込み）。上の inline image、無ければ shot_url に ?token= を付けて取得してください。');
+  }
   if (annotation?.url) lines.push(`url: ${annotation.url}`);
   if (annotation?.title) lines.push(`title: ${annotation.title}`);
   if (annotation?.capturedAt) lines.push(`captured_at: ${annotation.capturedAt}`);
@@ -396,7 +402,8 @@ export function buildEntryText(entry, annotation, { shotUrlFor } = {}) {
   lines.push('');
   lines.push(
     '上の image を vision で解釈してください（テキスト座標ではなく絵そのものを見る）。' +
-      'image を読めない場合は file_path の PNG を開いてください。各注釈は画像中の丸数字①②…と対応します。'
+      'image を読めない場合は file_path の PNG（無ければ shot_url に ?token= を付けて取得）を開いてください。' +
+      '各注釈は画像中の丸数字①②…と対応します。'
   );
   return lines.join('\n');
 }
