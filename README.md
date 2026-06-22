@@ -15,8 +15,7 @@ registry rather than the click-to-add form.)
 Annotations are **persisted per page (origin + path)** and **restored on every visit** (reproducibility),
 and each target element is re-resolved through a **robust multi-signal anchor** (stable-ID path,
 `data-testid`, `name`, `aria-label`, text match) so the *same element is found every time*
-(determinism). A **Copy context** button exports a deterministic page description to paste into an
-external AI chat.
+(determinism). **Copy for AI** exports deterministic guide context to paste into an external AI chat.
 
 You can also instruct the AI directly from the side-panel chat — but only through a **closed,
 deterministic verb registry** (`clickAffordance`, `fillAffordance`, `markElement`, `addNote`, …).
@@ -81,10 +80,11 @@ the selected URL / domain / all-sites scope and any durable re-apply rules are r
 Saved visual changes such as `outlineElement` re-apply after page refresh. To revert them, delete the
 matching remembered URL or memory rule in Settings, then refresh the page.
 
-Toolbar: **＋補足を付ける/Add context** (click an element to attach one AI-facing note; the target is framed in red) ·
-**お描き/Draw** (circle/box/arrow/freehand a target and attach a comment) ·
-**文脈をコピー/Copy context** · **手がかり/Affordances** (list interactive elements) ·
-**履歴/History** (reuse sent prompts, also via ↑/↓ at the textarea edge) · **設定/Settings**.
+Toolbar:
+- **Leave cues**: **Add note** (click an element to attach one AI-facing note; the target is framed in red) and **Draw** (circle/box/arrow/freehand a target and attach a comment).
+- **Guide AI**: **Copy for AI** packages the current URL, page title, saved cues, and operable elements as text to paste into another AI chat. When drawings exist, **Send image to AI** burns the visual cues into a screenshot.
+- **Inspect page**: **List elements** shows current operable elements.
+- **History** reuses sent prompts, also via ↑/↓ at the textarea edge. **Settings** opens AI connection, memory, recipe, and daemon settings.
 
 ### Drawing (circle/box/arrow/freehand around an element)
 
@@ -93,8 +93,8 @@ color), then **Done** to attach a single AI-facing instruction. Each drawing is 
 element it encircles**; coordinates are stored as **fractions of the element's box**, so the sketch
 follows the element and is **restored at the same place on revisit, scroll, and reflow**. The AI receives
 a plain-language description (e.g. *"circled in red. comment: …"*), so "look here / fix this circled part"
-instructions land precisely. Saved drawings (kind: **お描き**) are editable/removable from the
-"このページの補足" list.
+instructions land precisely. Saved drawings (kind: **Drawing**) are editable/removable from the
+**Page cues** list.
 
 ## Verb registry (excerpt)
 

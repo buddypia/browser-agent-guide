@@ -1,5 +1,5 @@
 // 開発用プレビュー: お描き注釈が1件ある時のサイドパネルを描画し、
-// 「お描きを画像でAIへ」CTA が注釈パネル内に出ることを目視確認する。
+// 「画像でAIへ送る」CTA が手がかりパネル内に出ることを目視確認する。
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -84,10 +84,10 @@ test('preview: お描きがある時、注釈パネルに画像でAIへ渡すCTA
   });
 
   await page.goto(`${origin}/sidepanel/sidepanel.html`);
-  await expect(page.getByText('AI send tray')).toBeVisible();
+  await expect(page.getByText('Page cues')).toBeVisible();
   const cta = page.locator('#btn-capture');
   await expect(cta).toBeVisible();
-  await expect(cta).toContainText('Send tray as image to AI');
+  await expect(cta).toContainText('Send image to AI');
   await expect(page.getByLabel('Preview of drawing 1')).toBeVisible();
 
   fs.mkdirSync(path.dirname(outPath), { recursive: true });

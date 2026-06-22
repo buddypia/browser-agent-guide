@@ -55,7 +55,7 @@ let state = {
   activeTabState: null,
   annotations: [],
   busy: false,
-  // 補足(picker)/お描き(drawing)モードがページ側で有効か。両モードは content 側で
+  // メモ(picker)/描画(drawing)モードがページ側で有効か。両モードは content 側で
   // 排他なので 1 フラグで扱い、サイドパネルにフォーカスがある状態の ESC を拾うために使う。
   pickerActive: false,
 };
@@ -361,7 +361,7 @@ function renderEmptyHint() {
     chip.addEventListener('click', () => usePrompt(t(key)));
     chips.appendChild(chip);
   });
-  // 「補足から始める」は composer ではなく補足ボタンへ誘導する。
+  // 「メモから始める」は composer ではなくメモボタンへ誘導する。
   const markChip = document.createElement('button');
   markChip.type = 'button';
   markChip.className = 'starter-chip meta';
@@ -678,7 +678,7 @@ els.input.addEventListener('keydown', (e) => {
   }
 });
 
-// 補足(picker)/お描き(drawing)モード中の ESC で終了する。これらはサイドパネルの
+// メモ(picker)/描画(drawing)モード中の ESC で終了する。これらはサイドパネルの
 // ボタンから開始するため、フォーカスがサイドパネル(別ドキュメント)に残り、ページ側の
 // keydown ハンドラに ESC が届かない。フォーカスが実際に居るこのドキュメントで拾い、
 // 配線済みの STOP_PICKER/STOP_DRAWING を送って確実に終了させる(content 側は冪等)。
@@ -694,7 +694,7 @@ els.languageSelect.addEventListener('change', (e) => {
   changeLanguage(e.target.value);
 });
 
-// 「補足を付ける」: ページ上で要素をクリックして補足を付ける注釈モードを開始。
+// 「メモを残す」: ページ上で要素をクリックしてメモを残すモードを開始。
 els.btnPick.addEventListener('click', async () => {
   if (state.tabId == null) await refreshState();
   try {
@@ -706,7 +706,7 @@ els.btnPick.addEventListener('click', async () => {
   }
 });
 
-// 「お描き」: ページ上で円/四角/矢印/ペンを使って印を描くお描きモードを開始。
+// 「描いて伝える」: ページ上で円/四角/矢印/ペンを使って対象を示す描画モードを開始。
 els.btnDraw.addEventListener('click', async () => {
   if (state.tabId == null) await refreshState();
   try {
@@ -718,7 +718,7 @@ els.btnDraw.addEventListener('click', async () => {
   }
 });
 
-// 「画像でAIへ」: お描きをスクリーンショットに焼き込み(burn-in)、画像ファイルとして
+// 「画像でAIへ」: 手がかりをスクリーンショットに焼き込み(burn-in)、画像ファイルとして
 // ダウンロード保存する。AIにはその shot.png を vision で見せる(テキスト変換ではなく絵を見る)。
 els.btnCapture.addEventListener('click', async () => {
   if (state.tabId == null) await refreshState();
@@ -775,7 +775,7 @@ els.btnCapture.addEventListener('click', async () => {
   }
 });
 
-// 「文脈をコピー」: 別のAIチャットに貼れる決定的なページ説明を生成してコピー。
+// 「AI用にコピー」: 別のAIチャットに貼れる決定的なページ説明を生成してコピー。
 els.btnContext.addEventListener('click', async () => {
   if (state.tabId == null) await refreshState();
   try {
@@ -838,7 +838,7 @@ async function clearChat() {
   els.input.focus();
 }
 
-// ---- 保存済み補足の一覧 ----
+// ---- 保存済み手がかりの一覧 ----
 async function refreshAnnotations() {
   if (state.tabId == null) return;
   try {
@@ -876,7 +876,7 @@ function updateMemoCountBadge(list) {
       els.memoCountBadge.removeAttribute('title');
     }
   }
-  // 「AI送信トレイ」を画像化するCTA。forAI OFF のお描きだけなら capture 側も空なので出さない。
+  // ページ手がかりを画像化するCTA。forAI OFF の描画だけなら capture 側も空なので出さない。
   if (els.annoFoot) els.annoFoot.hidden = sendCount === 0;
   if (els.captureCount) els.captureCount.textContent = sendCount > 0 ? String(sendCount) : '';
 }
