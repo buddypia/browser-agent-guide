@@ -204,7 +204,7 @@ test.describe('UI quality gates', () => {
 
     await language.selectOption('ja');
     await expect(page.getByRole('heading', { name: 'まずは指示を入力' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '補足を付ける' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'メモを残す' })).toBeVisible();
 
     await page.getByLabel('言語').selectOption('ko');
     await expect(page.getByRole('heading', { name: '먼저 지시를 입력하세요' })).toBeVisible();

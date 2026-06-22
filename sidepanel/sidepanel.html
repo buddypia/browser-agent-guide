@@ -66,7 +66,7 @@
       </div>
       <div class="toolbar">
         <div class="tool-group">
-          <p class="tool-cap mark" data-i18n="toolbar.markGroup">Notes &amp; drawings</p>
+          <p class="tool-cap mark" data-i18n="toolbar.markGroup">Leave cues</p>
           <div class="quick-actions two" aria-label="Frequent actions" data-i18n-aria-label="quickActions.label">
             <button
               id="btn-pick"
@@ -104,28 +104,13 @@
           </div>
         </div>
         <div class="tool-group">
-          <p class="tool-cap inspect" data-i18n="toolbar.inspectGroup">Inspect &amp; copy</p>
-          <div class="quick-actions two" aria-label="Inspect and copy" data-i18n-aria-label="toolbar.inspectGroup">
-            <button
-              id="btn-affordances"
-              class="quick-action inspect"
-              type="button"
-              title="List operable elements"
-              aria-label="List elements"
-              data-i18n-title="actions.affordancesTitle"
-              data-i18n-aria-label="actions.affordancesAria"
-            >
-              <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M9 6h11M9 12h11M9 18h11" />
-                <path d="M4 6h.01M4 12h.01M4 18h.01" />
-              </svg>
-              <span data-i18n="actions.affordances">List elements</span>
-            </button>
+          <p class="tool-cap guide" data-i18n="toolbar.guideGroup">Guide AI</p>
+          <div class="quick-actions one" aria-label="Guide AI" data-i18n-aria-label="toolbar.guideGroup">
             <button
               id="btn-context"
-              class="quick-action inspect"
+              class="quick-action guide"
               type="button"
-              title="Copy this page's text description to paste into another AI chat"
+              title="Copy guide context that teaches another AI about this page"
               aria-label="Copy for AI"
               data-i18n-title="actions.contextTitle"
               data-i18n-aria-label="actions.contextAria"
@@ -135,6 +120,26 @@
                 <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2" />
               </svg>
               <span data-i18n="actions.context">Copy for AI</span>
+            </button>
+          </div>
+        </div>
+        <div class="tool-group">
+          <p class="tool-cap inspect" data-i18n="toolbar.inspectGroup">Inspect page</p>
+          <div class="quick-actions one" aria-label="Inspect page" data-i18n-aria-label="toolbar.inspectGroup">
+            <button
+              id="btn-affordances"
+              class="quick-action inspect"
+              type="button"
+              title="Inspect operable elements on this page"
+              aria-label="List elements"
+              data-i18n-title="actions.affordancesTitle"
+              data-i18n-aria-label="actions.affordancesAria"
+            >
+              <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9 6h11M9 12h11M9 18h11" />
+                <path d="M4 6h.01M4 12h.01M4 18h.01" />
+              </svg>
+              <span data-i18n="actions.affordances">List elements</span>
             </button>
           </div>
         </div>

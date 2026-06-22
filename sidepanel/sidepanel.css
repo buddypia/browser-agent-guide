@@ -973,7 +973,7 @@ textarea:focus-visible {
   font-size: 11px;
 }
 
-/* ── Redesign: two captioned tool groups (Mark / Inspect) ─────────────── */
+/* ── Redesign: captioned tool groups (Cues / Guide AI / Inspect) ──────── */
 .tool-group {
   display: grid;
   gap: 6px;
@@ -999,10 +999,15 @@ textarea:focus-visible {
 }
 
 .tool-cap.mark::before { background: var(--ok); }
+.tool-cap.guide::before { background: #f4d28a; }
 .tool-cap.inspect::before { background: #5b9bd5; }
 
 .quick-actions.two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.quick-actions.one {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 /* recommended marking action — green, but softer than the accent Send */
@@ -1015,6 +1020,18 @@ textarea:focus-visible {
 .quick-action.mark-rec:hover {
   background: rgba(57, 185, 128, 0.22);
   border-color: var(--ok);
+}
+
+/* AI handoff tools — a warm lane separate from page inspection. */
+.quick-action.guide {
+  border-color: rgba(244, 210, 138, 0.56);
+  background: rgba(244, 210, 138, 0.12);
+  color: #f7e4b4;
+}
+
+.quick-action.guide:hover {
+  background: rgba(244, 210, 138, 0.18);
+  border-color: rgba(244, 210, 138, 0.72);
 }
 
 /* read-only / export tools — quieter panel tier, no green */
