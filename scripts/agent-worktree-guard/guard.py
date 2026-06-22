@@ -856,7 +856,7 @@ def delete_local_branch(root: Path, branch: str | None) -> bool:
     """merge 済みローカル branch を強制削除する。cleanup は pr_merged_at 記録後にのみ到達するため、
     squash-merge でローカル main に ff されていなくても安全に削除できる(-D)。
     削除失敗は致命にしない — worktree 除去という主目的は既に完了している。"""
-    if not branch or branch == "main":
+    if not branch or branch in {"main", "master"}:
         return False
     if not branch_exists(root, branch):
         return False
