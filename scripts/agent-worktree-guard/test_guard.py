@@ -239,6 +239,92 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         self.assertTrue(wt.exists())
         subprocess.run(["git", "worktree", "remove", str(wt), "--force"], cwd=self.repo, check=True)
 
+    def _git_out(self, args: list[str], cwd: Path) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=cwd, text=True, stdout=subprocess.PIPE, check=True
+        ).stdout.strip()
+
+    def _branch_exists(self, branch: str) -> bool:
+        return (
+            subprocess.run(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=self.repo
+            ).returncode
+            == 0
+        )
+
+    def test_cleanup_deletes_merged_branch(self) -> None:
+        run(["init"], self.repo)
+        wt = self._make_merged_worktree("branchgone")
+        self.assertTrue(self._branch_exists("feature/branchgone"))
+
+        cleanup = run(["cleanup", "--confirmed"], self.repo)
+        self.assertIn("cleaned 1 worktree", cleanup.stdout)
+        self.assertIn("branches deleted: 1", cleanup.stdout)
+        self.assertFalse(wt.exists())
+        self.assertFalse(self._branch_exists("feature/branchgone"))
+
+    def test_cleanup_drops_only_matching_branch_stash(self) -> None:
+        run(["init"], self.repo)
+        default_branch = self._git_out(["rev-parse", "--abbrev-ref", "HEAD"], self.repo)
+        wt = self._make_merged_worktree("stashed")
+
+        # stash on the worktree branch (worktree stays clean → removable).
+        (wt / "wip.txt").write_text("wip\n", encoding="utf-8")
+        subprocess.run(["git", "add", "wip.txt"], cwd=wt, check=True)
+        subprocess.run(["git", "stash", "push", "-m", "wt-wip"], cwd=wt, check=True, stdout=subprocess.PIPE)
+        # unrelated stash on the default branch in the main checkout.
+        (self.repo / "main-wip.txt").write_text("wip\n", encoding="utf-8")
+        subprocess.run(["git", "add", "main-wip.txt"], cwd=self.repo, check=True)
+        subprocess.run(["git", "stash", "push", "-m", "main-wip"], cwd=self.repo, check=True, stdout=subprocess.PIPE)
+
+        before = self._git_out(["stash", "list"], self.repo)
+        self.assertEqual(len(before.splitlines()), 2)
+
+        cleanup = run(["cleanup", "--confirmed"], self.repo)
+        self.assertIn("cleaned 1 worktree", cleanup.stdout)
+        self.assertIn("stashes dropped: 1", cleanup.stdout)
+        self.assertFalse(wt.exists())
+
+        after = self._git_out(["stash", "list"], self.repo)
+        self.assertEqual(len(after.splitlines()), 1)
+        self.assertIn(default_branch, after)
+        self.assertNotIn("feature/stashed", after)
+
+    def _make_committed_worktree(self, name: str) -> Path:
+        wt = self.repo / ".worktrees" / "feature" / name
+        run(["add", str(wt)], self.repo)
+        (wt / "f.txt").write_text("work\n", encoding="utf-8")
+        subprocess.run(["git", "add", "f.txt"], cwd=wt, check=True)
+        subprocess.run(["git", "commit", "-m", "work"], cwd=wt, check=True, stdout=subprocess.PIPE)
+        run(["mark-done", str(wt), "--reason", "manual"], self.repo)
+        return wt
+
+    def test_briefing_includes_review_report(self) -> None:
+        run(["init"], self.repo)
+        wt = self._make_committed_worktree("reviewed")
+        review_dir = wt / ".tmp" / "worktree-feature__reviewed"
+        review_dir.mkdir(parents=True, exist_ok=True)
+        (review_dir / "REVIEW.md").write_text(
+            "# Worktree Review — feature/reviewed\n\n"
+            "## Summary / 概要 (作業内容)\nクリーンアップ強化の要点。\n\n"
+            "## Trade-offs / トレードオフ\nstash 全消しではなく branch 一致のみ。\n",
+            encoding="utf-8",
+        )
+
+        audit = run(["audit"], self.repo)
+        self.assertIn("human review (REVIEW.md)", audit.stdout)
+        self.assertIn("概要", audit.stdout)
+        self.assertIn("クリーンアップ強化の要点", audit.stdout)
+        self.assertIn("トレードオフ", audit.stdout)
+
+    def test_briefing_notes_missing_review(self) -> None:
+        run(["init"], self.repo)
+        self._make_committed_worktree("noreview")
+
+        audit = run(["audit"], self.repo)
+        self.assertIn("REVIEW.md): 未作成", audit.stdout)
+        self.assertIn("mark-worktree-reviewed.mjs", audit.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
