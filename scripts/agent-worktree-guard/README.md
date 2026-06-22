@@ -47,7 +47,13 @@ sessions record merge automatically after a successful `gh pr merge`.
 worktree until PR merge is recorded. It removes only ledger entries whose owner
 marker matches the same session and ledger root. It uses `git worktree remove`
 first; `--force` is a separate explicit Git worktree removal flag, not a policy
-bypass.
+bypass. After the worktree is removed it also tidies the work it left behind:
+the now-merged local branch is force-deleted (`git branch -D`, safe because
+cleanup only runs after the PR merge is recorded) and any stash whose entry is
+based on that branch (`WIP on <branch>` / `On <branch>`) is dropped. Stashes on
+other branches are never touched, and every deleted branch / dropped stash is
+reported on stderr plus the `cleaned N worktree(s)` summary line
+(`branches deleted: N`, `stashes dropped: N`).
 
 ## Runtime Files
 
@@ -80,7 +86,12 @@ generated `.claude/settings.json` includes:
 - `Stop`: if every ledger worktree is done, continue the agent with a generated
   work briefing and the exact PR question until `confirm-pr --confirmed`; after
   confirmation it continues until merge is recorded; after merge it continues
-  until `cleanup --confirmed` removes the worktree.
+  until `cleanup --confirmed` removes the worktree. The briefing surfaces each
+  worktree's human-review report (`REVIEW.md`, the 概要/なぜ/何を/どうやって/影響/
+  トレードオフ/残作業/ファイル構造/レビュー依頼 sections) so the PR question is
+  answered from the review content, not a bare yes/no — and when `REVIEW.md` is
+  missing it points at the scaffold command (the `worktree-review-report-guard`
+  Stop hook still blocks until that report is complete).
 - `WorktreeCreate` / `WorktreeRemove`: route Claude `--worktree` lifecycle
   through the same ledger and owner-marker checks.
 
@@ -119,6 +130,9 @@ block `git push --no-verify` in AI tool calls.
 - Cleanup never touches a path absent from the current session ledger.
 - Cleanup never touches a path without a matching owner marker.
 - Cleanup never touches an owned worktree until PR merge is recorded.
+- Branch deletion targets only the cleaned worktree's own branch (never `main`),
+  and stash drop targets only stashes based on that exact branch — work on other
+  branches is never destroyed, and every removal is reported (no silent drop).
 - Standard `make wt.new` worktrees enter the ledger from the successful hook
   event, so cleanup removes only worktrees created or registered by that session.
 - Worktree inspection uses `git worktree list --porcelain -z`.
