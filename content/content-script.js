@@ -1626,7 +1626,16 @@
         if (a.kind === 'marker') applyMarker(a, target);
         else if (a.kind === 'button') renderAnnoButton(a, target);
         else if (a.kind === 'note') renderAnnoNote(a, target);
-        else if (a.kind === 'drawing') renderAnnoDrawing(a, target);
+        else if (a.kind === 'drawing') {
+          // 旧仕様で対象より大幅に小さい子要素へ誤アンカーされた古い注釈は、保存比率(shapesFrac)が
+          // 0..1 を大きく外れている。これを(構造変化で別要素へ解決された)target にそのまま掛けると、
+          // 無関係な位置へ巨大な点線が暴発する。安定シグナルの無い要素ではスキップして描き直しを促す。
+          if (target && !hasDurableAnchorSignal(target) && isDrawingFractionBroken(a.shapes)) {
+            warnBrokenDrawingOnce(a);
+          } else {
+            renderAnnoDrawing(a, target);
+          }
+        }
       }
       syncWorkflowUi(); // お描きが揃った後で手順パネル/順序コネクタを更新
       lastUnresolved = unresolved;
@@ -2503,18 +2512,25 @@
     return smallestCovering || el;
   }
 
+  // 「この要素は描いた四角と同じ対象か」を判定する。完全被覆(rect ⊇ box)を要求すると、人が
+  // 対象より少し大きめに囲んだだけで対象コンテナが外れ(box の上辺/左辺が rect の内側に入る)、
+  // 中心直下の小さい子要素へ誤アンカーしてしまう(検証シグナルダッシュボード全体を囲んだのに
+  // 中の1行「토론 밀도 0%」が選ばれた事例)。そこで「box中心を含み、かつ box の大部分を覆う」
+  // 緩い一致に変える。これなら対象を多少大きめ/小さめに囲んでも同一対象として掴める。
+  const COVERS_AREA_RATIO = 0.5; // rect が box のこの割合以上を覆えば同一対象とみなす
   function rectCoversShape(rect, box) {
     if (!rect || !box) return true;
-    // 人は対象要素ぴったりではなく少し外側を囲むため、その自然な余白は同一対象扱いにする。
-    const pad = 14;
-    return (
-      rect.width > 0 &&
-      rect.height > 0 &&
-      rect.left <= box.minX + pad &&
-      rect.top <= box.minY + pad &&
-      rect.right >= box.maxX - pad &&
-      rect.bottom >= box.maxY - pad
-    );
+    if (!(rect.width > 0 && rect.height > 0)) return false;
+    const bcx = (box.minX + box.maxX) / 2;
+    const bcy = (box.minY + box.maxY) / 2;
+    // box中心が rect の内側にあること(無関係な隣接要素を弾く軽い位置整合)。
+    if (rect.left > bcx || rect.right < bcx || rect.top > bcy || rect.bottom < bcy) return false;
+    // rect と box の交差面積が box の COVERS_AREA_RATIO 以上なら「同じ対象を囲んだ」とみなす。
+    // 完全被覆を要求しないので、box が rect より外側にはみ出す非対称ケースでも成立する。
+    const ix = Math.max(0, Math.min(rect.right, box.maxX) - Math.max(rect.left, box.minX));
+    const iy = Math.max(0, Math.min(rect.bottom, box.maxY) - Math.max(rect.top, box.minY));
+    const boxArea = Math.max(1, (box.maxX - box.minX) * (box.maxY - box.minY));
+    return (ix * iy) / boxArea >= COVERS_AREA_RATIO;
   }
 
   function isPageSizedRect(rect) {
@@ -2944,6 +2960,38 @@
     }
     if (!Number.isFinite(minX)) minX = minY = maxX = maxY = 0;
     return { minX, minY, maxX, maxY };
+  }
+
+  // 誤アンカー(対象より大幅に小さい子要素)に起因する「壊れた保存比率」の検出。描画時アンカー選定の
+  // 緩和(rectCoversShape)で新規注釈の比率はもう壊れないが、過去に保存された壊れ注釈が別要素へ解決され
+  // 無関係な位置へ巨大な点線を出すのを最後の砦として止めるための判定。
+  const DRAW_FRAC_MAX_OUT = 1.0; // 0..1 の外側にこれ以上はみ出す比率は誤アンカーの徴候
+  const DRAW_FRAC_MAX_SPAN = 3; // 対象要素のこの倍率を超える図形は誤アンカーの徴候
+  function isDrawingFractionBroken(shapes) {
+    if (!shapes || !shapes.length) return false;
+    const bb = shapesBBoxFrac(shapes);
+    return (
+      bb.minX < -DRAW_FRAC_MAX_OUT ||
+      bb.minY < -DRAW_FRAC_MAX_OUT ||
+      bb.maxX > 1 + DRAW_FRAC_MAX_OUT ||
+      bb.maxY > 1 + DRAW_FRAC_MAX_OUT ||
+      bb.maxX - bb.minX > DRAW_FRAC_MAX_SPAN ||
+      bb.maxY - bb.minY > DRAW_FRAC_MAX_SPAN
+    );
+  }
+  const warnedBrokenDrawings = new Set();
+  function warnBrokenDrawingOnce(a) {
+    if (!a || warnedBrokenDrawings.has(a.id)) return;
+    warnedBrokenDrawings.add(a.id);
+    try {
+      console.warn(
+        '[bag] お描き注釈のアンカー比率が壊れているため描画を抑止しました。描き直してください / ' +
+          'Drawing annotation has a broken anchor ratio; skipped rendering. Please redraw it.',
+        a.id
+      );
+    } catch {
+      /* console 不在環境は無視 */
+    }
   }
 
   // 対象要素の現在位置(viewport px)から、お描きの全図形・メモを再配置する。

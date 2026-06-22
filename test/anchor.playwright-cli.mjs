@@ -19,6 +19,8 @@ const hook = `
     upsertAnnotation, renderAnnotations, loadAnnotations,
     buildContextText, annoSummary,
     getCatalog, runActions, collectReferenceTargets,
+    rectCoversShape, isDrawingFractionBroken, hasDurableAnchorSignal,
+    pickAnchorElement, pickDurableAnchorElement,
     activateForTest: async (recipes) => {
       annotatePage();
       collectReferenceTargets();
@@ -115,6 +117,7 @@ const runnerSource = `async page => {
   const results = [];
   const check = (name, cond, detail = '') => results.push({ name, pass: Boolean(cond), detail: cond ? '' : String(detail) });
 
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.setContent(pageHtml);
   await page.addScriptTag({ content: chromeStub });
   await page.addScriptTag({ content: contentScript });
@@ -282,6 +285,135 @@ const runnerSource = `async page => {
   const clean = await page.evaluate((html) => window.__BAG_TEST__.sanitizeHtmlForTest(html), dirty);
   check('sanitizeHtmlが危険属性を除去', ['id=', 'class=', 'style=', 'onclick=', 'data-x='].every((x) => !clean.includes(x)), clean);
   check('sanitizeHtmlがscript/javascriptを除去', !clean.toLowerCase().includes('script') && !clean.toLowerCase().includes('javascript:'), clean);
+
+  // --- お描きアンカー: 描画時の誤アンカー回帰(検証シグナルダッシュボード事例) ---
+  // rectCoversShape を純粋関数として直接検証(座標非依存・決定的)。
+  const coversBig = await page.evaluate(() =>
+    window.__BAG_TEST__.rectCoversShape(
+      { left: 200, top: 200, right: 700, bottom: 600, width: 500, height: 400 },
+      { minX: 180, minY: 180, maxX: 720, maxY: 620 }
+    )
+  );
+  check('rectCoversShape: 少し大きめに囲んだコンテナを同一対象と認める', coversBig === true, 'got=' + coversBig);
+  const coversThinRow = await page.evaluate(() =>
+    window.__BAG_TEST__.rectCoversShape(
+      { left: 210, top: 380, right: 690, bottom: 420, width: 480, height: 40 },
+      { minX: 180, minY: 180, maxX: 720, maxY: 620 }
+    )
+  );
+  check('rectCoversShape: box内の細い小行(面積比~0.08)は同一対象と認めない', coversThinRow === false, 'got=' + coversThinRow);
+  const coversOffCenter = await page.evaluate(() =>
+    window.__BAG_TEST__.rectCoversShape(
+      { left: 0, top: 0, right: 100, bottom: 100, width: 100, height: 100 },
+      { minX: 180, minY: 180, maxX: 720, maxY: 620 }
+    )
+  );
+  check('rectCoversShape: box中心を含まない隣接要素は弾く', coversOffCenter === false, 'got=' + coversOffCenter);
+
+  // 壊れた保存比率(C: 暴発描画の抑止)の検出。
+  const brokenFrac = await page.evaluate(() =>
+    window.__BAG_TEST__.isDrawingFractionBroken([{ type: 'rect', x: -0.0785, y: -3.6928, w: 1.1619, h: 9.0557 }])
+  );
+  check('isDrawingFractionBroken: 本件の壊れ比率(y=-3.69,h=9.05)を検出', brokenFrac === true, 'got=' + brokenFrac);
+  const normalFrac = await page.evaluate(() =>
+    window.__BAG_TEST__.isDrawingFractionBroken([{ type: 'rect', x: 0.05, y: 0.05, w: 0.9, h: 0.9 }])
+  );
+  check('isDrawingFractionBroken: 正常比率(0..1)は壊れ扱いしない', normalFrac === false, 'got=' + normalFrac);
+  const slightlyOutFrac = await page.evaluate(() =>
+    window.__BAG_TEST__.isDrawingFractionBroken([{ type: 'rect', x: -0.15, y: -0.15, w: 1.3, h: 1.3 }])
+  );
+  check('isDrawingFractionBroken: 少し外側に囲んだ比率は壊れ扱いしない', slightlyOutFrac === false, 'got=' + slightlyOutFrac);
+
+  // pickDurableAnchorElement 統合: 大コンテナを少し大きめに囲んでも、中心直下の小子要素でなく
+  // コンテナにアンカーする(仮説Aの E2E 回帰)。durable シグナルを避けるため id は連番風にする。
+  // 注: position:absolute の子は positioned 親(boardZone7777/wrapZone7777)基準で配置されるため、
+  // 子の left/top は親内オフセットで指定する(metricRow8888 の絶対座標は 210,280 / btnInner7777 は 300,560)。
+  await page.evaluate(() => {
+    const host = document.createElement('div');
+    host.id = 'draw-fixture';
+    host.innerHTML =
+      '<div id="boardZone7777" style="position:absolute; left:200px; top:100px; width:500px; height:400px; background:#eee;">' +
+      '<div id="metricRow8888" style="position:absolute; left:10px; top:180px; width:480px; height:40px;">토론 밀도 0%</div>' +
+      '</div>' +
+      '<div id="wrapZone7777" style="position:absolute; left:200px; top:540px; width:400px; height:160px;">' +
+      '<button id="btnInner7777" style="position:absolute; left:100px; top:20px; width:120px; height:40px;">click</button>' +
+      '</div>';
+    document.body.appendChild(host);
+  });
+  const rectSanity = await page.evaluate(() => {
+    const r = document.querySelector('#boardZone7777').getBoundingClientRect();
+    const m = document.querySelector('#metricRow8888').getBoundingClientRect();
+    return {
+      board: { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) },
+      rowAbs: { left: Math.round(m.left), top: Math.round(m.top), width: Math.round(m.width), height: Math.round(m.height) },
+    };
+  });
+  check(
+    'お描きfixture: #boardZone7777 の rect が想定どおり(座標テスト前提)',
+    rectSanity.board.left === 200 && rectSanity.board.top === 100 && rectSanity.board.width === 500 && rectSanity.board.height === 400,
+    JSON.stringify(rectSanity)
+  );
+  check(
+    'お描きfixture: #metricRow8888 の絶対rectが box中心(450,300)を含む',
+    rectSanity.rowAbs.left === 210 && rectSanity.rowAbs.top === 280 && rectSanity.rowAbs.width === 480 && rectSanity.rowAbs.height === 40,
+    JSON.stringify(rectSanity)
+  );
+  const durableSanity = await page.evaluate(() => ({
+    board: window.__BAG_TEST__.hasDurableAnchorSignal(document.querySelector('#boardZone7777')),
+    row: window.__BAG_TEST__.hasDurableAnchorSignal(document.querySelector('#metricRow8888')),
+  }));
+  check(
+    'お描きfixture: コンテナ/小行とも安定シグナル無し(緩和判定のテスト前提)',
+    durableSanity.board === false && durableSanity.row === false,
+    JSON.stringify(durableSanity)
+  );
+  const bigCircle = await page.evaluate(() => {
+    const box = { minX: 180, minY: 80, maxX: 720, maxY: 520, cx: 450, cy: 300 };
+    const start = window.__BAG_TEST__.pickAnchorElement(box.cx, box.cy);
+    const target = window.__BAG_TEST__.pickDurableAnchorElement(start, box);
+    return { startId: start && start.id, targetId: target && target.id };
+  });
+  check('お描き: 中心直下の起点は小行になる(誤アンカーの起点)', bigCircle.startId === 'metricRow8888', JSON.stringify(bigCircle));
+  check('お描き: 少し大きめに囲んでもコンテナにアンカーする(小子要素に落ちない)', bigCircle.targetId === 'boardZone7777', JSON.stringify(bigCircle));
+  const tightCircle = await page.evaluate(() => {
+    const box = { minX: 295, minY: 555, maxX: 425, maxY: 605, cx: 360, cy: 580 };
+    const start = window.__BAG_TEST__.pickAnchorElement(box.cx, box.cy);
+    const target = window.__BAG_TEST__.pickDurableAnchorElement(start, box);
+    return { startId: start && start.id, targetId: target && target.id };
+  });
+  check('お描き: 要素をぴったり囲んだら要素自身に留まる(親へ昇格しない)', tightCircle.targetId === 'btnInner7777', JSON.stringify(tightCircle));
+
+  // C 統合: 旧仕様で壊れた比率(極端 shapesFrac)の drawing は、解決できても暴発描画しない。
+  const suppressedRects = await page.evaluate(async () => {
+    window.__BAG_TEST__.clearAnnotations();
+    const board = document.querySelector('#boardZone7777'); // 安定シグナル無しの要素
+    await window.__BAG_TEST__.upsertAnnotation({
+      kind: 'drawing',
+      anchor: window.__BAG_TEST__.buildAnchor(board),
+      shapes: [{ type: 'rect', x: -0.0785, y: -3.6928, w: 1.1619, h: 9.0557, color: '#ef4444', width: 3 }],
+      note: '壊れた比率の旧注釈',
+    });
+    window.__BAG_TEST__.renderAnnotations();
+    return document.querySelectorAll('.bag-draw-layer rect').length;
+  });
+  check('C: 壊れた比率の古い注釈は暴発描画されない(図形が出ない)', suppressedRects === 0, 'rects=' + suppressedRects);
+  const normalRects = await page.evaluate(async () => {
+    window.__BAG_TEST__.clearAnnotations();
+    const board = document.querySelector('#boardZone7777');
+    await window.__BAG_TEST__.upsertAnnotation({
+      kind: 'drawing',
+      anchor: window.__BAG_TEST__.buildAnchor(board),
+      shapes: [{ type: 'rect', x: 0.05, y: 0.05, w: 0.9, h: 0.9, color: '#ef4444', width: 3 }],
+      note: '正常な比率の注釈',
+    });
+    window.__BAG_TEST__.renderAnnotations();
+    return document.querySelectorAll('.bag-draw-layer rect').length;
+  });
+  check('C: 正常な比率の注釈は従来どおり描画される(抑止は壊れたものだけ)', normalRects === 1, 'rects=' + normalRects);
+  await page.evaluate(() => {
+    window.__BAG_TEST__.clearAnnotations();
+    document.querySelector('#draw-fixture')?.remove();
+  });
 
   return { total: results.length, passed: results.filter((r) => r.pass).length, results };
 }`;
