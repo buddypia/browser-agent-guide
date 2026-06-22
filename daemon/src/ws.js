@@ -3,6 +3,7 @@
 import { WebSocketServer } from 'ws';
 import { writeEntry } from './writer.js';
 import { tokenEquals } from './token.js';
+import { imageUrlFor } from './image-url.js';
 
 const MAX_PAYLOAD = 64 * 1024 * 1024; // 合成PNG(base64) + raw を許容
 
@@ -33,7 +34,9 @@ export function attachWebSocketServer(httpServer, { inboxDir, entryStore, token,
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   });
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
+    // 接続に使われた authority(host:port)。ack に載せる取得先 URL の host に使う（=画像配信ルートと同一サーバ）。
+    const host = req?.headers?.host || '';
     ws.on('message', (data) => {
       let msg;
       try {
@@ -51,7 +54,16 @@ export function attachWebSocketServer(httpServer, { inboxDir, entryStore, token,
         if (msg.downloadsDir) onHello?.(msg.downloadsDir);
         const saved = entryStore?.save ? entryStore.save(msg) : { storage: 'disk', materialized: true, ...writeEntry(currentInbox(), msg) };
         onSaved?.(saved);
-        ws.send(JSON.stringify({ type: 'ack', ...saved }));
+        // パス非依存の取得先 URL を ack に併走させる（拡張サイドパネルがそのまま表示できる）。
+        // token は URL に埋め込まない（取得時に ?token= を付与）。raw は payload にある時だけ広告する。
+        // 注: index.js では WS と画像配信ルートが同一 token を共有するので、この URL は ?token= 付与で必ず到達できる。
+        const urls = token && saved?.id
+          ? {
+              shotUrl: imageUrlFor(host, saved.id, 'shot'),
+              ...(msg.image?.raw ? { rawUrl: imageUrlFor(host, saved.id, 'raw') } : {}),
+            }
+          : {};
+        ws.send(JSON.stringify({ type: 'ack', ...saved, ...urls }));
       } catch (e) {
         ws.send(JSON.stringify({ type: 'error', error: String(e?.message || e) }));
       }

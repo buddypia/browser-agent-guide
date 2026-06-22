@@ -94,6 +94,19 @@ async function installChromeMock(page) {
             actions: [],
             results: [],
           };
+        case 'CAPTURE_VISUAL_FEEDBACK':
+          // daemon 経路: ack 由来の token-less な画像URL（res.imageUrl）をサイドパネルが表示する。
+          return {
+            transport: 'daemon',
+            dir: '/home/user/Downloads/ai-inbox/cap-test-slug',
+            id: 'cap-test-slug',
+            imageUrl: 'http://127.0.0.1:8765/shot/cap-test-slug.png',
+            items: 1,
+            drawn: 1,
+            width: 800,
+            height: 600,
+            downscaled: false,
+          };
         case 'SET_REMEMBER_SCOPE':
         case 'OPEN_OPTIONS':
         case 'START_PICKER':
@@ -225,6 +238,23 @@ test.describe('UI quality gates', () => {
 
     await expect(page.locator('#messages').getByText('Check the main CTA on this page', { exact: true })).toBeVisible();
     await expect(page.locator('#messages').getByText('Reply to: Check the main CTA on this page')).toBeVisible();
+  });
+
+  test('side panel shows the daemon image URL after capture', async ({ page }) => {
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+    // パネル JS の初期化完了を待つ（init が state を整える）。
+    await expect(page.getByRole('textbox', { name: 'Instruction for AI' })).toBeVisible();
+
+    // キャプチャCTA(#btn-capture)はトレイに項目がある時だけ可視。ここでは daemon ack→サイドパネル
+    // 表示の配線だけを検証したいので、ハンドラを DOM の .click() で直接起動する（可視性に依存しない）。
+    await page.evaluate(() => document.getElementById('btn-capture').click());
+
+    // daemon 経路で res.imageUrl が来たら、パス非依存の取得先 URL を「画像URL」行として出す。
+    await expect(
+      page.locator('#messages').getByText('http://127.0.0.1:8765/shot/cap-test-slug.png')
+    ).toBeVisible();
+    // token は表示テキストに埋め込まない（取得時に付与する案内のみ）。
+    await expect(page.locator('#messages').getByText('append ?token=')).toBeVisible();
   });
 
   test('side panel can delete one chat turn or all chat messages', async ({ page }) => {

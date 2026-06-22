@@ -116,6 +116,7 @@
   "capture.sentDaemon": "デーモンへ送信しました（WebSocket）。",
   "capture.savedDownload": "視覚フィードバックをダウンロードフォルダに保存しました。",
   "capture.savePath": "保存先: {path}/",
+  "capture.imageUrl": "画像URL: {url}（取得時に ?token= を付与）",
   "capture.daemonCliHint": "CLIで「視覚フィードバックの最新を見て」と頼めば、MCP経由で自動取得されます。",
   "capture.daemonScopeHint": "複数プロジェクトが混在する場合は urlContains で今のページに絞れます。",
   "capture.fallbackNote": "\n（デーモン送信に失敗→ダウンロード保存にフォールバック: {message}）",

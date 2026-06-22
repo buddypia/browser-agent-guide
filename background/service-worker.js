@@ -629,7 +629,8 @@ async function captureVisualFeedback({ tabId, autoSync = false }) {
           memo,
         },
       });
-      return { transport: 'daemon', dir: ack.dir, file: `${ack.dir}/shot.png`, id: ack.id, ...common };
+      // ack.shotUrl はパス非依存の取得先（token-less）。サイドパネルが表示する（取得時に ?token= を付与）。
+      return { transport: 'daemon', dir: ack.dir, file: `${ack.dir}/shot.png`, id: ack.id, imageUrl: ack.shotUrl || null, ...common };
     } catch (e) {
       daemonError = String(e?.message || e); // フォールバックして下の downloads へ
       if (autoSync) throw new Error(daemonError);

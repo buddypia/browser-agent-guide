@@ -110,7 +110,7 @@ export function createMcpServer(entrySource, { shotUrlFor } = {}) {
       }
       const blocked = imageGateMessage(entry, { contextId, imageReason });
       if (blocked) return { content: [{ type: 'text', text: blocked }] };
-      return { content: buildEntryContent(entryStore.materialize(entry), { shotUrlFor }) };
+      return { content: buildEntryContent(materializeForImage(entryStore, entry), { shotUrlFor }) };
     }
   );
 
@@ -147,11 +147,23 @@ export function createMcpServer(entrySource, { shotUrlFor } = {}) {
       if (!entry) return { content: [{ type: 'text', text: `id=${id} は見つかりません。` }], isError: true };
       const blocked = imageGateMessage(entry, { contextId, imageReason });
       if (blocked) return { content: [{ type: 'text', text: blocked }] };
-      return { content: buildEntryContent(entryStore.materialize(entry), { shotUrlFor }) };
+      return { content: buildEntryContent(materializeForImage(entryStore, entry), { shotUrlFor }) };
     }
   );
 
   return server;
+}
+
+// image 応答用に entry を materialize する。/shot ルートと同じく「画像バイトはメモリ優先」で、
+// disk 書き込み（file_path fallback の materialize）は best-effort 扱いにする。
+// 書き込みに失敗（read-only inbox / disk full 等）しても、メモリの画像バイト + shot_url で応答を返す。
+// 成功時は従来どおり file_path を materialize する（image fallback 不変条件を満たす）。
+function materializeForImage(entryStore, entry) {
+  try {
+    return entryStore.materialize(entry);
+  } catch {
+    return entry;
+  }
 }
 
 function asEntryStore(entrySource) {

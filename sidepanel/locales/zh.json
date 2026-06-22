@@ -116,6 +116,7 @@
   "capture.sentDaemon": "已发送到守护进程（WebSocket）。",
   "capture.savedDownload": "视觉反馈已保存到下载文件夹。",
   "capture.savePath": "保存到：{path}/",
+  "capture.imageUrl": "图片 URL：{url}（获取时附加 ?token=）",
   "capture.daemonCliHint": "在 CLI 中请求查看最新视觉反馈，即可通过 MCP 自动获取。",
   "capture.daemonScopeHint": "多个项目共享收件箱时，可用 urlContains 限定为当前页面。",
   "capture.fallbackNote": "\n（守护进程发送失败，已回退为下载保存：{message}）",
