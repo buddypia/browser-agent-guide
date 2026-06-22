@@ -29,7 +29,9 @@ const IMAGE_GATE_SCHEMA = {
     .describe('@agent: / selector / testid / anchorLabel だけでは不十分で、vision が必要な具体的理由。'),
 };
 
-export function createMcpServer(entrySource) {
+// shotUrlFor(id, kind) は、ディスクパス非依存の loopback HTTP 取得先（/shot|/raw/<id>.png?token=…）を
+// 返すオプション関数。渡された時だけ context/image テキストに shot_url/raw_url を併走させる。
+export function createMcpServer(entrySource, { shotUrlFor } = {}) {
   const entryStore = asEntryStore(entrySource);
   const server = new McpServer(
     { name: 'bag-visual-feedback', version: '0.1.0' },
@@ -81,7 +83,7 @@ export function createMcpServer(entrySource) {
       if (!entry) {
         return { content: [{ type: 'text', text: filterEmptyMessage({ urlContains, titleContains }) }] };
       }
-      const context = buildEntryContext(entry);
+      const context = buildEntryContext(entry, { shotUrlFor });
       return {
         content: [{ type: 'text', text: buildEntryContextText(context) }],
         structuredContent: context,
@@ -108,7 +110,7 @@ export function createMcpServer(entrySource) {
       }
       const blocked = imageGateMessage(entry, { contextId, imageReason });
       if (blocked) return { content: [{ type: 'text', text: blocked }] };
-      return { content: buildEntryContent(entryStore.materialize(entry)) };
+      return { content: buildEntryContent(entryStore.materialize(entry), { shotUrlFor }) };
     }
   );
 
@@ -123,7 +125,7 @@ export function createMcpServer(entrySource) {
     async ({ id }) => {
       const entry = entryStore.findEntry(id);
       if (!entry) return { content: [{ type: 'text', text: `id=${id} は見つかりません。` }], isError: true };
-      const context = buildEntryContext(entry);
+      const context = buildEntryContext(entry, { shotUrlFor });
       return {
         content: [{ type: 'text', text: buildEntryContextText(context) }],
         structuredContent: context,
@@ -145,7 +147,7 @@ export function createMcpServer(entrySource) {
       if (!entry) return { content: [{ type: 'text', text: `id=${id} は見つかりません。` }], isError: true };
       const blocked = imageGateMessage(entry, { contextId, imageReason });
       if (blocked) return { content: [{ type: 'text', text: blocked }] };
-      return { content: buildEntryContent(entryStore.materialize(entry)) };
+      return { content: buildEntryContent(entryStore.materialize(entry), { shotUrlFor }) };
     }
   );
 

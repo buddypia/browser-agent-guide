@@ -12,6 +12,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, resolve, isAbsolute, sep } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { decodeBase64 } from './writer.js';
 
 export const SHOT = 'shot.png';
 export const RAW = 'raw.png';
@@ -182,20 +183,20 @@ export function readAnnotation(dir) {
 
 // MCP tool 用の content[] を組み立てる。image を見られない CLI でも text の file_path で
 // vision できるよう、必ず image と file_path の両方を返す（handoff §3.2 = fallback 内蔵）。
-export function buildEntryContent(entry, { includeImage = true } = {}) {
+export function buildEntryContent(entry, { includeImage = true, shotUrlFor } = {}) {
   const annotation = readEntryAnnotation(entry);
   const content = [];
   if (includeImage) {
     const data = readEntryShotBase64(entry);
     content.push({ type: 'image', data, mimeType: 'image/png' });
   }
-  content.push({ type: 'text', text: buildEntryText(entry, annotation) });
+  content.push({ type: 'text', text: buildEntryText(entry, annotation, { shotUrlFor }) });
   return content;
 }
 
 // 画像を送らず、annotation.json 由来の手がかりだけを返す軽量 context。
 // @agent: / selector / testid で特定できる時は vision を呼ばずに進められる。
-export function buildEntryContext(entry) {
+export function buildEntryContext(entry, { shotUrlFor } = {}) {
   const annotation = readEntryAnnotation(entry) || {};
   const storage = entry.storage || 'disk';
   const materialized = storage === 'memory' ? Boolean(entry.materialized) : true;
@@ -207,6 +208,8 @@ export function buildEntryContext(entry) {
     storage,
     materialized,
     files,
+    // ディスクパス非依存の取得先（loopback HTTP）。ブラウザの DL 先と inbox がズレても届く。
+    urls: shotUrlFor ? { shot: shotUrlFor(entry.id, 'shot'), raw: shotUrlFor(entry.id, 'raw') } : null,
     url: annotation.url || entry.url || '',
     title: annotation.title || entry.title || '',
     capturedAt: annotation.capturedAt || '',
@@ -253,6 +256,9 @@ export function buildEntryContextText(context) {
   if (context.files.raw) lines.push(`raw_path: ${context.files.raw}`);
   if (context.files.annotation) lines.push(`annotation_path: ${context.files.annotation}`);
   if (context.files.memo) lines.push(`memo_path: ${context.files.memo}`);
+  // パス非依存の取得先。file_path を解決できない（inbox がズレた）時はこの URL に ?token= を付けて PNG を取れる。
+  if (context.urls?.shot) lines.push(`shot_url: ${context.urls.shot}  (append ?token=<daemon token>)`);
+  if (context.urls?.raw) lines.push(`raw_url: ${context.urls.raw}`);
   if (context.url) lines.push(`url: ${context.url}`);
   if (context.title) lines.push(`title: ${context.title}`);
   if (context.capturedAt) lines.push(`captured_at: ${context.capturedAt}`);
@@ -314,8 +320,30 @@ function readEntryAnnotation(entry) {
 }
 
 function readEntryShotBase64(entry) {
-  if (entry?.shotBuffer) return entry.shotBuffer.toString('base64');
-  return readFileSync(entry.shot).toString('base64');
+  const buf = readEntryImageBuffer(entry, 'shot');
+  if (!buf) throw new Error(`shot.png not found for entry ${entry?.id || ''}`);
+  return buf.toString('base64');
+}
+
+// PNG のバイト列を返す共通入口（MCP の base64 化と HTTP 画像配信が共有する）。kind='shot'|'raw'。
+// メモリ保持(materialize 前)エントリは payload/shotBuffer から、ディスクエントリはファイルから読む。
+// バイトが取れなければ null（呼び出し側で 404 / throw を選ぶ）。
+export function readEntryImageBuffer(entry, kind = 'shot') {
+  if (!entry) return null;
+  if (kind === 'shot') {
+    if (entry.shotBuffer) return entry.shotBuffer;
+    return entry.shot && existsSync(entry.shot) ? readFileSync(entry.shot) : null;
+  }
+  if (kind === 'raw') {
+    // メモリ保持(materialize 前)は raw を payload にだけ持つ。
+    if (entry.shotBuffer && !entry.materialized) {
+      const raw = decodeBase64(entry.payload?.image?.raw);
+      if (raw && raw.length) return raw;
+    }
+    const p = entry.dir ? join(entry.dir, RAW) : '';
+    return p && existsSync(p) ? readFileSync(p) : null;
+  }
+  return null;
 }
 
 function entryFiles(entry, materialized) {
@@ -331,9 +359,11 @@ function entryFiles(entry, materialized) {
 }
 
 // image と並走させるテキスト。先頭に絶対パス、続いて指示一覧（selector/intent）。
-export function buildEntryText(entry, annotation) {
+export function buildEntryText(entry, annotation, { shotUrlFor } = {}) {
   const lines = [];
   lines.push(`file_path: ${entry.shot}`);
+  // file_path を解決できない（inbox がブラウザ DL 先とズレた）時の代替取得先。取得には ?token= を付与する。
+  if (shotUrlFor) lines.push(`shot_url: ${shotUrlFor(entry.id, 'shot')}  (append ?token=<daemon token>)`);
   if (annotation?.url) lines.push(`url: ${annotation.url}`);
   if (annotation?.title) lines.push(`title: ${annotation.title}`);
   if (annotation?.capturedAt) lines.push(`captured_at: ${annotation.capturedAt}`);

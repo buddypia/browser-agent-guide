@@ -47,7 +47,7 @@ function adoptDownloadsDir(downloadsDir) {
   return true;
 }
 
-const server = createHttpServer({ inboxDir: getInbox, entryStore });
+const server = createHttpServer({ inboxDir: getInbox, entryStore, token });
 attachWebSocketServer(server, {
   inboxDir: getInbox,
   entryStore,
@@ -61,6 +61,7 @@ server.listen(port, host, () => {
   // stdout は汚さず stderr に出す（MCP の stdio とは独立だが慣習に合わせる）。
   process.stderr.write(`[bag-vf] MCP(Streamable HTTP)  http://${host}:${port}/mcp\n`);
   process.stderr.write(`[bag-vf] 拡張 push (WebSocket)  ws://${host}:${port}/ws\n`);
+  process.stderr.write(`[bag-vf] 画像配信 (GET)         http://${host}:${port}/shot/<id>.png?token=…  (raw は /raw/<id>.png)\n`);
   process.stderr.write(`[bag-vf] inbox: ${getInbox()}${inboxState.pinned ? ' (固定)' : ' (自動検出。拡張の報告で更新される場合あり)'}\n`);
   process.stderr.write(`[bag-vf] storage: ${storageMode}${storageMode === 'hybrid' ? ' (context はメモリ、image/file_path 時だけ保存)' : ' (即時保存)'}\n`);
   process.stderr.write(`[bag-vf] token: ${token}\n`);
