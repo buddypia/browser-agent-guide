@@ -116,6 +116,7 @@
   "capture.sentDaemon": "Sent to the daemon (WebSocket).",
   "capture.savedDownload": "Saved visual feedback to your Downloads folder.",
   "capture.savePath": "Saved to: {path}/",
+  "capture.imageUrl": "Image URL: {url} (append ?token= to fetch)",
   "capture.daemonCliHint": "In your CLI, ask to see the latest visual feedback and it will be fetched through MCP.",
   "capture.daemonScopeHint": "When multiple projects share the inbox, filter with urlContains for the current page.",
   "capture.fallbackNote": "\n(Daemon send failed, so it fell back to download: {message})",
