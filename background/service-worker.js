@@ -3,13 +3,28 @@
 // - ページ有効化時にコンテンツスクリプトへ動詞レシピを適用
 // - サイドパネルからのチャットを受けて、文脈収集 → AI呼び出し → 動詞実行 を行う
 
-import { getSettings, saveSettings } from '../lib/storage.js';
+import { getSettings as readSettingsRaw, saveSettings as saveSettingsRaw } from '../lib/storage.js';
 import { findMatchingRules } from '../lib/site-matcher.js';
 import { callAI } from '../lib/ai-client.js';
 import { buildSystemPrompt } from '../lib/prompt.js';
 import { slugFromCapture } from '../lib/slug.js';
 import { mergeRecipeActions } from '../lib/recipe-merge.js';
 import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18n.js';
+
+// ---- 設定ブロブのメモリキャッシュ ----
+// 1メッセージ処理で getSettings が複数回(例: handleMessage 冒頭の ensureI18n と
+// getActiveTabState)呼ばれても、chrome.storage.local 読込＋ディープマージを1回に抑える。
+// 自身の保存(saveSettings)と外部変更(options/sidepanel の storage.onChanged)で失効させる。
+let settingsCache = null;
+async function getSettings() {
+  if (settingsCache) return settingsCache;
+  settingsCache = await readSettingsRaw();
+  return settingsCache;
+}
+async function saveSettings(next) {
+  settingsCache = null; // 書込前に失効させ、以後の読込が新値を取り直すようにする
+  await saveSettingsRaw(next);
+}
 
 // ---- i18n: ロケール辞書(sidepanel/locales)を拡張オリジンで読み、同期 t() で解決する ----
 // SW はオーケストレータとして唯一ロケール辞書を読み、content/offscreen/ai-client のエラーや
@@ -47,9 +62,13 @@ function t(key, vars) {
   );
 }
 
-// 言語設定が変わったら、次回 ensureI18n で辞書を読み直させる。
+// 設定が変わったら(options/sidepanel など他コンテキストの書込含む)、設定キャッシュを
+// 失効させ、言語が変わっていれば次回 ensureI18n で辞書を読み直させる。
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes.aiAdvisorSettings) i18nLoadedFor = null;
+  if (area === 'local' && changes.aiAdvisorSettings) {
+    settingsCache = null;
+    i18nLoadedFor = null;
+  }
 });
 
 const MEMORY_VERBS = new Set([
