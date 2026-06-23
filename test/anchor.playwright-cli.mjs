@@ -415,6 +415,202 @@ const runnerSource = `async page => {
     document.querySelector('#draw-fixture')?.remove();
   });
 
+  // --- 解決時の誤バインド回帰(nichenext.com/ko 事例: 選択要素と違う要素に赤枠が出る) ---
+  // 近傍由来の非一意シグナル(同一hrefの繰り返しリンク / 祖先testid / 共有aria-label)が
+  // 別要素を掴むのを resolveAnchor が防ぎ、クリックした“その”要素へ戻ることを検証する。
+  await page.evaluate(() => {
+    const host = document.createElement('div');
+    host.id = 'misbind-fixture';
+    host.innerHTML =
+      // FM1: サムネ用<a>と見出し<a>が同一URLを指す記事カード。クリックは見出しリンク。
+      '<div id="feedZone">' +
+      '  <article>' +
+      '    <a href="/ko/post/aaa" class="thumb" aria-label="썸네일"><span>img</span></a>' +
+      '    <h3><a href="/ko/post/aaa" class="title">첫번째 글 제목</a></h3>' +
+      '  </article>' +
+      '</div>' +
+      // FM3: 祖先<li>が共有 data-testid を持つカード列。クリックは2枚目の見出しテキスト。
+      '<ul id="cardList">' +
+      '  <li data-testid="post-card"><a href="/ko/x"><span class="ttl">카드 가</span></a></li>' +
+      '  <li data-testid="post-card"><a href="/ko/y"><span class="ttl">카드 나</span></a></li>' +
+      '</ul>' +
+      // FM2: アイコンボタンが aria-label を共有(テキストで識別)。クリックは2つ目。
+      '<div id="iconBar">' +
+      '  <button aria-label="더보기" class="more">가옵션</button>' +
+      '  <button aria-label="더보기" class="more">나옵션</button>' +
+      '</div>';
+    document.body.appendChild(host);
+  });
+
+  const fm1 = await page.evaluate(() => {
+    const titleLink = document.querySelector('#feedZone a.title');
+    const resolved = window.__BAG_TEST__.resolveAnchor(window.__BAG_TEST__.buildAnchor(titleLink));
+    return { ok: resolved === titleLink, resolvedClass: resolved && resolved.className };
+  });
+  check('解決: 同一href繰り返しリンクで見出しリンク自身に戻る(サムネに落ちない)', fm1.ok, JSON.stringify(fm1));
+
+  const fm3 = await page.evaluate(() => {
+    const ttlB = document.querySelectorAll('#cardList .ttl')[1];
+    const resolved = window.__BAG_TEST__.resolveAnchor(window.__BAG_TEST__.buildAnchor(ttlB));
+    return { ok: resolved === ttlB, resolvedText: resolved && (resolved.textContent || '').trim() };
+  });
+  check('解決: 祖先共有testidの子テキストで子要素自身に戻る(先頭カードに落ちない)', fm3.ok, JSON.stringify(fm3));
+
+  const fm2 = await page.evaluate(() => {
+    const btnB = document.querySelectorAll('#iconBar .more')[1];
+    const resolved = window.__BAG_TEST__.resolveAnchor(window.__BAG_TEST__.buildAnchor(btnB));
+    return { ok: resolved === btnB, resolvedText: resolved && (resolved.textContent || '').trim() };
+  });
+  check('解決: 共有aria-labelでも選んだボタン自身に戻る(先頭ボタンに落ちない)', fm2.ok, JSON.stringify(fm2));
+
+  // end-to-end: メモ(note)の赤枠 data-bag-anno-outline が“選んだ”要素にだけ付くことを確認。
+  const outlineOnRight = await page.evaluate(async () => {
+    window.__BAG_TEST__.clearAnnotations();
+    const titleLink = document.querySelector('#feedZone a.title');
+    await window.__BAG_TEST__.upsertAnnotation({
+      kind: 'note',
+      anchor: window.__BAG_TEST__.buildAnchor(titleLink),
+      note: 'ここの文言を直す',
+      outline: true,
+    });
+    window.__BAG_TEST__.renderAnnotations();
+    const outlined = document.querySelector('[data-bag-anno-outline="note"]');
+    return { onTitle: outlined === titleLink, outlinedClass: outlined && outlined.className };
+  });
+  check('メモ赤枠: 選んだ見出しリンクだけが囲まれる(別リンクに暴発しない)', outlineOnRight.onTitle, JSON.stringify(outlineOnRight));
+
+  await page.evaluate(() => {
+    window.__BAG_TEST__.clearAnnotations();
+    document.querySelector('#misbind-fixture')?.remove();
+  });
+
+  // --- MUST-FIX 1: 共有testidの兄弟でテキストが変化/重複しても、選んだ位置の要素へ戻る ---
+  // (テキスト+300がセレクタ位置を上書きし、古い値を持つ兄弟へ赤枠が逃げた回帰の防止)
+  await page.evaluate(() => {
+    const host = document.createElement('div');
+    host.id = 'stale-fixture';
+    host.innerHTML =
+      '<div class="grid">' +
+      '<article data-testid="metricRow">42%</article>' +
+      '<article data-testid="metricRow">17%</article>' +
+      '</div>';
+    document.body.appendChild(host);
+  });
+  const staleMutated = await page.evaluate(() => {
+    const cards = document.querySelectorAll('#stale-fixture [data-testid="metricRow"]');
+    const anchor = window.__BAG_TEST__.buildAnchor(cards[1]); // 2枚目(位置1)を選ぶ。捕捉時 text="17%"
+    cards[1].textContent = '55%'; // 選んだカードのテキストが更新され…
+    cards[0].textContent = '17%'; // …古い値("17%")が兄弟(位置0)へ移る(ライブ更新の典型)
+    const resolved = window.__BAG_TEST__.resolveAnchor(anchor);
+    return { ok: resolved === cards[1], text: resolved && resolved.textContent };
+  });
+  check('MUST-FIX1: テキスト変化後も選んだ2枚目へ戻る(古い値を持つ兄弟に逃げない)', staleMutated.ok, JSON.stringify(staleMutated));
+  const dupText = await page.evaluate(() => {
+    const cards = document.querySelectorAll('#stale-fixture [data-testid="metricRow"]');
+    cards[0].textContent = '0%';
+    cards[1].textContent = '0%'; // 最初から同一テキスト("토론 밀도 0%"事例)で2枚目を選ぶ
+    const anchor = window.__BAG_TEST__.buildAnchor(cards[1]);
+    const resolved = window.__BAG_TEST__.resolveAnchor(anchor);
+    return { ok: resolved === cards[1] };
+  });
+  check('MUST-FIX1: 兄弟が同一テキストでも選んだ2枚目へ戻る(文書順先頭に逃げない)', dupText.ok, JSON.stringify(dupText));
+  await page.evaluate(() => document.querySelector('#stale-fixture')?.remove());
+
+  // MUST-FIX1b: 捕捉後に手前へ新カードが挿入され位置がズレても、ユニークなテキストで拾い直す
+  // (フィードの「新着を先頭に挿入」= SPA定番。位置インデックスが古くなる回帰の防止)
+  await page.evaluate(() => {
+    const host = document.createElement('div');
+    host.id = 'prepend-fixture';
+    host.innerHTML =
+      '<ul id="feed2">' +
+      '<li data-testid="post-card"><h3>알파 기사</h3></li>' +
+      '<li data-testid="post-card"><h3>베타 기사</h3></li>' +
+      '<li data-testid="post-card"><h3>감마 기사</h3></li>' +
+      '</ul>';
+    document.body.appendChild(host);
+  });
+  const prepend = await page.evaluate(() => {
+    const beta = document.querySelectorAll('#feed2 li[data-testid="post-card"] > h3')[1];
+    const anchor = window.__BAG_TEST__.buildAnchor(beta); // 捕捉: selectorIndex=1, selectorCount=3, text="베타 기사"
+    const feed = document.querySelector('#feed2');
+    const li = document.createElement('li');
+    li.setAttribute('data-testid', 'post-card');
+    const h = document.createElement('h3');
+    h.textContent = '새 기사';
+    li.appendChild(h);
+    feed.insertBefore(li, feed.firstChild); // 先頭に新着を挿入 → 捕捉要素は index 2 へズレる
+    const resolved = window.__BAG_TEST__.resolveAnchor(anchor);
+    return { ok: resolved === beta, text: resolved && resolved.textContent };
+  });
+  check('MUST-FIX1b: 手前に挿入で位置がズレても捕捉したカード(베타)へ戻る(隣に逃げない)', prepend.ok, JSON.stringify(prepend));
+  await page.evaluate(() => document.querySelector('#prepend-fixture')?.remove());
+
+  // --- MUST-FIX 2: テキスト無し+近傍リンク無しのアイコン/SVGボタンでも buildAnchor が落ちない ---
+  await page.evaluate(() => {
+    const host = document.createElement('div');
+    host.id = 'icon-fixture';
+    host.innerHTML = '<div id="iconbar2"><button class="ic"><svg width="10" height="10"></svg></button></div>';
+    document.body.appendChild(host);
+  });
+  const iconAnno = await page.evaluate(() => {
+    const btn = document.querySelector('#icon-fixture .ic');
+    let threw = false;
+    let anchor = null;
+    try {
+      anchor = window.__BAG_TEST__.buildAnchor(btn);
+    } catch (e) {
+      threw = String((e && e.message) || e);
+    }
+    const resolved = anchor ? window.__BAG_TEST__.resolveAnchor(anchor) : null;
+    return { threw, resolvedOk: resolved === btn };
+  });
+  check('MUST-FIX2: テキスト無し+リンク無しのアイコンボタンでbuildAnchorが例外を投げない', iconAnno.threw === false, JSON.stringify(iconAnno));
+  check('MUST-FIX2: そのアイコンボタンが自身へ解決する(注釈できる)', iconAnno.resolvedOk, JSON.stringify(iconAnno));
+  await page.evaluate(() => document.querySelector('#icon-fixture')?.remove());
+
+  // --- MUST-FIX 3: 共有testidのフィードで O(N^2) にならない(セレクタ照会はanchor毎1回・プール有界) ---
+  const perf = await page.evaluate(async () => {
+    window.__BAG_TEST__.clearAnnotations();
+    const N = 40;
+    const host = document.createElement('div');
+    host.id = 'perf-fixture';
+    let html = '';
+    for (let i = 0; i < N; i += 1) {
+      html += '<li data-testid="feedcard"><h3><a href="/feed/' + i + '"><span class="tt">記事' + i + '</span></a></h3></li>';
+    }
+    host.innerHTML = '<ul>' + html + '</ul>';
+    document.body.appendChild(host);
+    const spans = Array.from(document.querySelectorAll('#perf-fixture .tt'));
+    for (const span of spans) {
+      await window.__BAG_TEST__.upsertAnnotation({ kind: 'note', anchor: window.__BAG_TEST__.buildAnchor(span), note: 'x', outline: true });
+    }
+    // 1回の renderAnnotations 中の document.querySelectorAll 呼び出し回数を計測する。
+    const orig = document.querySelectorAll.bind(document);
+    let qsaCount = 0;
+    document.querySelectorAll = function (...a) {
+      qsaCount += 1;
+      return orig(...a);
+    };
+    try {
+      window.__BAG_TEST__.renderAnnotations();
+    } finally {
+      document.querySelectorAll = orig;
+    }
+    // 各注釈が自分のカードへ解決しているか(スケールしても誤バインドしない)。
+    let correct = 0;
+    for (let i = 0; i < spans.length; i += 1) {
+      if (window.__BAG_TEST__.resolveAnchor(window.__BAG_TEST__.buildAnchor(spans[i])) === spans[i]) correct += 1;
+    }
+    return { N, qsaCount, correct };
+  });
+  // O(N^2) 版なら N*プール ≈ 数千回。修正版は anchor 毎おおむね1回 + 固定オーバーヘッドで線形。
+  check('MUST-FIX3: renderのquerySelectorAll回数が線形に収まる(<6N)', perf.qsaCount < perf.N * 6, JSON.stringify(perf));
+  check('MUST-FIX3: N枚の共有testidカードでも各注釈が自分のカードへ解決する', perf.correct === perf.N, JSON.stringify(perf));
+  await page.evaluate(() => {
+    window.__BAG_TEST__.clearAnnotations();
+    document.querySelector('#perf-fixture')?.remove();
+  });
+
   return { total: results.length, passed: results.filter((r) => r.pass).length, results };
 }`;
 
