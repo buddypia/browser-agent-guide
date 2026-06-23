@@ -15,6 +15,8 @@ import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18
 // 1メッセージ処理で getSettings が複数回(例: handleMessage 冒頭の ensureI18n と
 // getActiveTabState)呼ばれても、chrome.storage.local 読込＋ディープマージを1回に抑える。
 // 自身の保存(saveSettings)と外部変更(options/sidepanel の storage.onChanged)で失効させる。
+// 重要: 戻り値は共有参照のため「読み取り専用」として扱う。変更時は新オブジェクトを作って
+// saveSettings に渡すこと(in-place 変更すると保存前 throw でキャッシュが storage と乖離する)。
 let settingsCache = null;
 async function getSettings() {
   if (settingsCache) return settingsCache;
@@ -390,11 +392,19 @@ async function rememberPageRule({ url, title, source = 'chat', scope = 'page', a
     };
     sites.push(rule);
   } else {
-    rule.enabled = true;
-    rule.learned = rule.learned !== false;
-    rule.source = rule.source || source;
-    rule.updatedAt = now;
-    if (!rule.label) rule.label = ruleLabel(title, target);
+    // getSettings() の戻り値(= settingsCache 共有参照)を in-place 変更しない。
+    // クローンして sites[idx] に差し替えることで、保存(saveSettings は書込前に
+    // cache を null 化)までの間に例外が出ても、キャッシュが storage と乖離しない。
+    const idx = sites.indexOf(rule);
+    rule = {
+      ...rule,
+      enabled: true,
+      learned: rule.learned !== false,
+      source: rule.source || source,
+      updatedAt: now,
+      label: rule.label || ruleLabel(title, target),
+    };
+    sites[idx] = rule;
   }
 
   const currentRecipe = Array.isArray(recipes[rule.id]) ? [...recipes[rule.id]] : [];
