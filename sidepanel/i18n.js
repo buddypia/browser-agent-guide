@@ -50,8 +50,14 @@ export function languageName(locale) {
 
 export async function createI18n(locale = DEFAULT_LOCALE) {
   let currentLocale = normalizeLocale(locale);
-  const fallbackMessages = await loadMessages(DEFAULT_LOCALE);
-  let messages = currentLocale === DEFAULT_LOCALE ? fallbackMessages : await loadMessages(currentLocale);
+  // フォールバック(en)と現在ロケールを並列取得し、最初のローカライズ描画までの
+  // 直列待ち(en.json → locale.json の2往復)を1往復ぶんに縮める。
+  const needsLocale = currentLocale !== DEFAULT_LOCALE;
+  const [fallbackMessages, localeMessages] = await Promise.all([
+    loadMessages(DEFAULT_LOCALE),
+    needsLocale ? loadMessages(currentLocale) : Promise.resolve(null),
+  ]);
+  let messages = needsLocale ? localeMessages : fallbackMessages;
 
   return {
     get locale() {

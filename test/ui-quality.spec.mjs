@@ -47,9 +47,9 @@ async function startStaticServer() {
   });
 }
 
-async function installChromeMock(page) {
-  await page.addInitScript(() => {
-    const store = {};
+async function installChromeMock(page, seed = {}) {
+  await page.addInitScript((seedData) => {
+    const store = seedData && typeof seedData === 'object' ? JSON.parse(JSON.stringify(seedData)) : {};
     const storageListeners = new Set();
 
     function copy(value) {
@@ -157,11 +157,16 @@ async function installChromeMock(page) {
         },
       },
       tabs: {
+        // サイドパネルは init 時に自前で active tab を解決し、SW 往復を待たずに
+        // 当該ページのチャット履歴を先読みする(primeChatHistory)。
+        async query() {
+          return [{ id: 1, url: 'https://example.com/app', title: 'Example App' }];
+        },
         onActivated: { addListener() {} },
         onUpdated: { addListener() {} },
       },
     };
-  });
+  }, seed);
 }
 
 async function expectNoAxeViolations(page) {
@@ -229,6 +234,30 @@ test.describe('UI quality gates', () => {
 
     await page.getByLabel('语言').selectOption('en');
     await expect(page.getByRole('heading', { name: 'Start by typing an instruction' })).toBeVisible();
+  });
+
+  test('side panel restores per-page chat history on open via its own tab query', async ({ page }) => {
+    // SW 往復(GET_ACTIVE_TAB_STATE)を待たずに、パネル自身の chrome.tabs.query で
+    // 解決した URL の履歴が開いた直後に表示されること(primeChatHistory)を検証する。
+    await installChromeMock(page, {
+      aiAdvisorChatHistoryByPage: {
+        'https://example.com/app': {
+          url: 'https://example.com/app',
+          title: 'Example App',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          messages: [
+            { role: 'user', content: 'remembered question' },
+            { role: 'assistant', content: 'remembered answer' },
+          ],
+        },
+      },
+    });
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+
+    await expect(page.locator('#messages').getByText('remembered question', { exact: true })).toBeVisible();
+    await expect(page.locator('#messages').getByText('remembered answer', { exact: true })).toBeVisible();
+    // 履歴があるので空ヒントは出ない。
+    await expect(page.locator('#messages .empty-hint')).toHaveCount(0);
   });
 
   test('side panel can send a mocked prompt', async ({ page }) => {
