@@ -143,6 +143,7 @@
   }
 
   function labelOf(el) {
+    if (!el || el.nodeType !== 1) return ''; // nearestLink等が null を返す場合に getAttribute で落ちない
     const aria = el.getAttribute('aria-label');
     if (aria) return aria.trim();
     const text = (el.innerText || el.textContent || '').trim();
@@ -1493,8 +1494,15 @@
     const best = bestTargetCandidate(candidates) || {};
     const href = normalizedLinkHref(el) || best.href || '';
     const dataAsin = nearestDataAsin(el) || asinFromHref(href) || best.dataAsin || '';
+    const selector = cssPath(el);
+    const selPos = selectorPosition(selector, el);
     return {
-      selector: cssPath(el),
+      selector,
+      // セレクタが非一意(共有testid/id起点で複数一致)な場合の“捕捉時の位置”と一致総数。解決時に
+      // 同位置の要素を優先することで、兄弟がテキストを変えても/重複しても選んだ要素へ戻る。一致総数が
+      // 変わっていたら(手前に挿入/削除でズレた)位置を信用し過ぎないための判定材料にする。
+      selectorIndex: selPos.index,
+      selectorCount: selPos.count,
       tag: el.tagName.toLowerCase(),
       role: roleOf(el),
       text: (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80),
@@ -1509,49 +1517,221 @@
     };
   }
 
-  // 複数シグナルを優先順に試し、最後はタグ+テキスト一致で粘る。
+  // セレクタが指す要素群の中で el が何番目か(捕捉位置)と一致総数。一意/解決不能なら index=0。
+  function selectorPosition(selector, el) {
+    if (!selector) return { index: 0, count: 0 };
+    try {
+      const matches = document.querySelectorAll(selector);
+      if (matches.length <= 1) return { index: 0, count: matches.length };
+      const idx = Array.prototype.indexOf.call(matches, el);
+      return { index: idx >= 0 ? idx : 0, count: matches.length };
+    } catch {
+      return { index: 0, count: 0 };
+    }
+  }
+
+  // ---- anchor の解決(再バインド) ----
+  // 重要: 注釈(赤枠/お描き)は「クリックした“その”要素」へ戻さなければならない。
+  // 単純に「最初に一致したシグナルを返す」と、buildAnchor が近傍由来で拾う非一意シグナル
+  //   - href: 同一URLを指す繰り返しリンク(サムネ用<a>＋見出し<a>等)の“先頭”
+  //   - testid: 祖先ラッパー(カード等)の共有 data-testid
+  //   - aria-label/name/placeholder: ページ内で重複しがちなラベル
+  // のどれかが別要素を掴み、赤枠が無関係な要素へ暴発する(nichenext.com/ko で報告)。
+  // 方式: セレクタの“捕捉位置(selectorIndex)”=構造上の同一性を最重視し、揮発しうる
+  // テキストは補助点に留める。これにより、共有testidの兄弟が同じ/古いテキストを持っても
+  // (例: 「토론 밀도 0%」が複数行)選んだ位置の要素へ戻る。
+  // 性能: セレクタの querySelectorAll は anchor ごとに1回だけ実行し、候補プールは捕捉位置と
+  // 先頭の2件に絞る(兄弟全件は入れない)。確信が持てない時だけ近傍シグナル/テキストへ広げる。
   function resolveAnchor(anchor) {
     if (!anchor) return null;
-    const tries = [];
-    if (anchor.dataAgentId)
-      tries.push(() => document.querySelector(`[data-agent-id="${cssAttr(anchor.dataAgentId)}"]`));
-    if (anchor.dataAsin && /^[A-Z0-9]{10}$/i.test(anchor.dataAsin))
-      tries.push(() => document.querySelector(`[data-asin="${cssAttr(anchor.dataAsin)}"]`));
-    if (anchor.testid)
-      tries.push(() =>
-        document.querySelector(
-          `[data-testid="${cssEscape(anchor.testid)}"],[data-test="${cssEscape(anchor.testid)}"],[data-cy="${cssEscape(anchor.testid)}"]`
-        )
+    // 一意な自己同一シグナルは即決(従来の最優先を踏襲し、決定性も保つ)。
+    if (anchor.dataAgentId) {
+      const el = safeQuery(`[data-agent-id="${cssAttr(anchor.dataAgentId)}"]`);
+      if (el) return el;
+    }
+    // セレクタ一致を1回だけ取り、捕捉位置を割り出す(以後 score へ使い回す=再クエリしない)。
+    const selMatches = anchor.selector ? safeQueryAll(anchor.selector) : [];
+    const selCount = selMatches.length;
+    // 一致総数が捕捉時と変わっていたら、手前に要素が挿入/削除されて位置がズレた可能性が高い。
+    // この時は捕捉位置(positional)を信用し過ぎず、テキスト等で本来の要素を拾い直す。
+    const stale = anchor.selectorCount > 0 && selCount > 1 && selCount !== anchor.selectorCount;
+    const sel = {
+      unique: selCount === 1 ? selMatches[0] : null,
+      positional: selCount > 1 ? selMatches[clampSelectorIndex(anchor, selCount)] : null,
+      stale,
+    };
+    // 1段目: セレクタ/data-asin 由来の少数候補だけで採点(共有testidの兄弟全件は入れない)。
+    const pool = collectSignalCandidates(anchor, selMatches);
+    let best = pickBestAnchorMatch(pool, anchor, sel);
+    // 2段目: 確信が持てない(セレクタが壊れて el を指さない/位置がズレた)時は、近傍シグナルと
+    // tag を絞った text 一致へ広げて再採点する(構造変化後の再解決用フォールバック)。
+    if (stale || !best.el || best.score < ANCHOR_CONFIDENT) {
+      addBroadSignalCandidates(pool, anchor);
+      addTextCandidates(pool, anchor);
+      best = pickBestAnchorMatch(pool, anchor, sel);
+    }
+    return best.el && best.score > 0 ? best.el : null;
+  }
+
+  // anchor 一致が「確信できる」とみなす点数。これ未満なら近傍/text 走査での上書きを許す。
+  // (捕捉位置 450 や own testid 120 + tag 120 = 240 などが確信ライン)
+  const ANCHOR_CONFIDENT = 220;
+  const SIGNAL_CANDIDATE_CAP = 50; // 共有testid等で兄弟が大量にある場合の採点件数上限(O(N^2)回避)
+
+  function safeQueryAll(sel) {
+    try {
+      return Array.from(document.querySelectorAll(sel));
+    } catch {
+      return [];
+    }
+  }
+
+  function clampSelectorIndex(anchor, len) {
+    const i = anchor.selectorIndex | 0; // 旧レコード(未保存)は 0
+    return i >= 0 && i < len ? i : 0;
+  }
+
+  function anchorTextOf(el) {
+    return (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  }
+
+  // 文書順で安定に並べるための比較関数(同点時の決定的タイブレーク=文書順で先の要素)。
+  function domOrder(a, b) {
+    if (a === b) return 0;
+    const pos = a.compareDocumentPosition(b);
+    if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+    if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+    return 0;
+  }
+
+  // 1段目候補: セレクタの“捕捉位置”と先頭、+ data-asin。兄弟全件は入れない(有界)。
+  function collectSignalCandidates(anchor, selMatches) {
+    const set = new Set();
+    const add = (el) => {
+      if (el && el.nodeType === 1 && !isOwnUi(el)) set.add(el);
+    };
+    if (selMatches.length === 1) {
+      add(selMatches[0]);
+    } else if (selMatches.length > 1) {
+      add(selMatches[clampSelectorIndex(anchor, selMatches.length)]); // 捕捉した位置の要素(本命)
+      add(selMatches[0]); // 位置情報が古い場合の保険
+    }
+    if (anchor.dataAsin && /^[A-Z0-9]{10}$/i.test(anchor.dataAsin)) {
+      addCapped(set, `[data-asin="${cssAttr(anchor.dataAsin)}"]`, 8);
+    }
+    return set;
+  }
+
+  // 2段目候補(フォールバック): 近傍由来シグナルの一致を上限付きで追記。
+  function addBroadSignalCandidates(set, anchor) {
+    if (anchor.testid) {
+      addCapped(
+        set,
+        `[data-testid="${cssEscape(anchor.testid)}"],[data-test="${cssEscape(anchor.testid)}"],[data-cy="${cssEscape(anchor.testid)}"]`,
+        SIGNAL_CANDIDATE_CAP
       );
-    if (anchor.href)
-      tries.push(() => {
-        for (const link of document.querySelectorAll('a[href]')) {
-          if (normalizedLinkHref(link) === anchor.href) return link;
-        }
-        return null;
-      });
-    if (anchor.name) tries.push(() => document.querySelector(`[name="${cssEscape(anchor.name)}"]`));
-    if (anchor.ariaLabel)
-      tries.push(() => document.querySelector(`[aria-label="${cssEscape(anchor.ariaLabel)}"]`));
-    if (anchor.placeholder)
-      tries.push(() => document.querySelector(`[placeholder="${cssEscape(anchor.placeholder)}"]`));
-    if (anchor.selector) tries.push(() => safeQuery(anchor.selector));
-    for (const t of tries) {
-      try {
-        const el = t();
-        if (el) return el;
-      } catch {
-        /* 不正セレクタは無視して次の手がかりへ */
+    }
+    if (anchor.name) addCapped(set, `[name="${cssEscape(anchor.name)}"]`, SIGNAL_CANDIDATE_CAP);
+    if (anchor.ariaLabel) addCapped(set, `[aria-label="${cssEscape(anchor.ariaLabel)}"]`, SIGNAL_CANDIDATE_CAP);
+    if (anchor.placeholder) addCapped(set, `[placeholder="${cssEscape(anchor.placeholder)}"]`, SIGNAL_CANDIDATE_CAP);
+    if (anchor.href) {
+      let n = 0;
+      for (const link of document.querySelectorAll('a[href]')) {
+        if (normalizedLinkHref(link) !== anchor.href) continue;
+        if (!isOwnUi(link)) set.add(link);
+        if (++n >= SIGNAL_CANDIDATE_CAP) break;
       }
+    }
+  }
+
+  function addCapped(set, sel, cap) {
+    try {
+      const matches = document.querySelectorAll(sel);
+      for (let i = 0; i < matches.length && i < cap; i += 1) {
+        const el = matches[i];
+        if (el && el.nodeType === 1 && !isOwnUi(el)) set.add(el);
+      }
+    } catch {
+      /* 不正セレクタは無視 */
+    }
+  }
+
+  // tag を絞った text 一致の候補を追記(走査が重いので確信が無い時だけ呼ぶ)。
+  function addTextCandidates(set, anchor) {
+    if (!anchor.text) return;
+    const scope = anchor.tag && /^[a-z][a-z0-9-]*$/i.test(anchor.tag) ? anchor.tag : '*';
+    let n = 0;
+    for (const el of document.querySelectorAll(scope)) {
+      if (isOwnUi(el)) continue;
+      if (anchorTextOf(el) === anchor.text) {
+        set.add(el);
+        if (++n >= 30) break; // 同一テキストが大量にある場合の暴走防止
+      }
+    }
+  }
+
+  // selector が“安定セレクタ”か(#安定ID や [data-*] 始まりで nth-of-type を含まない)。
+  // 安定なら一意に解決できる強い証拠、nth-of-type 依存なら構造変化で揺れる弱い証拠として扱う。
+  function isStableSelector(sel) {
+    return !!sel && !sel.includes(':nth-') && (sel.startsWith('#') || sel.startsWith('['));
+  }
+
+  // 候補プールから anchor に最も一致する要素を選ぶ(同点は文書順で先を採り決定的にする)。
+  function pickBestAnchorMatch(set, anchor, sel) {
+    const list = Array.from(set).sort(domOrder);
+    let bestEl = null;
+    let bestScore = -Infinity;
+    for (const el of list) {
+      const s = scoreAnchorMatch(el, anchor, sel);
+      if (s > bestScore) {
+        bestScore = s;
+        bestEl = el;
+      }
+    }
+    return { el: bestEl, score: bestScore };
+  }
+
+  // 要素が anchor をどれだけ忠実に表すかを採点する。構造上の同一性(セレクタの一意一致/捕捉位置)を
+  // 最重視し、揮発しうる text や近傍由来の testid/href/aria は補助点に留める。tag 不一致は強い反証。
+  // sel = { unique, positional } は resolveAnchor が1回だけ算出した値(ここで再クエリしない)。
+  function scoreAnchorMatch(el, anchor, sel) {
+    let score = 0;
+    if (anchor.dataAgentId && el.getAttribute('data-agent-id') === anchor.dataAgentId) score += 1000;
+    if (sel) {
+      // セレクタが一意に el へ解決する、または“捕捉した位置”の要素 = 構造上の同一要素(最強)。
+      // テキストが変わった/兄弟と重複しても、ここで選んだ位置の要素が勝つ。
+      // ただし一致総数が変わって位置がズレた(stale)時は位置の信頼を下げ、text-exact(250)に
+      // 主導権を譲る(手前に新カードが挿入されても捕捉要素のユニークテキストで拾い直せるように)。
+      if (sel.unique && sel.unique === el) score += isStableSelector(anchor.selector) ? 500 : 450;
+      else if (sel.positional && sel.positional === el) score += sel.stale ? 120 : 450;
+    }
+    if (anchor.dataAsin && /^[A-Z0-9]{10}$/i.test(anchor.dataAsin)) {
+      const own = (el.getAttribute('data-asin') || '').toUpperCase();
+      if (own === anchor.dataAsin.toUpperCase()) score += 250;
+    }
+    if (anchor.tag) {
+      if (el.tagName.toLowerCase() === anchor.tag) score += 120;
+      else score -= 120; // タグ違いは「別要素」の強い証拠
     }
     if (anchor.text) {
-      const els = document.querySelectorAll(anchor.tag || '*');
-      for (const el of els) {
-        const txt = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
-        if (txt && txt === anchor.text) return el;
-      }
+      const txt = anchorTextOf(el);
+      // text は“補助”。構造上の同一性(450〜500)を覆せない重みにし、古い/重複テキストの兄弟へ
+      // 赤枠が逃げるのを防ぐ。一方でセレクタが曖昧な時は依然として有効な識別子になる。
+      if (txt === anchor.text) score += 250;
+      else if (txt && (txt.includes(anchor.text) || anchor.text.includes(txt))) score += 60;
+      else score -= 60; // テキストがまるで違うのも反証
     }
-    return null;
+    if (anchor.testid) {
+      const ownTestid = el.getAttribute('data-testid') || el.getAttribute('data-test') || el.getAttribute('data-cy') || '';
+      if (ownTestid === anchor.testid) score += 120; // 自身が保持(強い)
+      else if (nearestTestId(el) === anchor.testid) score += 30; // 祖先/子孫由来の文脈一致(弱い)
+    }
+    if (anchor.name && el.getAttribute('name') === anchor.name) score += 120;
+    if (anchor.ariaLabel && el.getAttribute('aria-label') === anchor.ariaLabel) score += 60;
+    if (anchor.placeholder && el.getAttribute('placeholder') === anchor.placeholder) score += 60;
+    if (anchor.href && normalizedLinkHref(el) === anchor.href) score += 30; // リンク文脈の一致(弱い)
+    if (anchor.role && roleOf(el) === anchor.role) score += 20;
+    return score;
   }
 
   function safeQuery(sel) {
