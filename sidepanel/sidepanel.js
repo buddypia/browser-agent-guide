@@ -274,6 +274,25 @@ async function loadChatHistory() {
   renderChatHistory();
 }
 
+// 開いた直後の履歴表示を SW 往復(コールドスタート)から外すため、パネル自身で
+// アクティブタブURLを解決して当該ページのチャット履歴を先読みする。pageKey を
+// 同期的に確定してから読込むので、後続の refreshState(SW由来の同一URL)は
+// pageKey 一致で履歴ロードをスキップし二重描画にならない。
+async function primeChatHistory() {
+  try {
+    const tabs = await chrome.tabs?.query?.({ active: true, currentWindow: true });
+    const url = tabs?.[0]?.url || '';
+    const nextPageKey = pageKeyForUrl(url);
+    if (nextPageKey && nextPageKey !== state.pageKey) {
+      state.pageKey = nextPageKey;
+      state.url = url;
+      await loadChatHistory();
+    }
+  } catch {
+    /* タブ取得不可時は refreshState 側の履歴ロードに委ねる */
+  }
+}
+
 async function persistChatHistory(messages = state.history, page = state) {
   const pageKey = page.pageKey || '';
   if (!pageKey) return;
@@ -332,8 +351,17 @@ async function clearPromptHistory() {
 }
 
 function renderChatHistory() {
+  if (!state.history.length) {
+    // 空状態: 同一言語のリッチな空ヒントが既に描画済みなら作り直さない。
+    // init の即時描画 → 履歴ロード(空)で同じ空状態が二度描かれるときの
+    // 無駄なDOM破棄/再生成とチラつきを防ぐ(言語切替時は locale 不一致で作り直す)。
+    const existing = els.messages.querySelector('.empty-hint[data-ready="1"]');
+    if (existing && existing.dataset.locale === state.language) return;
+    els.messages.innerHTML = '';
+    renderEmptyHint();
+    return;
+  }
   els.messages.innerHTML = '';
-  if (!state.history.length) renderEmptyHint();
   state.history.forEach((msg, index) => addMessage(msg.role, msg.content, { messageIndex: index }));
   scrollToBottom();
 }
@@ -342,6 +370,9 @@ function renderEmptyHint() {
   const hint = document.createElement('div');
   hint.className = 'empty-hint';
   hint.id = 'empty-hint';
+  // 再構築スキップ判定用: JS生成のリッチヒントである印と、その描画言語。
+  hint.dataset.ready = '1';
+  hint.dataset.locale = state.language;
 
   const title = document.createElement('h1');
   title.textContent = t('empty.title');
@@ -1168,9 +1199,15 @@ async function init() {
   state.language = i18n.locale;
   renderLanguageOptions();
   applyI18n();
-  await Promise.all([loadPromptHistory(), refreshState()]);
+  // ローカライズ済みの空ヒントを即描画し、入力も即フォーカスして、開いた瞬間に
+  // 使える状態にする。バナー/履歴/注釈は SW 往復(MV3 のコールドスタートを含む)を
+  // 待たずに後追いで埋めるため、ここでは await しない。
+  renderChatHistory();
   syncHistoryButton();
   els.input.focus();
+  loadPromptHistory();
+  primeChatHistory();
+  refreshState();
 }
 
 init();
