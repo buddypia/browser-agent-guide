@@ -1,0 +1,9 @@
+{
+  "schema": "bag.visual-feedback/v0",
+  "url": "https://amazon.co.jp/dp/B0EXAMPLE",
+  "title": "Amazon 商品ページ",
+  "capturedAt": "2026-06-20T10:00:00.000Z",
+  "dpr": 2,
+  "viewport": { "width": 1440, "height": 900 },
+  "items": [{ "n": 1, "id": "a1", "color": "#ef4444", "note": "カートに入れる", "selector": "#add-to-cart", "resolved": true, "inViewport": true }]
+}

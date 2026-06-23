@@ -93,8 +93,41 @@ bag_visual_feedback:list_visual_feedback({ titleContains: "ダッシュボード
 条件に一致しない場合は image を返さず案内テキストを返す（誤って別プロジェクトの画像を掴ませない）。
 CLI への運用ヒント: 作業中ページの URL 断片を `urlContains` に渡すよう AGENTS.md / CLAUDE.md に書いておくとよい。
 
+さらに、`urlContains` / `titleContains` を**付けずに** `get_latest_visual_feedback_context` /
+`get_latest_visual_feedback` を呼んだ時、直近（既定90分・`capturedAt` 基準）に**複数プロジェクト
+（異なるホスト）のキャプチャ**があると、単一を勝手に返さず**候補一覧**を返す（image も返さない）。
+別案件を「最新」と誤認させないための安全則で、`structuredContent.disambiguation` に候補
+（id / host / title / captured_at）が入る。`urlContains` で絞れば従来どおり1件を返す。image が
+必要な時は、候補の context を読んだ上でその `id` を `contextId` に渡す。**単一プロジェクトの inbox
+では一切発火しない**（従来挙動のまま）。窓は `--latest-window-min` / `BAG_VF_LATEST_WINDOW_MIN`（分）で調整可。
+
 > 動作確認: `node scripts/probe.mjs ~/Downloads/ai-inbox --url <部分一致>` は context-only。
 > image 経路を明示的に試す時だけ `--image` を足す。
+
+### inbox の自動掃除（retention・既定 OFF）
+
+共有 inbox には同一ページの古い世代や日齢の古いキャプチャが積み上がる。`--retention on`
+（または `BAG_VF_RETENTION=on`）で、デーモンが古い entry を `<inbox>/done/` へ**退避**する
+（削除でなく atomic rename。`done/` は一覧・最新取得の対象外）。判定は2軸:
+
+- **MAX-AGE**: `shot.png` の更新時刻が `--retention-max-age`（既定 `14d`）より古い。
+- **同一ページ族 cap**: slug の `{host}__{title}` 単位で新しい `--retention-max-per-family`
+  （既定 `5`）件だけ残し、古い世代を退避（例: 同じページを9回撮った旧世代を畳む）。
+
+安全則 **GRACE FLOOR**: `--retention-grace`（既定 `30m`）以内の新しい entry は何があっても退避しない
+（別 CLI が今 push して直後に読む未読を守る。`max-age`/`done-ttl` は grace 未満にクランプされる）。
+`done/` は `--retention-done-ttl`（既定 `7d`）を過ぎたものだけ削除する（それまでは復元可能）。退避された
+entry も `id` 指定なら `get_visual_feedback` / `/shot/<id>.png` で取り戻せる（最新・一覧からは外れる）。
+
+軸はどちらも「別プロジェクトを巻き込まない」: 族 cap は `{host}__{title}` 単位、MAX-AGE は単一 entry の
+日齢のみで、共有バケットを奪い合わない。掃除は起動時・約1時間ごと（`--retention-interval`）・保存直後・
+inbox 採用時に走る。**デーモンが動いている間だけ**の機能。期間は `30m`/`14d`/`7d`/`1h` の単位付きで指定。
+
+```bash
+node src/index.js --retention on                          # 既定値で有効化
+node src/index.js --retention on --retention-max-per-family 3 --retention-max-age 7d
+BAG_VF_RETENTION=on node src/index.js
+```
 
 ## 起動
 
@@ -119,7 +152,9 @@ node src/index.js --storage hybrid
 curl -s http://127.0.0.1:8765/healthz   # {"ok":true,"inboxDir":"...","imageRoute":"/shot/<id>.png","storage":"disk|hybrid",...}
 ```
 
-環境変数でも設定可: `BAG_VF_INBOX`, `BAG_VF_PORT`, `BAG_VF_HOST`, `BAG_VF_STORAGE`。
+環境変数でも設定可: `BAG_VF_INBOX`, `BAG_VF_PORT`, `BAG_VF_HOST`, `BAG_VF_STORAGE`,
+`BAG_VF_RETENTION`(on/off), `BAG_VF_RETENTION_MAX_AGE`, `BAG_VF_RETENTION_MAX_PER_FAMILY`,
+`BAG_VF_RETENTION_GRACE`, `BAG_VF_RETENTION_DONE_TTL`, `BAG_VF_RETENTION_INTERVAL`, `BAG_VF_LATEST_WINDOW_MIN`。
 
 ## 常駐化（ログイン/再起動を跨いで動かす）
 
