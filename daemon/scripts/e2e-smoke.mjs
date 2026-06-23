@@ -2,7 +2,7 @@
 // 拡張役の WS クライアントで push → デーモンが書き込み → MCP クライアントで get_latest 取得、
 // を一連で確認する。一時 inbox を使うので Downloads は汚さない。
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +18,30 @@ const TOKEN = 'e2e-token';
 const PORT = 8791;
 const inbox = mkdtempSync(join(tmpdir(), 'vf-e2e-'));
 
-const proc = spawn('node', [indexJs, '--inbox', inbox, '--port', String(PORT), '--token', TOKEN], { stdio: ['ignore', 'inherit', 'inherit'] });
+// retention 検証用: 起動前に「古い別案件」を1件仕込む（起動時 sweep で done/ へ退避されるはず）。
+const STALE_ID = '20260101-000000__stale-example-com__stale__deadbee';
+{
+  const dir = join(inbox, STALE_ID);
+  mkdirSync(dir, { recursive: true });
+  const png = Buffer.from(PNG_B64, 'base64');
+  writeFileSync(join(dir, 'shot.png'), png);
+  writeFileSync(
+    join(dir, 'annotation.json'),
+    JSON.stringify({ url: 'https://stale.example.com/old', title: 'STALE', capturedAt: '2026-01-01T00:00:00.000Z', items: [] })
+  );
+  const past = new Date(Date.now() - 10_000); // 10秒前（grace/maxAge=1s より十分古い）
+  utimesSync(join(dir, 'shot.png'), past, past);
+}
+
+// retention ON + 小さい maxAge/grace。doneTtl は大きくして退避物を id で復元できる状態に保つ。
+const proc = spawn(
+  'node',
+  [
+    indexJs, '--inbox', inbox, '--port', String(PORT), '--token', TOKEN,
+    '--retention', 'on', '--retention-max-age', '1s', '--retention-grace', '1s', '--retention-done-ttl', '100d',
+  ],
+  { stdio: ['ignore', 'inherit', 'inherit'] }
+);
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 function fail(msg) {
@@ -80,7 +103,18 @@ try {
   console.log('OK MCP context-first → context と image の両方が path に', ack.id, 'を含む');
   console.log('OK MCP get_latest → image', Buffer.from(img.data, 'base64').length, 'bytes');
 
-  console.log('\nE2E OK: 拡張(WS push) → デーモン → CLI(MCP) が一連で通った');
+  // 3) retention 検証: 起動時 sweep が stale を done/ へ退避 → 一覧から消え、id 指定では done/ から復元できる
+  const client2 = new Client({ name: 'e2e-retention', version: '0' });
+  await client2.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`)));
+  const listRes = await client2.callTool({ name: 'list_visual_feedback', arguments: {} });
+  const listTxt = listRes.content.find((c) => c.type === 'text')?.text || '';
+  const staleCtx = await client2.callTool({ name: 'get_visual_feedback_context', arguments: { id: STALE_ID } });
+  await client2.close();
+  if (listTxt.includes(STALE_ID)) fail('retention: stale が一覧に残っている（done/ へ退避されていない）');
+  if (staleCtx.structuredContent?.id !== STALE_ID) fail('retention: 退避した stale を id で復元できない（findEntry done/ graft）');
+  console.log('OK retention → stale を done/ へ退避し、一覧から消え、id 指定では done/ から復元できる');
+
+  console.log('\nE2E OK: 拡張(WS push) → デーモン → CLI(MCP) + retention が一連で通った');
   proc.kill();
   rmSync(inbox, { recursive: true, force: true });
   process.exit(0);

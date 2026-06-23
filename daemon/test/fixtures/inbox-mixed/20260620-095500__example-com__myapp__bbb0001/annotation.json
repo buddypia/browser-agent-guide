@@ -1,0 +1,9 @@
+{
+  "schema": "bag.visual-feedback/v0",
+  "url": "https://example.com/app",
+  "title": "MyApp ダッシュボード",
+  "capturedAt": "2026-06-20T09:55:00.000Z",
+  "dpr": 2,
+  "viewport": { "width": 1440, "height": 900 },
+  "items": [{ "n": 1, "id": "b1", "color": "#3b82f6", "note": "保存ボタンを直す", "selector": "#save", "resolved": true, "inViewport": true }]
+}

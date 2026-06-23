@@ -190,3 +190,76 @@ test('get_latest_visual_feedback: 不一致フィルタは image 無しの案内
     assert.ok(txt.includes('no-such-project'), '条件を案内');
   });
 });
+
+// 別プロジェクトが混在する inbox（amazon が最新 + 自分の example）での曖昧検知。
+// 単一 host の fixtures/inbox では distinctCount<=1 で従来挙動のままなので、ここは別 fixture を立てる。
+const MIXED_INBOX = resolve(here, 'fixtures/inbox-mixed');
+const AMAZON_ID = '20260620-100000__amazon-co-jp__amazon__aaa0001';
+
+async function withMixedClient(fn) {
+  const server = createHttpServer({ inboxDir: MIXED_INBOX });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const client = new Client({ name: 'test-client', version: '0.0.0' });
+  const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`));
+  await client.connect(transport);
+  try {
+    return await fn(client);
+  } finally {
+    await client.close();
+    await new Promise((r) => server.close(r));
+  }
+}
+
+test('mixed inbox: bare context は image 無し・foreign id 無し・disambiguation を返す', async () => {
+  await withMixedClient(async (client) => {
+    const res = await client.callTool({ name: 'get_latest_visual_feedback_context', arguments: {} });
+    assert.ok(!res.content.some((c) => c.type === 'image'), '曖昧時は image を返さない');
+    assert.equal(res.structuredContent.id, undefined, 'foreign id を top-level に載せない（laundering 防止）');
+    assert.equal(res.structuredContent.disambiguation.distinctCount, 2);
+    const txt = res.content.find((c) => c.type === 'text').text;
+    assert.ok(txt.includes('latest が曖昧'));
+    assert.ok(txt.includes('amazon-co-jp'), '両プロジェクトを列挙');
+    assert.ok(txt.includes('example-com'));
+  });
+});
+
+test('mixed inbox: bare image で候補外 contextId は image 無し + disambiguation（別案件を漏らさない）', async () => {
+  await withMixedClient(async (client) => {
+    const res = await client.callTool({
+      name: 'get_latest_visual_feedback',
+      arguments: { contextId: 'not-a-candidate', imageReason: 'verify foreign image is not leaked on a bare ambiguous call' },
+    });
+    assert.ok(!res.content.some((c) => c.type === 'image'), '別案件の image を漏らさない');
+    assert.equal(res.structuredContent.disambiguation.distinctCount, 2);
+    const txt = res.content.find((c) => c.type === 'text').text;
+    assert.ok(txt.includes('latest が曖昧'));
+  });
+});
+
+test('mixed inbox: bare image で窓内候補 id + imageReason はその候補の image を警告 banner 付きで返す', async () => {
+  await withMixedClient(async (client) => {
+    const res = await client.callTool({
+      name: 'get_latest_visual_feedback',
+      arguments: { contextId: AMAZON_ID, imageReason: 'verify an in-window candidate id is honored with the banner' },
+    });
+    const img = res.content.find((c) => c.type === 'image');
+    assert.ok(img, '窓内候補 id は image を返す');
+    assert.equal(img.mimeType, 'image/png');
+    const txt = res.content.find((c) => c.type === 'text');
+    assert.ok(txt.text.includes('latest が曖昧'), '警告 banner が image と一緒に来る');
+  });
+});
+
+test('mixed inbox: scoped urlContains=amazon は単一 amazon entry を image で返す（filtered path 不変）', async () => {
+  await withMixedClient(async (client) => {
+    const res = await client.callTool({
+      name: 'get_latest_visual_feedback',
+      arguments: { urlContains: 'amazon', contextId: AMAZON_ID, imageReason: 'verify the filtered path still returns the scoped capture image' },
+    });
+    const img = res.content.find((c) => c.type === 'image');
+    assert.ok(img, 'スコープ指定なら image を返す');
+    const txt = res.content.find((c) => c.type === 'text');
+    assert.ok(txt.text.includes(AMAZON_ID));
+  });
+});

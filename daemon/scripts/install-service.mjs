@@ -23,7 +23,20 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DAEMON_ENTRY = resolve(SCRIPT_DIR, '..', 'src', 'index.js');
 
 // デーモン本体が解釈するフラグだけを通す(install 用フラグと混ざらないように)。
-const DAEMON_FLAGS = new Set(['--inbox', '--port', '--host', '--storage']);
+// retention/latest-window も常駐ユニットの起動引数に引き継ぐ（always-on でも設定を保つ）。
+const DAEMON_FLAGS = new Set([
+  '--inbox',
+  '--port',
+  '--host',
+  '--storage',
+  '--retention',
+  '--retention-max-age',
+  '--retention-max-per-family',
+  '--retention-grace',
+  '--retention-done-ttl',
+  '--retention-interval',
+  '--latest-window-min',
+]);
 
 function parse(argv) {
   const out = { write: false, daemonArgs: [], env: {} };

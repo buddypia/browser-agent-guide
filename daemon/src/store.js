@@ -104,6 +104,7 @@ function createMemoryEntry({ inboxDir, payload, now, taken }) {
     dir,
     shot: join(dir, 'shot.png'),
     mtime: Date.now(),
+    capturedAt,
     storage: 'memory',
     materialized: false,
     payload,

@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import {
   listEntries,
   findEntry,
@@ -13,6 +15,7 @@ import {
   readAnnotation,
   matchesFilter,
   queryEntries,
+  peekDistinctRecent,
 } from '../src/inbox.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -93,13 +96,83 @@ test('matchesFilter: url/title の部分一致（大文字小文字無視）。�
   assert.equal(matchesFilter(ann, { urlContains: 'example.com', titleContains: '存在しない' }), false); // AND
 });
 
-test('queryEntries: フィルタで該当 slug だけ返し、url/title メタを付与', () => {
+test('queryEntries: フィルタで該当 slug だけ返し、url/title/capturedAt メタを付与', () => {
   // fixture の2件はどちらも url=https://example.com/api。example.com で2件、other で0件。
   const hit = queryEntries(INBOX, { urlContains: 'example.com' });
   assert.equal(hit.length, 2);
   assert.ok(hit.every((e) => e.url === 'https://example.com/api'));
   assert.ok('title' in hit[0]);
+  assert.ok('capturedAt' in hit[0], 'capturedAt メタも付与');
+  assert.equal(hit[0].capturedAt, '2026-06-17T09:58:00.021Z');
   assert.equal(queryEntries(INBOX, { urlContains: 'no-such-project' }).length, 0);
+});
+
+test('peekDistinctRecent: 異なる host が窓内に2件で distinctCount=2、同一 host は 1', () => {
+  const base = Date.parse('2026-06-20T10:00:00.000Z');
+  const peek = peekDistinctRecent(
+    [
+      { id: 'n1', url: 'https://amazon.co.jp/x', title: 'A', capturedAt: new Date(base).toISOString(), mtime: base },
+      { id: 'n2', url: 'https://example.com/y', title: 'B', capturedAt: new Date(base - 5 * 60000).toISOString(), mtime: base },
+    ],
+    { windowMs: 90 * 60000 }
+  );
+  assert.equal(peek.distinctCount, 2);
+  assert.equal(peek.candidates[0].id, 'n1', 'head（最新）が先頭候補');
+  const same = peekDistinctRecent(
+    [
+      { id: 's1', url: 'https://example.com/a', capturedAt: new Date(base).toISOString(), mtime: base },
+      { id: 's2', url: 'https://example.com/b', capturedAt: new Date(base - 60000).toISOString(), mtime: base },
+    ],
+    { windowMs: 90 * 60000 }
+  );
+  assert.equal(same.distinctCount, 1, '同一 host は曖昧でない（単一プロジェクト）');
+});
+
+test('peekDistinctRecent: capturedAt 基準（mtime 同値でも capturedAt で窓判定）', () => {
+  const base = Date.parse('2026-06-20T10:00:00.000Z');
+  const sameMtime = 1782209987000; // git checkout 等で全 entry の mtime が潰れた想定
+  const peek = peekDistinctRecent(
+    [
+      { id: 'h', url: 'https://amazon.co.jp/x', capturedAt: new Date(base).toISOString(), mtime: sameMtime },
+      { id: 'in', url: 'https://example.com/y', capturedAt: new Date(base - 5 * 60000).toISOString(), mtime: sameMtime },
+      { id: 'out', url: 'https://other.com/z', capturedAt: new Date(base - 200 * 60000).toISOString(), mtime: sameMtime },
+    ],
+    { windowMs: 90 * 60000 }
+  );
+  assert.equal(peek.distinctCount, 2, '窓内の amazon+example のみ。窓外 other は capturedAt で除外');
+  assert.ok(peek.candidates.some((c) => c.host === 'amazon-co-jp'));
+  assert.ok(!peek.candidates.some((c) => c.host === 'other-com'));
+});
+
+test('peekDistinctRecent: capturedAt 欠落は mtime フォールバック / 不正 url は site バケット / 空入力は 0', () => {
+  const base = 1782209987000;
+  const peek = peekDistinctRecent(
+    [
+      { id: 'a', url: 'https://amazon.co.jp/x', capturedAt: '', mtime: base },
+      { id: 'b', url: 'not a url', capturedAt: '', mtime: base - 60000 },
+    ],
+    { windowMs: 90 * 60000 }
+  );
+  assert.equal(peek.distinctCount, 2);
+  assert.ok(peek.candidates.some((c) => c.host === 'site'), '解析不能 url は site バケット');
+  assert.deepEqual(peekDistinctRecent([]), { newest: null, distinctCount: 0, candidates: [] });
+});
+
+test('findEntry: id 指定なら done/ も解決。listEntries/queryEntries は done/ を除外し続ける', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'bag-inbox-done-'));
+  try {
+    const id = '20260101-000000__example-com__page__arch001';
+    const dir = join(tmp, 'done', id);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'shot.png'), Buffer.from([137, 80, 78, 71]));
+    assert.equal(findEntry(tmp, id)?.id, id, 'archived id を done/ から復元');
+    assert.ok(findEntry(tmp, id).dir.endsWith(join('done', id)));
+    assert.equal(listEntries(tmp).length, 0, 'latest/list は done/ を除外');
+    assert.equal(queryEntries(tmp).length, 0);
+    assert.equal(findEntry(tmp, '../escape'), null, 'traversal id は null');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('buildEntryText: 指示一覧（番号/メモ/intent/selector）を含む', () => {
