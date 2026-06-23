@@ -199,21 +199,27 @@ export function peekDistinctRecent(rows, { windowMs = 90 * 60 * 1000 } = {}) {
     const t = Date.parse(e?.capturedAt);
     return Number.isNaN(t) ? Number(e?.mtime) || 0 : t;
   };
-  const head = rows[0];
-  const headTs = ts(head);
+  // 窓の基準は「最新の capturedAt」。rows は mtime 降順なので rows[0] が capturedAt 最新とは限らない
+  // （git/rsync/DL fallback で mtime が潰れると mtime と capturedAt が逆転する＝capturedAt を使う理由）。
+  // rows[0] を anchor にすると、mtime だけ大きい古い別案件を基準にして真に新しい案件を窓外に落とし、
+  // distinctCount を過小評価して曖昧検知がサイレントに不発になる。max(capturedAt) を anchor にする。
+  const headTs = Math.max(...rows.map(ts));
   const byHost = new Map();
   for (const e of rows) {
-    if (Math.abs(ts(e) - headTs) > windowMs) continue;
+    if (headTs - ts(e) > windowMs) continue; // headTs は最大なので ts(e) <= headTs
     const host = hostSlug(e?.url || '');
     if (!byHost.has(host)) byHost.set(host, e); // rows は新しい順なので host 初出 = その host の最新
   }
-  const candidates = [...byHost.entries()].slice(0, 5).map(([host, e]) => ({
+  // candidates は窓内 distinct host の最新。queryEntries の limit(既定8)で上限が付くので cap しない
+  // （distinctCount と candidates 数を一致させ、image tool の contextId 一致判定が候補を取りこぼさない）。
+  const candidates = [...byHost.entries()].map(([host, e]) => ({
     id: e.id,
     host,
     title: e.title || '',
     capturedAt: e.capturedAt || '',
   }));
-  return { newest: head, distinctCount: byHost.size, candidates };
+  // newest は「mtime 最新」(従来 latest 契約)を維持。単一案件時の単発返却で使う。
+  return { newest: rows[0], distinctCount: byHost.size, candidates };
 }
 
 export function readAnnotation(dir) {

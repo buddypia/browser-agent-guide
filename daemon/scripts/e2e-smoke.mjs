@@ -33,17 +33,32 @@ const STALE_ID = '20260101-000000__stale-example-com__stale__deadbee';
   utimesSync(join(dir, 'shot.png'), past, past);
 }
 
-// retention ON + 小さい maxAge/grace。doneTtl は大きくして退避物を id で復元できる状態に保つ。
+// retention ON。maxAge=5s(stale 10s前は退避、push 直後の新規は対象外)、grace=1s、
+// maxPerFamily=1(同一ページ族の新世代 push で旧世代を退避させ onSaved sweep を検証)、doneTtl は大きく。
 const proc = spawn(
   'node',
   [
     indexJs, '--inbox', inbox, '--port', String(PORT), '--token', TOKEN,
-    '--retention', 'on', '--retention-max-age', '1s', '--retention-grace', '1s', '--retention-done-ttl', '100d',
+    '--retention', 'on', '--retention-max-age', '5s', '--retention-grace', '1s',
+    '--retention-max-per-family', '1', '--retention-done-ttl', '100d',
   ],
   { stdio: ['ignore', 'inherit', 'inherit'] }
 );
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+function wsPush(payload) {
+  return new Promise((res, rej) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?token=${TOKEN}`);
+    const t = setTimeout(() => rej(new Error('ws timeout')), 4000);
+    ws.on('open', () => ws.send(JSON.stringify(payload)));
+    ws.on('message', (d) => {
+      clearTimeout(t);
+      ws.close();
+      res(JSON.parse(d.toString()));
+    });
+    ws.on('error', rej);
+  });
+}
 function fail(msg) {
   console.error('NG:', msg);
   proc.kill();
@@ -55,28 +70,14 @@ try {
   await wait(800); // listen 待ち
 
   // 1) 拡張役: WS push
-  const ack = await new Promise((res, rej) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?token=${TOKEN}`);
-    const t = setTimeout(() => rej(new Error('ws timeout')), 4000);
-    ws.on('open', () =>
-      ws.send(
-        JSON.stringify({
-          type: 'visual_feedback',
-          capturedAt: '2026-06-18T02:03:04.005Z',
-          url: 'https://example.com/e2e',
-          title: 'E2E',
-          image: { shot: PNG_B64, raw: PNG_B64 },
-          annotation: { url: 'https://example.com/e2e', items: [{ n: 1, note: 'E2E メモ' }] },
-          memo: '# memo\n',
-        })
-      )
-    );
-    ws.on('message', (d) => {
-      clearTimeout(t);
-      ws.close();
-      res(JSON.parse(d.toString()));
-    });
-    ws.on('error', rej);
+  const ack = await wsPush({
+    type: 'visual_feedback',
+    capturedAt: '2026-06-18T02:03:04.005Z',
+    url: 'https://example.com/e2e',
+    title: 'E2E',
+    image: { shot: PNG_B64, raw: PNG_B64 },
+    annotation: { url: 'https://example.com/e2e', title: 'E2E', items: [{ n: 1, note: 'E2E メモ' }] },
+    memo: '# memo\n',
   });
   if (ack.type !== 'ack') fail(`ack ではない: ${JSON.stringify(ack)}`);
   console.log('OK push → ack id =', ack.id);
@@ -112,9 +113,33 @@ try {
   await client2.close();
   if (listTxt.includes(STALE_ID)) fail('retention: stale が一覧に残っている（done/ へ退避されていない）');
   if (staleCtx.structuredContent?.id !== STALE_ID) fail('retention: 退避した stale を id で復元できない（findEntry done/ graft）');
-  console.log('OK retention → stale を done/ へ退避し、一覧から消え、id 指定では done/ から復元できる');
+  console.log('OK retention(startup) → stale を done/ へ退避し、一覧から消え、id 指定では done/ から復元できる');
 
-  console.log('\nE2E OK: 拡張(WS push) → デーモン → CLI(MCP) + retention が一連で通った');
+  // 4) onSaved sweep 検証: grace を抜けた後に同一ページ族の新世代を push すると、
+  //    保存直後の sweep(onSaved) が旧世代を family cap(=1) で done/ へ退避する。
+  await wait(1500); // 1回目(ack.id)を grace(1s)外にする
+  const ack2 = await wsPush({
+    type: 'visual_feedback',
+    capturedAt: '2026-06-18T02:03:06.005Z', // 別 capturedAt → 別 id・同 family(example-com__e2e)
+    url: 'https://example.com/e2e',
+    title: 'E2E',
+    image: { shot: PNG_B64 },
+    annotation: { url: 'https://example.com/e2e', title: 'E2E', items: [{ n: 1, note: '2nd' }] },
+  });
+  if (ack2.type !== 'ack' || ack2.id === ack.id) fail(`2回目 push の ack 異常: ${JSON.stringify(ack2)}`);
+  await wait(300); // onSaved sweep 完了待ち
+  const client3 = new Client({ name: 'e2e-onsaved', version: '0' });
+  await client3.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`)));
+  const list2 = await client3.callTool({ name: 'list_visual_feedback', arguments: {} });
+  const list2Txt = list2.content.find((c) => c.type === 'text')?.text || '';
+  const oldCtx = await client3.callTool({ name: 'get_visual_feedback_context', arguments: { id: ack.id } });
+  await client3.close();
+  if (list2Txt.includes(ack.id)) fail('onSaved sweep: 旧世代が一覧に残っている（family cap で退避されていない）');
+  if (!list2Txt.includes(ack2.id)) fail('onSaved sweep: 新世代が一覧に無い');
+  if (oldCtx.structuredContent?.id !== ack.id) fail('onSaved sweep: 退避した旧世代を id で復元できない');
+  console.log('OK retention(onSaved) → 新世代 push で旧世代が family cap により done/ へ退避し、id 復元可');
+
+  console.log('\nE2E OK: 拡張(WS push) → デーモン → CLI(MCP) + retention(startup/onSaved) が一連で通った');
   proc.kill();
   rmSync(inbox, { recursive: true, force: true });
   process.exit(0);

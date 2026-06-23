@@ -34,14 +34,17 @@ const DEFAULTS = {
 
 const UNIT_MS = { ms: 1, s: 1000, m: MINUTE, h: 60 * MINUTE, d: DAY };
 
-// '30m' / '14d' / '7d' / '1h' / '500ms' / 純数値(ms) を ms へ。不正は fallback。
+// '30m' / '14d' / '7d' / '1h' / '500ms' / 純数値(ms) を ms へ。不正・0・負は fallback。
+// 0 を許すと grace=0（floor=now）で grace floor が無効化し、未読 capture を archive しうるので
+// coerceCount と同様に「正の値のみ採用、それ以外は安全な既定へ」に揃える。
 export function coerceDuration(value, fallbackMs) {
   if (value == null || value === '') return fallbackMs;
   const m = String(value).trim().toLowerCase().match(/^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/);
   if (!m) return fallbackMs;
   const n = Number(m[1]);
   if (!Number.isFinite(n)) return fallbackMs;
-  return Math.round(n * UNIT_MS[m[2] || 'ms']);
+  const ms = Math.round(n * UNIT_MS[m[2] || 'ms']);
+  return ms > 0 ? ms : fallbackMs;
 }
 
 function coerceCount(value, fallback) {
@@ -59,6 +62,9 @@ function parseEnabled(value) {
 // 同一ページ族キー。{stamp}__{host}__{title}__{hash}（衝突時は末尾が {hash}-N）から
 // stamp(先頭) と hash(末尾) を外した {host}__{title} を返す。旧 timestamp 形式など
 // '__' 区切りでないものは null（= family cap 対象外、age のみで掃除）。
+// 粒度の注意: title は slug 生成時に先頭24字へ畳まれる(slug.js sanitizeToken(title,24))ため、同一 host で
+// 先頭24字が一致する別ページは同一 family に統合されうる（archive は削除でなく退避＝復元可能。host 跨ぎでは
+// 決して衝突しない）。per-URL 厳密な族分けが要るなら別途 discriminator を足す。
 export function familyKey(id) {
   const parts = String(id || '').split('__');
   if (parts.length >= 4) return parts.slice(1, -1).join('__');
@@ -159,6 +165,7 @@ export function pruneInbox(inboxDir, policy) {
   const toArchive = new Map(); // id -> entry（重複排除）
   const familySeen = new Map(); // familyKey -> これまでに見た（=より新しい）世代数
   for (const e of entries) {
+    if (!e.mtime) continue; // stat 失敗(mtime=0)は判定不能 → 触らない（grace floor を bypass させない）
     const isYoung = e.mtime >= floor; // grace 内（保護）
     if (!isYoung && e.mtime < ageCut) toArchive.set(e.id, e); // MAX-AGE
     const key = familyKey(e.id);

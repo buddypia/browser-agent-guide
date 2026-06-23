@@ -158,6 +158,34 @@ test('peekDistinctRecent: capturedAt 欠落は mtime フォールバック / 不
   assert.deepEqual(peekDistinctRecent([]), { newest: null, distinctCount: 0, candidates: [] });
 });
 
+test('peekDistinctRecent: 窓 anchor は capturedAt 最大（mtime 逆転で曖昧検知を過小評価しない）', () => {
+  const base = Date.parse('2026-06-20T10:00:00.000Z');
+  // rows は mtime 降順。A は mtime 最大だが capturedAt は最古（DL fallback / rsync で mtime が後から潰れた想定）。
+  const rows = [
+    { id: 'A', url: 'https://foreign.com/x', capturedAt: new Date(base - 100 * 60000).toISOString(), mtime: 9999 },
+    { id: 'B', url: 'https://mine.com/y', capturedAt: new Date(base).toISOString(), mtime: 1000 },
+    { id: 'C', url: 'https://other.com/z', capturedAt: new Date(base - 5 * 60000).toISOString(), mtime: 800 },
+  ];
+  const peek = peekDistinctRecent(rows, { windowMs: 90 * 60000 });
+  // anchor=capturedAt最大(=B base)。窓内: B(0), C(5m)。A は 100m で窓外。
+  assert.equal(peek.distinctCount, 2, 'mtime 最大の古い別案件を anchor にして真の最新を窓外に落とさない');
+  assert.ok(peek.candidates.some((c) => c.host === 'mine-com'));
+  assert.ok(peek.candidates.some((c) => c.host === 'other-com'));
+  assert.ok(!peek.candidates.some((c) => c.host === 'foreign-com'), 'capturedAt 窓外の foreign は候補に入らない');
+});
+
+test('peekDistinctRecent: 多数 distinct host でも distinctCount と candidates 数が一致（cap で取りこぼさない）', () => {
+  const base = Date.parse('2026-06-20T10:00:00.000Z');
+  const rows = [];
+  for (let i = 0; i < 6; i += 1) {
+    rows.push({ id: `id${i}`, url: `https://h${i}.com/p`, capturedAt: new Date(base - i * 60000).toISOString(), mtime: 1000 - i });
+  }
+  const peek = peekDistinctRecent(rows, { windowMs: 90 * 60000 });
+  assert.equal(peek.distinctCount, 6);
+  assert.equal(peek.candidates.length, 6, 'candidates は distinctCount と一致（top-5 cap で 6番目を落とさない）');
+  assert.ok(peek.candidates.some((c) => c.id === 'id5'), '6番目の host の id も候補に含む（contextId 一致判定で取りこぼさない）');
+});
+
 test('findEntry: id 指定なら done/ も解決。listEntries/queryEntries は done/ を除外し続ける', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'bag-inbox-done-'));
   try {

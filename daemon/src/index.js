@@ -119,7 +119,12 @@ function parseArgs(argv) {
     else if (a === '--host') out.host = argv[(i += 1)];
     else if (a === '--token') out.token = argv[(i += 1)];
     else if (a === '--storage') out.storage = argv[(i += 1)];
-    else if (a === '--retention') out.retention = argv[(i += 1)];
+    else if (a === '--retention') {
+      // 値消費フラグだが、単体 `--retention`（末尾 or 次が別フラグ）は 'on' とみなす
+      // （`--retention --port 9000` が 9000 を飲んで silently OFF になる罠を避ける）。
+      const next = argv[i + 1];
+      out.retention = next === undefined || next.startsWith('--') ? 'on' : argv[(i += 1)];
+    }
     else if (a === '--retention-max-age') out.retentionMaxAge = argv[(i += 1)];
     else if (a === '--retention-max-per-family') out.retentionMaxPerFamily = argv[(i += 1)];
     else if (a === '--retention-grace') out.retentionGrace = argv[(i += 1)];
