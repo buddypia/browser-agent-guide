@@ -652,7 +652,7 @@ async function captureVisualFeedback({ tabId, autoSync = false }) {
           title: data.title,
           dpr: data.dpr,
           viewport: data.viewport,
-          downloadsDir: knownDownloadsDir || undefined,
+          downloadsDir: (daemon.saveDir || '').trim() || knownDownloadsDir || undefined,
           image: { shot: composite.dataUrl, raw: screenshotDataUrl },
           annotation,
           memo,

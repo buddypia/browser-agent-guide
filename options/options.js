@@ -75,6 +75,7 @@ function fillDaemonForm() {
   $('vf-auto-sync').checked = Boolean(settings.visualFeedback?.autoSync);
   $('daemon-url').value = d.url || DEFAULT_SETTINGS.daemon.url;
   $('daemon-token').value = d.token || '';
+  $('daemon-save-dir').value = d.saveDir || '';
 }
 
 async function saveDaemon() {
@@ -83,6 +84,7 @@ async function saveDaemon() {
     enabled: $('daemon-enabled').checked,
     url: $('daemon-url').value.trim() || DEFAULT_SETTINGS.daemon.url,
     token: $('daemon-token').value.trim(),
+    saveDir: $('daemon-save-dir').value.trim(),
   };
   settings.visualFeedback = {
     ...(settings.visualFeedback || {}),

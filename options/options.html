@@ -120,6 +120,10 @@
             <span data-i18n="opt.daemon.token">トークン</span>
             <input id="daemon-token" type="password" placeholder="デーモン起動時に表示される token" data-i18n-placeholder="opt.daemon.tokenPlaceholder" autocomplete="off" />
           </label>
+          <label>
+            <span data-i18n="opt.daemon.saveDir">保存先フォルダ</span>
+            <input id="daemon-save-dir" type="text" placeholder="空欄=OSの既定ダウンロードフォルダ" data-i18n-placeholder="opt.daemon.saveDirPlaceholder" />
+          </label>
         </div>
         <div class="row">
           <button id="save-daemon" class="primary" data-agent-id="@agent:options.daemon.save" data-agent-action="submit" data-i18n="opt.common.save">保存</button>
@@ -132,6 +136,9 @@
         </p>
         <p class="hint" data-i18n="opt.daemon.autoSyncHint">
           自動同期はデーモン到達時だけ送信し、失敗時に自動ダウンロードは行いません。
+        </p>
+        <p class="hint" data-i18n="opt.daemon.saveDirHint">
+          保存先フォルダはデーモン有効時のみ有効です。空欄ならOSの既定ダウンロードフォルダに保存します（安全のためホーム配下のみ採用。ホーム外は daemon の --inbox で指定）。
         </p>
       </section>
 
