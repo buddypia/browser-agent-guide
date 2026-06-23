@@ -8,8 +8,11 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { buildEntryContent, buildEntryContext, buildEntryContextText } from './inbox.js';
+import { buildEntryContent, buildEntryContext, buildEntryContextText, peekDistinctRecent } from './inbox.js';
 import { createDiskEntryStore } from './store.js';
+
+// 引数なし latest が曖昧（直近に複数プロジェクト）と判定する時間窓（既定90分、capturedAt 基準）。
+const DEFAULT_LATEST_WINDOW_MS = 90 * 60 * 1000;
 
 // 複数プロジェクトが1つの inbox に積まれる時の絞り込み引数（部分一致・任意）。
 const FILTER_SCHEMA = {
@@ -31,7 +34,7 @@ const IMAGE_GATE_SCHEMA = {
 
 // shotUrlFor(id, kind) は、ディスクパス非依存の loopback HTTP 取得先（/shot|/raw/<id>.png?token=…）を
 // 返すオプション関数。渡された時だけ context/image テキストに shot_url/raw_url を併走させる。
-export function createMcpServer(entrySource, { shotUrlFor } = {}) {
+export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFAULT_LATEST_WINDOW_MS } = {}) {
   const entryStore = asEntryStore(entrySource);
   const server = new McpServer(
     { name: 'bag-visual-feedback', version: '0.1.0' },
@@ -79,6 +82,25 @@ export function createMcpServer(entrySource, { shotUrlFor } = {}) {
       inputSchema: { ...FILTER_SCHEMA },
     },
     async ({ urlContains, titleContains }) => {
+      // 引数なし（無フィルタ）の時だけ曖昧検知。直近に複数プロジェクトが居れば単一を返さず候補一覧を返す。
+      if (!urlContains && !titleContains) {
+        const rows = entryStore.queryEntries({ limit: 8 });
+        const peek = peekDistinctRecent(rows, { windowMs: latestWindowMs });
+        if (peek.distinctCount >= 2) {
+          return ambiguousLatestResult(peek);
+        }
+        // 単一プロジェクト（または空）→ 従来どおり最新を返す。
+        const entry = rows[0];
+        if (!entry) {
+          return { content: [{ type: 'text', text: filterEmptyMessage({}) }] };
+        }
+        const context = buildEntryContext(entry, { shotUrlFor });
+        return {
+          content: [{ type: 'text', text: buildEntryContextText(context) }],
+          structuredContent: context,
+        };
+      }
+      // フィルタ指定時は従来どおり（呼び出し側が既にスコープを絞っている）。
       const [entry] = entryStore.queryEntries({ limit: 1, urlContains, titleContains });
       if (!entry) {
         return { content: [{ type: 'text', text: filterEmptyMessage({ urlContains, titleContains }) }] };
@@ -104,6 +126,35 @@ export function createMcpServer(entrySource, { shotUrlFor } = {}) {
       inputSchema: { ...FILTER_SCHEMA, ...IMAGE_GATE_SCHEMA },
     },
     async ({ urlContains, titleContains, contextId, imageReason }) => {
+      // 引数なしの時だけ曖昧検知。複数プロジェクトが直近に居る時は、別案件の image を
+      // サイレントに返さない。例外として contextId が「窓内の候補 id」に一致し imageReason がある
+      // 場合だけ、その候補の image を返す（候補 context を読んだ上での再取得を妨げない）。
+      if (!urlContains && !titleContains) {
+        const rows = entryStore.queryEntries({ limit: 8 });
+        const peek = peekDistinctRecent(rows, { windowMs: latestWindowMs });
+        if (peek.distinctCount >= 2) {
+          const picked = peek.candidates.find((c) => c.id === contextId);
+          if (picked && String(imageReason || '').trim()) {
+            const entry = entryStore.findEntry(picked.id);
+            if (entry) {
+              const content = buildEntryContent(materializeForImage(entryStore, entry), { shotUrlFor });
+              // 別案件混在の警告を image と一緒に必ず連れて行く。
+              content.unshift({ type: 'text', text: ambiguousLatestMessage(peek.candidates) });
+              return { content };
+            }
+          }
+          return ambiguousLatestResult(peek);
+        }
+        // 単一プロジェクト（または空）→ 従来の imageGate 経路をそのまま。
+        const entry = rows[0];
+        if (!entry) {
+          return { content: [{ type: 'text', text: filterEmptyMessage({}) }] };
+        }
+        const blocked = imageGateMessage(entry, { contextId, imageReason });
+        if (blocked) return { content: [{ type: 'text', text: blocked }] };
+        return { content: buildEntryContent(materializeForImage(entryStore, entry), { shotUrlFor }) };
+      }
+      // フィルタ指定時は従来どおり。
       const [entry] = entryStore.queryEntries({ limit: 1, urlContains, titleContains });
       if (!entry) {
         return { content: [{ type: 'text', text: filterEmptyMessage({ urlContains, titleContains }) }] };
@@ -194,6 +245,35 @@ function imageGateMessage(entry, { contextId, imageReason } = {}) {
     );
   }
   return '';
+}
+
+// 引数なし latest が曖昧な時の案内文。別案件を誤って掴ませないため image は返さず候補を列挙する。
+const AMBIGUOUS_HINT =
+  'urlContains に作業中ページの URL 断片（例: ホスト名）を渡して絞るか、list_visual_feedback で一覧を確認してください。' +
+  'image が要る時は、候補の context を読んだ上でその id を contextId に渡してください。';
+
+function ambiguousLatestMessage(candidates = []) {
+  const lines = [];
+  lines.push(
+    'latest が曖昧です: 直近に複数プロジェクトのキャプチャがあります（別案件を誤って掴まないため image は返しません）。'
+  );
+  lines.push('candidates (newest-first):');
+  for (const c of candidates) {
+    lines.push(`  - id=${c.id}  host=${c.host}  title=${c.title || '(不明)'}  captured_at=${c.capturedAt || '(不明)'}`);
+  }
+  lines.push(AMBIGUOUS_HINT);
+  return lines.join('\n');
+}
+
+// 曖昧時の text-only 応答。structuredContent には id を載せず disambiguation だけを返す
+// （別案件の id を機械的にエコーして image を取り戻す経路を塞ぐ）。
+function ambiguousLatestResult(peek) {
+  return {
+    content: [{ type: 'text', text: ambiguousLatestMessage(peek.candidates) }],
+    structuredContent: {
+      disambiguation: { distinctCount: peek.distinctCount, candidates: peek.candidates, hint: AMBIGUOUS_HINT },
+    },
+  };
 }
 
 // フィルタ有無で空時メッセージを出し分ける（誤って別プロジェクトのを掴ませない案内）。

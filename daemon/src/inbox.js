@@ -13,6 +13,7 @@ import { join, resolve, isAbsolute, sep } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { decodeBase64 } from './writer.js';
+import { hostSlug } from './slug.js';
 
 export const SHOT = 'shot.png';
 export const RAW = 'raw.png';
@@ -142,7 +143,22 @@ export function listEntries(inboxDir, limit = 20) {
 }
 
 export function findEntry(inboxDir, id, scan = 500) {
-  return listEntries(inboxDir, scan).find((e) => e.id === id) || null;
+  const hit = listEntries(inboxDir, scan).find((e) => e.id === id);
+  if (hit) return hit;
+  // id 指定の時だけ done/ も解決する（retention の sweep が退避した capture を
+  // in-flight な contextId / /shot/<id>.png で取り戻せるように）。latest/list は
+  // 引き続き done/ を除外する（listEntries/queryEntries は素のまま）。
+  if (!inboxDir || !id || /[\\/]/.test(id) || id === '.' || id === '..') return null;
+  const dir = join(inboxDir, 'done', id);
+  const shot = join(dir, SHOT);
+  if (!existsSync(shot)) return null;
+  let mtime = 0;
+  try {
+    mtime = statSync(shot).mtimeMs;
+  } catch {
+    /* stat 失敗は 0 のまま */
+  }
+  return { id, dir, shot, mtime };
 }
 
 // annotation の url/title が部分一致するか（複数プロジェクトが1つの inbox に積まれる時の絞り込み）。
@@ -165,10 +181,45 @@ export function queryEntries(inboxDir, { urlContains, titleContains, limit = 20,
   for (const e of listEntries(inboxDir, scan)) {
     const annotation = readAnnotation(e.dir);
     if (!matchesFilter(annotation, { urlContains, titleContains })) continue;
-    out.push({ ...e, url: annotation?.url || '', title: annotation?.title || '' });
+    out.push({ ...e, url: annotation?.url || '', title: annotation?.title || '', capturedAt: annotation?.capturedAt || '' });
     if (out.length >= Math.max(1, limit)) break;
   }
   return out;
+}
+
+// 引数なし latest が「別プロジェクトのキャプチャ」にサイレントに乗っ取られないための曖昧検知。
+// rows（新しい順の queryEntries 結果）の先頭を head とし、head の capturedAt から windowMs 以内の
+// entry を hostSlug(url) でグループ化する。distinctCount>=2 なら「直近に複数プロジェクトが居る」=曖昧。
+// 時刻は annotation.capturedAt を最優先（ファイル mtime は git/rsync/DL fallback で潰れるため）し、
+// capturedAt が無い/壊れている時だけ mtime にフォールバックする。
+// 返り値の candidates は host ごとの最新 entry を新しい順に最大5件。
+export function peekDistinctRecent(rows, { windowMs = 90 * 60 * 1000 } = {}) {
+  if (!Array.isArray(rows) || rows.length === 0) return { newest: null, distinctCount: 0, candidates: [] };
+  const ts = (e) => {
+    const t = Date.parse(e?.capturedAt);
+    return Number.isNaN(t) ? Number(e?.mtime) || 0 : t;
+  };
+  // 窓の基準は「最新の capturedAt」。rows は mtime 降順なので rows[0] が capturedAt 最新とは限らない
+  // （git/rsync/DL fallback で mtime が潰れると mtime と capturedAt が逆転する＝capturedAt を使う理由）。
+  // rows[0] を anchor にすると、mtime だけ大きい古い別案件を基準にして真に新しい案件を窓外に落とし、
+  // distinctCount を過小評価して曖昧検知がサイレントに不発になる。max(capturedAt) を anchor にする。
+  const headTs = Math.max(...rows.map(ts));
+  const byHost = new Map();
+  for (const e of rows) {
+    if (headTs - ts(e) > windowMs) continue; // headTs は最大なので ts(e) <= headTs
+    const host = hostSlug(e?.url || '');
+    if (!byHost.has(host)) byHost.set(host, e); // rows は新しい順なので host 初出 = その host の最新
+  }
+  // candidates は窓内 distinct host の最新。queryEntries の limit(既定8)で上限が付くので cap しない
+  // （distinctCount と candidates 数を一致させ、image tool の contextId 一致判定が候補を取りこぼさない）。
+  const candidates = [...byHost.entries()].map(([host, e]) => ({
+    id: e.id,
+    host,
+    title: e.title || '',
+    capturedAt: e.capturedAt || '',
+  }));
+  // newest は「mtime 最新」(従来 latest 契約)を維持。単一案件時の単発返却で使う。
+  return { newest: rows[0], distinctCount: byHost.size, candidates };
 }
 
 export function readAnnotation(dir) {

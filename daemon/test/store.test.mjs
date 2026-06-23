@@ -127,3 +127,43 @@ test('hybrid store: context はメモリから返し、image 要求時だけ inb
     rmSync(inboxDir, { recursive: true, force: true });
   }
 });
+
+test('hybrid store: 異なる host の memory push 2件で bare context が disambiguation を返す（N5）', async () => {
+  const inboxDir = mkdtempSync(join(tmpdir(), 'vf-hybrid-amb-'));
+  const entryStore = createVisualFeedbackStore({ inboxDir, storageMode: 'hybrid' });
+  const httpServer = createHttpServer({ inboxDir, entryStore });
+  const wss = attachWebSocketServer(httpServer, { inboxDir, entryStore, token: TOKEN });
+  await new Promise((r) => httpServer.listen(0, '127.0.0.1', r));
+  const { port } = httpServer.address();
+  const wsUrl = `ws://127.0.0.1:${port}/ws`;
+  const mcpUrl = `http://127.0.0.1:${port}/mcp`;
+  try {
+    await sendOnce(`${wsUrl}?token=${TOKEN}`, {
+      type: 'visual_feedback',
+      capturedAt: '2026-06-20T10:00:00.000Z',
+      url: 'https://amazon.co.jp/x',
+      title: 'Amazon',
+      image: { shot: PNG_B64 },
+      annotation: { url: 'https://amazon.co.jp/x', title: 'Amazon', capturedAt: '2026-06-20T10:00:00.000Z', items: [] },
+    });
+    await sendOnce(`${wsUrl}?token=${TOKEN}`, {
+      type: 'visual_feedback',
+      capturedAt: '2026-06-20T09:58:00.000Z',
+      url: 'https://example.com/y',
+      title: 'MyApp',
+      image: { shot: PNG_B64 },
+      annotation: { url: 'https://example.com/y', title: 'MyApp', capturedAt: '2026-06-20T09:58:00.000Z', items: [] },
+    });
+    await withMcpClient(mcpUrl, async (client) => {
+      // メモリ保持エントリでも peekDistinctRecent が capturedAt を読み、曖昧検知が働く。
+      const res = await client.callTool({ name: 'get_latest_visual_feedback_context', arguments: {} });
+      assert.ok(!res.content.some((c) => c.type === 'image'), '曖昧時は image を返さない');
+      assert.equal(res.structuredContent.id, undefined, 'foreign id を載せない');
+      assert.equal(res.structuredContent.disambiguation.distinctCount, 2, 'memory entry の capturedAt で 2 案件を検知');
+    });
+  } finally {
+    wss.close();
+    await new Promise((r) => httpServer.close(r));
+    rmSync(inboxDir, { recursive: true, force: true });
+  }
+});
