@@ -1,4 +1,5 @@
 import { getSettings, patchSettings } from '../lib/storage.js';
+import { WORKFLOW_KEY, normalizeWorkflow } from '../lib/workflow.js';
 import { createI18n, DEFAULT_LOCALE, LANGUAGE_OPTIONS, languageName, localeToIntl, normalizeLocale, resolveLocale } from './i18n.js';
 
 // サイドパネルのチャットUI。background経由でAI呼び出しと動詞実行を行う。
@@ -28,6 +29,15 @@ const els = {
   promptHistoryList: document.getElementById('prompt-history-list'),
   btnHistoryClear: document.getElementById('btn-history-clear'),
   btnClearChat: document.getElementById('btn-clear-chat'),
+  btnWorkflow: document.getElementById('btn-workflow'),
+  workflowCountBadge: document.getElementById('workflow-count-badge'),
+  workflowPanel: document.getElementById('workflow-panel'),
+  workflowHint: document.getElementById('workflow-hint'),
+  workflowSteps: document.getElementById('workflow-steps'),
+  workflowName: document.getElementById('workflow-name'),
+  btnWorkflowSave: document.getElementById('btn-workflow-save'),
+  btnWorkflowClear: document.getElementById('btn-workflow-clear'),
+  workflowSaved: document.getElementById('workflow-saved'),
 };
 
 const CHAT_HISTORY_KEY = 'aiAdvisorChatHistoryByPage';
@@ -54,6 +64,7 @@ let state = {
   rememberScope: 'page',
   activeTabState: null,
   annotations: [],
+  workflow: { recording: false, steps: [], saved: [] },
   busy: false,
   // メモ(picker)/描画(drawing)モードがページ側で有効か。両モードは content 側で
   // 排他なので 1 フラグで扱い、サイドパネルにフォーカスがある状態の ESC を拾うために使う。
@@ -102,6 +113,7 @@ function rerenderLocalizedContent() {
   renderChatHistory();
   renderPromptHistory();
   renderAnnotationList(state.annotations);
+  renderWorkflow(state.workflow);
   if (state.activeTabState) renderBanner(state.activeTabState);
   syncHistoryButton();
 }
@@ -1167,10 +1179,206 @@ function previewArrowPoints(x1, y1, x2, y2) {
   return `${x1},${y1} ${x2},${y2} ${hx1},${hy1} ${x2},${y2} ${hx2},${hy2}`;
 }
 
+// ---- ページ跨ぎワークフロー(記録した手順) ----
+// 記録ON中に各ページで残したメモを URL ごと時系列(=URL順)で貯め、チャットで AI に一括で渡す。
+// content/SW と同じ chrome.storage.local キー(WORKFLOW_KEY)を直接読み書きする。
+async function readWorkflow() {
+  try {
+    const all = await chrome.storage.local.get(WORKFLOW_KEY);
+    return normalizeWorkflow(all[WORKFLOW_KEY]);
+  } catch {
+    return normalizeWorkflow(null);
+  }
+}
+
+async function mutateWorkflow(mutator) {
+  const wf = await readWorkflow();
+  const next = mutator(wf) || wf;
+  await chrome.storage.local.set({ [WORKFLOW_KEY]: next });
+  return next;
+}
+
+async function refreshWorkflow() {
+  renderWorkflow(await readWorkflow());
+}
+
+function shortUrl(u) {
+  try {
+    const url = new URL(u);
+    const p = url.pathname.length > 24 ? url.pathname.slice(0, 23) + '…' : url.pathname;
+    return url.host + (p === '/' ? '' : p);
+  } catch {
+    return u || '';
+  }
+}
+
+function renderWorkflow(wf) {
+  state.workflow = wf = normalizeWorkflow(wf);
+  const stepCount = wf.steps.length;
+
+  if (els.btnWorkflow) els.btnWorkflow.setAttribute('aria-pressed', wf.recording ? 'true' : 'false');
+  if (els.workflowCountBadge) {
+    els.workflowCountBadge.hidden = stepCount === 0;
+    els.workflowCountBadge.textContent = stepCount ? String(stepCount) : '';
+  }
+
+  if (els.workflowPanel) els.workflowPanel.hidden = !(wf.recording || stepCount > 0 || wf.saved.length > 0);
+  if (els.workflowHint) els.workflowHint.hidden = !wf.recording;
+  if (els.btnWorkflowSave) els.btnWorkflowSave.disabled = stepCount === 0;
+  if (els.btnWorkflowClear) els.btnWorkflowClear.hidden = stepCount === 0;
+
+  if (els.workflowSteps) {
+    els.workflowSteps.innerHTML = '';
+    wf.steps.forEach((s, i) => els.workflowSteps.appendChild(renderWorkflowStep(s, i + 1)));
+  }
+  renderSavedWorkflows(wf.saved);
+}
+
+function renderWorkflowStep(s, num) {
+  const row = document.createElement('div');
+  row.className = 'workflow-step';
+
+  const n = document.createElement('span');
+  n.className = 'wf-num';
+  n.textContent = String(num);
+
+  const body = document.createElement('div');
+  body.className = 'wf-body';
+  const text = document.createElement('div');
+  text.className = 'wf-text';
+  text.textContent = s.text || s.target || t('workflow.emptyStep');
+  const url = document.createElement('div');
+  url.className = 'wf-url';
+  url.textContent = shortUrl(s.url);
+  url.title = s.url || '';
+  body.appendChild(text);
+  body.appendChild(url);
+
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'wf-del';
+  del.textContent = '×';
+  del.title = t('workflow.removeStep');
+  del.setAttribute('aria-label', t('workflow.removeStep'));
+  del.addEventListener('click', () => removeWorkflowStep(s.id));
+
+  row.appendChild(n);
+  row.appendChild(body);
+  row.appendChild(del);
+  return row;
+}
+
+function renderSavedWorkflows(saved) {
+  if (!els.workflowSaved) return;
+  els.workflowSaved.innerHTML = '';
+  if (!saved.length) return;
+  const title = document.createElement('div');
+  title.className = 'anno-support-title';
+  title.textContent = t('workflow.savedTitle');
+  els.workflowSaved.appendChild(title);
+  saved.forEach((w) => {
+    const row = document.createElement('div');
+    row.className = 'workflow-saved-item';
+    const name = document.createElement('span');
+    name.className = 'wf-name';
+    name.textContent = `${w.name || t('workflow.untitled')} (${w.steps.length})`;
+    name.title = name.textContent;
+    const load = document.createElement('button');
+    load.type = 'button';
+    load.className = 'wf-saved-load';
+    load.textContent = t('workflow.load');
+    load.addEventListener('click', () => loadSavedWorkflow(w.id));
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'wf-saved-del';
+    del.textContent = '×';
+    del.title = t('workflow.deleteSaved');
+    del.setAttribute('aria-label', `${t('workflow.deleteSaved')}: ${w.name || t('workflow.untitled')}`);
+    del.addEventListener('click', () => deleteSavedWorkflow(w.id));
+    row.appendChild(name);
+    row.appendChild(load);
+    row.appendChild(del);
+    els.workflowSaved.appendChild(row);
+  });
+}
+
+async function toggleWorkflowRecording() {
+  const wf = await mutateWorkflow((w) => {
+    w.recording = !w.recording;
+    return w;
+  });
+  renderWorkflow(wf);
+  if (wf.recording) showBanner(escapeHtml(t('workflow.recordingBanner')), true);
+  else hideBanner();
+}
+
+async function clearWorkflowSteps() {
+  if (!state.workflow.steps.length) return;
+  if (!confirm(t('workflow.clearConfirm'))) return;
+  renderWorkflow(
+    await mutateWorkflow((w) => {
+      w.steps = [];
+      return w;
+    })
+  );
+}
+
+async function removeWorkflowStep(stepId) {
+  renderWorkflow(
+    await mutateWorkflow((w) => {
+      w.steps = w.steps.filter((s) => s.id !== stepId);
+      return w;
+    })
+  );
+}
+
+async function saveCurrentWorkflow() {
+  const current = await readWorkflow();
+  if (!current.steps.length) return;
+  const name = (els.workflowName?.value || '').trim() || t('workflow.untitled');
+  const entry = {
+    id: `wf-${Date.now()}`,
+    name,
+    createdAt: new Date().toISOString(),
+    steps: current.steps.map((s) => ({ ...s })),
+  };
+  const wf = await mutateWorkflow((w) => {
+    w.saved = [entry, ...w.saved].slice(0, 30);
+    return w;
+  });
+  if (els.workflowName) els.workflowName.value = '';
+  renderWorkflow(wf);
+  addMessage('assistant', t('workflow.savedMsg', { name: entry.name, count: entry.steps.length }));
+}
+
+async function loadSavedWorkflow(id) {
+  const wf = await mutateWorkflow((w) => {
+    const found = w.saved.find((x) => x.id === id);
+    if (found) w.steps = found.steps.map((s) => ({ ...s }));
+    return w;
+  });
+  renderWorkflow(wf);
+  addMessage('assistant', t('workflow.loadedMsg'));
+}
+
+async function deleteSavedWorkflow(id) {
+  renderWorkflow(
+    await mutateWorkflow((w) => {
+      w.saved = w.saved.filter((x) => x.id !== id);
+      return w;
+    })
+  );
+}
+
+if (els.btnWorkflow) els.btnWorkflow.addEventListener('click', () => toggleWorkflowRecording().catch(() => {}));
+if (els.btnWorkflowSave) els.btnWorkflowSave.addEventListener('click', () => saveCurrentWorkflow().catch(() => {}));
+if (els.btnWorkflowClear) els.btnWorkflowClear.addEventListener('click', () => clearWorkflowSteps().catch(() => {}));
+
 // 注釈は content 側で保存されるため、storage変化を監視して一覧を更新する。
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes.aiAdvisorAnnotations) refreshAnnotations();
+  if (changes[WORKFLOW_KEY]) refreshWorkflow();
   if (changes.aiAdvisorSettings) {
     if (suppressNextSettingsRefresh) {
       suppressNextSettingsRefresh = false;
@@ -1207,6 +1415,7 @@ async function init() {
   els.input.focus();
   loadPromptHistory();
   primeChatHistory();
+  refreshWorkflow();
   refreshState();
 }
 

@@ -47,4 +47,32 @@ const ok = (name) => {
   ok('お描きは従来どおりワークフロー手順に出る');
 }
 
+// (4) 記録ワークフロー(ページ跨ぎ)は URL 付きで番号順に出て、現在ページに ★ が付く。
+{
+  const p = buildSystemPrompt({
+    context: {
+      url: 'https://shop.example/cart',
+      crossPageWorkflow: {
+        count: 2,
+        steps: [
+          { order: 1, url: 'https://shop.example/item', text: 'カートに入れる', target: '購入ボタン', kind: 'note' },
+          { order: 2, url: 'https://shop.example/cart', text: '数量を2に', target: '数量欄', kind: 'note' },
+        ],
+      },
+    },
+  });
+  assert.match(p, /記録ワークフロー\(URL順の操作手順\)/, '記録ワークフロー節が出る');
+  assert.match(p, /1\. \[https:\/\/shop\.example\/item\]/, '手順1 が URL 付きで出る');
+  assert.match(p, /2\. \[https:\/\/shop\.example\/cart\] ★現在のページ/, '現在ページの手順に ★ が付く');
+  assert.match(p, /navigateTo/, '別URLへ進む手段として navigateTo を案内する');
+  ok('記録ワークフローは URL 付き・番号順で出る');
+}
+
+// (5) 記録ワークフローが無ければ節は出ない(回帰防止)。
+{
+  const p = buildSystemPrompt({ context: { url: 'https://x/y' } });
+  assert.doesNotMatch(p, /記録ワークフロー/, '空なら記録ワークフロー節は出ない');
+  ok('記録ワークフローが無ければ節は出ない');
+}
+
 console.log(`\n${passed} passed`);
