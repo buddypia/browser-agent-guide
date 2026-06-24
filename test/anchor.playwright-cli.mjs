@@ -484,8 +484,54 @@ const runnerSource = `async page => {
   });
   check('メモ赤枠: 選んだ見出しリンクだけが囲まれる(別リンクに暴発しない)', outlineOnRight.onTitle, JSON.stringify(outlineOnRight));
 
+  // メモは「手順N」としてAI文脈に番号付きで出る + annoSummary.step=N(AIにも人間にもステップだと伝わる)。
+  const stepContext = await page.evaluate(async () => {
+    window.__BAG_TEST__.clearAnnotations();
+    const link = document.querySelector('#feedZone a.title');
+    const saved = await window.__BAG_TEST__.upsertAnnotation({
+      kind: 'note',
+      anchor: window.__BAG_TEST__.buildAnchor(link),
+      note: 'ここを直す',
+      outline: true,
+    });
+    const text = window.__BAG_TEST__.buildContextText();
+    return { inText: text.includes('手順1（人の補足') && text.includes(': ここを直す'), step: saved?.step };
+  });
+  check('メモ手順: AI文脈に「手順1（補足）」で出る + annoSummary.step=1', stepContext.inText && stepContext.step === 1, JSON.stringify(stepContext));
+
+  // 対象未解決の補足は浮遊キャプション(.bag-step-caption.bag-floating)で番号付き常時表示する。
+  const floatingNote = await page.evaluate(async () => {
+    window.__BAG_TEST__.clearAnnotations();
+    const host = document.createElement('div');
+    host.id = 'floaty-host';
+    const el = document.createElement('button');
+    el.id = 'floaty-target';
+    el.textContent = 'ユニークに消える対象xyz';
+    host.appendChild(el);
+    document.body.appendChild(host);
+    await window.__BAG_TEST__.upsertAnnotation({
+      kind: 'note',
+      anchor: window.__BAG_TEST__.buildAnchor(el),
+      note: '浮遊メモ',
+    });
+    host.remove(); // 対象を消す → 次の render で未解決 → floating 経路
+    window.__BAG_TEST__.renderAnnotations();
+    const fc = document.querySelectorAll('.bag-step-caption.bag-floating');
+    return {
+      count: fc.length,
+      num: fc[0]?.querySelector('.bag-step-caption-num')?.textContent,
+      text: fc[0]?.querySelector('.bag-step-caption-text')?.textContent,
+    };
+  });
+  check(
+    '浮遊メモ: 対象未解決の補足は floating キャプションで番号付き常時表示',
+    floatingNote.count === 1 && floatingNote.num === '1' && floatingNote.text === '浮遊メモ',
+    JSON.stringify(floatingNote)
+  );
+
   await page.evaluate(() => {
     window.__BAG_TEST__.clearAnnotations();
+    document.querySelector('#floaty-host')?.remove();
     document.querySelector('#misbind-fixture')?.remove();
   });
 
