@@ -62,9 +62,6 @@
     ui: 'data-bag-ui',
     annoMarked: 'data-bag-anno-marked',
     annoOutline: 'data-bag-anno-outline',
-    // 選択直後〜メモ入力中だけ対象を囲む一時赤枠。renderAnnotations の一括クリア
-    // ([data-bag-anno-outline]) と名前空間を分け、再描画で消えないようにする。
-    pickOutline: 'data-bag-pick-outline',
   };
 
   const CHAT_BLOCKED_VERBS = new Set(['defineMarker', 'setStyle', 'removeElement']);
@@ -1794,8 +1791,11 @@
           el.removeAttribute(ATTR.intentSrc);
         }
       });
-      // 補足(note)の赤枠と目印の枠線。annoMarkedを持たないnote分も含め一括で外す。
+      // 目印(marker)の枠線(CSS outline 属性)を一括で外す。
       document.querySelectorAll(`[${ATTR.annoOutline}]`).forEach((el) => el.removeAttribute(ATTR.annoOutline));
+      // 補足(note)の赤枠はオーバーレイ方式。毎回作り直すので保存済み分の枠だけ撤去する
+      // (選択中の一時枠 'pick' は openAuthoring/closeAuthoring 管理なので残す)。
+      clearOutlineBoxes('note');
 
       // お描きの永続レイヤとピンを一旦破棄して再構築する。
       // 古い content-script インスタンス由来の点線コネクタは data-bag-anno を持たないため、
@@ -1883,7 +1883,8 @@
     pin.appendChild(tip);
     if (target && a.placement !== 'floating') {
       // 補足を付けた要素は赤枠で囲み、対象がひと目で分かるようにする(旧noteレコードも一律に囲む)。
-      target.setAttribute(ATTR.annoOutline, 'note');
+      // CSS outline ではなく独立オーバーレイで囲む(祖先の overflow/兄弟の z-index で欠けないため)。
+      addOutlineBox(target, 'note');
       target.insertAdjacentElement('afterend', pin);
     } else {
       pin.classList.add('bag-floating');
@@ -1925,6 +1926,9 @@
     lastUrl = location.href;
     resolveAttempts = 0;
     appliedRecipeSig = null; // 別画面なら同一レシピでも再適用を許可する
+    // 編集中だった補足フォームと選択中の一時赤枠(pick)は前画面のものなので畳む
+    // (startPicker/startDrawing と同様。残すと新画面に旧要素を指す赤枠が居座る)。
+    closeAuthoring();
     try {
       // SWが眠っていても次のDOM変化/イベントで再送されるため、失敗は握りつぶす。
       chrome.runtime.sendMessage({ type: 'SPA_NAVIGATED', url: location.href }, () => void chrome.runtime.lastError);
@@ -1944,7 +1948,8 @@
     // 全注釈が解決済みで対象ノードも生きている場合、Amazon の lazy layout などに追従するため
     // 座標だけ軽く更新し、DOMの作り直しは避ける。
     if (!staleResolvedTarget && lastUnresolved === 0) {
-      if (drawRegistry.length) scheduleDrawingReposition();
+      // お描きが無くても補足の赤枠オーバーレイはレイアウト変化に追従させる。
+      if (drawRegistry.length || outlineBoxes.length) scheduleDrawingReposition();
       return;
     }
     // 未解決注釈での無限リトライは抑える。ただし、解決済みだった対象が差し替わった場合は
@@ -2097,9 +2102,10 @@
   function openAuthoring(el, existing) {
     closeAuthoring();
     // 選択した対象を赤枠で囲んだまま残し、メモ入力中も「どこを直すのか」を見失わないようにする。
-    // 保存すれば renderAnnoNote が data-bag-anno-outline='note' を付けてそのまま赤枠が継続し、
-    // キャンセル時は closeAuthoring がこの一時枠を外す。
-    if (el && el.nodeType === 1) el.setAttribute(ATTR.pickOutline, '1');
+    // 保存すれば renderAnnoNote が同じ位置に 'note' 枠を引き継ぎ、キャンセル時は
+    // closeAuthoring がこの一時枠(pick)を外す。CSS outline ではなく独立オーバーレイで囲む。
+    clearOutlineBoxes('pick');
+    addOutlineBox(el, 'pick');
     // 編集時は保存済みanchorを維持する。floating合図ボタンはanchor=nullなので、
     // ここでbuildAnchor(null)に落ちると el.tagName で TypeError になる。新規メモのみ要素から生成。
     const anchor = existing ? existing.anchor : buildAnchor(el);
@@ -2247,9 +2253,9 @@
   function closeAuthoring() {
     authoringEl?.remove();
     authoringEl = null;
-    // 選択中の一時赤枠を解除する。保存済みの補足は renderAnnoNote が
-    // data-bag-anno-outline='note' で別途維持するので、この解除後も赤枠は残る。
-    document.querySelectorAll(`[${ATTR.pickOutline}]`).forEach((el) => el.removeAttribute(ATTR.pickOutline));
+    // 選択中の一時赤枠(pick)を解除する。保存済みの補足は renderAnnoNote が
+    // 'note' 枠として別途維持するので、この解除後も赤枠は残る。
+    clearOutlineBoxes('pick');
   }
 
   // ===========================================================================
@@ -3443,8 +3449,78 @@
 
   function repositionDrawings() {
     for (const entry of drawRegistry) redrawEntry(entry);
+    repositionOutlineBoxes(); // 補足/選択中の赤枠オーバーレイもスクロール/リサイズに追従させる
     layoutMemos();
     renderWorkflowConnectors(); // 順序コネクタもスクロール/リサイズに追従させる
+  }
+
+  // ===========================================================================
+  // 補足(note)/選択中(pick)の対象を囲む赤枠オーバーレイ
+  // CSS outline は対象要素自身に描かれるため、サイトの overflow:hidden(祖先クリップ)や
+  // z-index(兄弟の上塗り)・transform で枠が欠けることがある(=要素によって囲めたり囲めなかったり)。
+  // hover の .bag-pick-overlay と同じく、祖先から切り離した fixed の独立レイヤに枠を描けば、
+  // どんなページCSSでも確実に対象を囲める。スクロール/リサイズ追従は repositionDrawings
+  // (setupDrawingReposition の scroll/resize リスナ)へ相乗りする。
+  // ===========================================================================
+  let outlineHost = null;
+  let outlineBoxes = []; // [{ target, box, kind }] kind: 'note'(保存済み) | 'pick'(選択中の一時枠)
+
+  function ensureOutlineHost() {
+    if (outlineHost && outlineHost.isConnected) return outlineHost;
+    outlineHost = document.createElement('div');
+    outlineHost.className = 'bag-anno-outline-host';
+    outlineHost.setAttribute(ATTR.ui, '1');
+    document.documentElement.appendChild(outlineHost);
+    return outlineHost;
+  }
+
+  // 対象要素を囲む赤枠 div を1つ追加する。旧 CSS outline の outline-offset:2px と見た目を
+  // 揃えるため、矩形を 2px 外側へ広げて囲む(box-sizing:border-box で枠線込み)。
+  function addOutlineBox(target, kind) {
+    if (!target || target.nodeType !== 1) return null;
+    const box = document.createElement('div');
+    box.className = 'bag-anno-outline-box';
+    box.setAttribute(ATTR.ui, '1');
+    ensureOutlineHost().appendChild(box);
+    const entry = { target, box, kind };
+    outlineBoxes.push(entry);
+    positionOutlineBox(entry);
+    setupDrawingReposition(); // お描きが無くてもスクロール/リサイズ追従を有効化
+    return entry;
+  }
+
+  function positionOutlineBox(entry) {
+    const { target, box } = entry;
+    if (!target.isConnected) {
+      box.style.display = 'none';
+      return;
+    }
+    const r = target.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) {
+      box.style.display = 'none'; // detached 相当(非表示・ゼロ矩形)は枠を隠し、再描画での再解決に委ねる
+      return;
+    }
+    Object.assign(box.style, {
+      display: 'block',
+      left: `${r.left - 2}px`,
+      top: `${r.top - 2}px`,
+      width: `${r.width + 4}px`,
+      height: `${r.height + 4}px`,
+    });
+  }
+
+  function repositionOutlineBoxes() {
+    for (const entry of outlineBoxes) positionOutlineBox(entry);
+  }
+
+  // kind 指定でその種別だけ、未指定で全部の枠を撤去する。
+  // note 枠は renderAnnotations が毎回作り直し、pick 枠は openAuthoring/closeAuthoring が管理する。
+  function clearOutlineBoxes(kind) {
+    outlineBoxes = outlineBoxes.filter((entry) => {
+      if (kind && entry.kind !== kind) return true;
+      entry.box.remove();
+      return false;
+    });
   }
 
   // ===========================================================================
