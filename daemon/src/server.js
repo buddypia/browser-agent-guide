@@ -252,11 +252,16 @@ const AMBIGUOUS_HINT =
   'urlContains に作業中ページの URL 断片（例: ホスト名）を渡して絞るか、list_visual_feedback で一覧を確認してください。' +
   'image が要る時は、候補の context を読んだ上でその id を contextId に渡してください。';
 
+// 曖昧時の警告本文。text(content[]) と structuredContent.disambiguation.message の両方で共有する。
+// Codex(#10334) は structuredContent があると content[] を丸ごと落として structuredContent だけを
+// surface するため、この警告が text にしか無いと Codex は読めず Claude Code と非対称になる。
+// 1 か所に集約し両チャネルへ同じ文言を載せてパリティを保つ（文言ドリフトも防ぐ）。
+const AMBIGUOUS_MESSAGE =
+  'latest が曖昧です: 直近に複数プロジェクトのキャプチャがあります（別案件を誤って掴まないため image は返しません）。';
+
 function ambiguousLatestMessage(candidates = []) {
   const lines = [];
-  lines.push(
-    'latest が曖昧です: 直近に複数プロジェクトのキャプチャがあります（別案件を誤って掴まないため image は返しません）。'
-  );
+  lines.push(AMBIGUOUS_MESSAGE);
   lines.push('candidates (newest-first):');
   for (const c of candidates) {
     lines.push(`  - id=${c.id}  host=${c.host}  title=${c.title || '(不明)'}  captured_at=${c.capturedAt || '(不明)'}`);
@@ -271,7 +276,15 @@ function ambiguousLatestResult(peek) {
   return {
     content: [{ type: 'text', text: ambiguousLatestMessage(peek.candidates) }],
     structuredContent: {
-      disambiguation: { distinctCount: peek.distinctCount, candidates: peek.candidates, hint: AMBIGUOUS_HINT },
+      // message は content[] の警告文と同一。Codex は structuredContent しか surface しない場面が
+      // あるため、警告を structuredContent 側にも載せて Claude Code とパリティを保つ。
+      // 不変条件: top-level に id を載せない（別案件 id の laundering 防止）。message は disambiguation 内。
+      disambiguation: {
+        distinctCount: peek.distinctCount,
+        candidates: peek.candidates,
+        hint: AMBIGUOUS_HINT,
+        message: AMBIGUOUS_MESSAGE,
+      },
     },
   };
 }
