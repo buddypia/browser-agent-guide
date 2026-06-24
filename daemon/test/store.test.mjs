@@ -63,7 +63,7 @@ test('normalizeStorageMode: disk 既定、memory は hybrid alias', () => {
 test('hybrid store: context はメモリから返し、image 要求時だけ inbox に保存する', async () => {
   const inboxDir = mkdtempSync(join(tmpdir(), 'vf-hybrid-'));
   const entryStore = createVisualFeedbackStore({ inboxDir, storageMode: 'hybrid' });
-  const httpServer = createHttpServer({ inboxDir, entryStore });
+  const httpServer = createHttpServer({ inboxDir, entryStore, nowMs: Date.parse('2026-06-18T01:10:00.000Z') });
   const wss = attachWebSocketServer(httpServer, { inboxDir, entryStore, token: TOKEN });
   await new Promise((r) => httpServer.listen(0, '127.0.0.1', r));
   const { port } = httpServer.address();
@@ -131,7 +131,7 @@ test('hybrid store: context はメモリから返し、image 要求時だけ inb
 test('hybrid store: 異なる host の memory push 2件で bare context が disambiguation を返す（N5）', async () => {
   const inboxDir = mkdtempSync(join(tmpdir(), 'vf-hybrid-amb-'));
   const entryStore = createVisualFeedbackStore({ inboxDir, storageMode: 'hybrid' });
-  const httpServer = createHttpServer({ inboxDir, entryStore });
+  const httpServer = createHttpServer({ inboxDir, entryStore, nowMs: Date.parse('2026-06-20T10:10:00.000Z') });
   const wss = attachWebSocketServer(httpServer, { inboxDir, entryStore, token: TOKEN });
   await new Promise((r) => httpServer.listen(0, '127.0.0.1', r));
   const { port } = httpServer.address();
