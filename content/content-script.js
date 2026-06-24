@@ -62,6 +62,9 @@
     ui: 'data-bag-ui',
     annoMarked: 'data-bag-anno-marked',
     annoOutline: 'data-bag-anno-outline',
+    // 選択直後〜メモ入力中だけ対象を囲む一時赤枠。renderAnnotations の一括クリア
+    // ([data-bag-anno-outline]) と名前空間を分け、再描画で消えないようにする。
+    pickOutline: 'data-bag-pick-outline',
   };
 
   const CHAT_BLOCKED_VERBS = new Set(['defineMarker', 'setStyle', 'removeElement']);
@@ -2054,6 +2057,10 @@
   // 要素クリック後に出る、非エンジニア向けの簡易フォーム。
   function openAuthoring(el, existing) {
     closeAuthoring();
+    // 選択した対象を赤枠で囲んだまま残し、メモ入力中も「どこを直すのか」を見失わないようにする。
+    // 保存すれば renderAnnoNote が data-bag-anno-outline='note' を付けてそのまま赤枠が継続し、
+    // キャンセル時は closeAuthoring がこの一時枠を外す。
+    if (el && el.nodeType === 1) el.setAttribute(ATTR.pickOutline, '1');
     // 編集時は保存済みanchorを維持する。floating合図ボタンはanchor=nullなので、
     // ここでbuildAnchor(null)に落ちると el.tagName で TypeError になる。新規メモのみ要素から生成。
     const anchor = existing ? existing.anchor : buildAnchor(el);
@@ -2195,6 +2202,9 @@
   function closeAuthoring() {
     authoringEl?.remove();
     authoringEl = null;
+    // 選択中の一時赤枠を解除する。保存済みの補足は renderAnnoNote が
+    // data-bag-anno-outline='note' で別途維持するので、この解除後も赤枠は残る。
+    document.querySelectorAll(`[${ATTR.pickOutline}]`).forEach((el) => el.removeAttribute(ATTR.pickOutline));
   }
 
   // ===========================================================================

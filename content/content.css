@@ -118,6 +118,12 @@
   outline: 2px dashed #ef4444 !important;
   outline-offset: 2px !important;
 }
+/* 選択直後〜メモ入力中の対象を、保存後の赤枠と同じ見た目で囲んだまま残す。
+   renderAnnotations は [data-bag-anno-outline] だけを掃除するため別属性で名前空間を分ける。 */
+[data-bag-pick-outline] {
+  outline: 2px dashed #ef4444 !important;
+  outline-offset: 2px !important;
+}
 
 /* コメントの吹き出しピン */
 .bag-note-pin {
