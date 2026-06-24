@@ -1979,6 +1979,13 @@
   let pickOverlay = null;
   let pickHintEl = null;
   let authoringEl = null;
+  // ホバーで実際にハイライトした要素を記憶し、クリック時に再利用する。クリック直前に
+  // サイトがDOMを変える(Amazonの商品カード等、hoverでオーバーレイdivが出る)と click の
+  // composedPath() が別要素を返し、見えていた赤枠と選択要素がズレるため。
+  let lastPickEl = null;
+  // pointerdown(capture段)で掴むスナップショット。サイトの mousedown ハンドラより前に走るため、
+  // タップで overlay 等が差し込まれる前の“本当に触れた要素”を確実に捕捉できる(hover より堅牢)。
+  let lastPickPointerEl = null;
 
   function startPicker() {
     if (picking) return { picking: true };
@@ -1994,6 +2001,7 @@
     pickHintEl.setAttribute(ATTR.ui, '1');
     pickHintEl.textContent = t('cs.picker.hint');
     document.documentElement.appendChild(pickHintEl);
+    document.addEventListener('pointerdown', onPickPointerDown, true);
     document.addEventListener('mousemove', onPickMove, true);
     document.addEventListener('click', onPickClick, true);
     document.addEventListener('keydown', onPickKey, true);
@@ -2007,6 +2015,9 @@
     pickOverlay = null;
     pickHintEl?.remove();
     pickHintEl = null;
+    lastPickEl = null;
+    lastPickPointerEl = null;
+    document.removeEventListener('pointerdown', onPickPointerDown, true);
     document.removeEventListener('mousemove', onPickMove, true);
     document.removeEventListener('click', onPickClick, true);
     document.removeEventListener('keydown', onPickKey, true);
@@ -2021,13 +2032,18 @@
     return e.target;
   }
 
-  function onPickMove(e) {
-    if (!pickOverlay) return;
-    const el = pickTargetFrom(e);
-    if (!el || (el.closest && el.closest(`[${ATTR.ui}]`))) {
-      pickOverlay.style.display = 'none';
-      return;
+  // 候補のうち、まだDOMに繋がっていて自前UIでない最初の要素を返す。
+  // detached(hover/pointer の後にサイトが除去)や stale な参照を弾く。
+  function firstConnectedPick(...els) {
+    for (const el of els) {
+      if (el && el.nodeType === 1 && el.isConnected && el.closest && !el.closest(`[${ATTR.ui}]`)) return el;
     }
+    return null;
+  }
+
+  // 選択中の赤枠オーバーレイを対象要素の矩形へ合わせる。hover と pointerdown で共用。
+  function highlightPick(el) {
+    if (!pickOverlay || !el) return;
     const r = el.getBoundingClientRect();
     Object.assign(pickOverlay.style, {
       display: 'block',
@@ -2038,11 +2054,38 @@
     });
   }
 
+  function onPickPointerDown(e) {
+    if (e.target.closest && e.target.closest(`[${ATTR.ui}]`)) return; // 自前UIは無視
+    const el = pickTargetFrom(e);
+    if (!el || el.nodeType !== 1 || (el.closest && el.closest(`[${ATTR.ui}]`))) {
+      lastPickPointerEl = null;
+      return;
+    }
+    // capture段なのでサイトの mousedown(overlay差し込み等)より前に対象を確定できる。
+    // タップで mousemove が来ない環境でも、ここで赤枠フィードバックを即出す。
+    lastPickPointerEl = el;
+    highlightPick(el);
+  }
+
+  function onPickMove(e) {
+    if (!pickOverlay) return;
+    const el = pickTargetFrom(e);
+    if (!el || (el.closest && el.closest(`[${ATTR.ui}]`))) {
+      pickOverlay.style.display = 'none';
+      lastPickEl = null;
+      return;
+    }
+    lastPickEl = el; // ハイライトした“その”要素をクリック時に使う
+    highlightPick(el);
+  }
+
   function onPickClick(e) {
     if (e.target.closest && e.target.closest(`[${ATTR.ui}]`)) return; // 自前UIは無視
     e.preventDefault();
     e.stopPropagation();
-    const el = pickTargetFrom(e);
+    // 優先順: pointerdown(capture=サイトのmousedown前)で掴んだ要素 > hover要素 > clickのcomposedPath。
+    // firstConnectedPick が detached/自前UI を弾くので、見えていた赤枠と実際の対象が一致する。
+    const el = firstConnectedPick(lastPickPointerEl, lastPickEl) || pickTargetFrom(e);
     stopPicker();
     openAuthoring(el);
   }
@@ -2066,6 +2109,11 @@
     const anchor = existing ? existing.anchor : buildAnchor(el);
     const head = anchor || {};
     const heading = head.text || head.ariaLabel || head.placeholder || head.tag || t('cs.author.targetFallback');
+    // どの要素を選んだかを CSS セレクタ(クエリ)で具体的に示す。tag だけだと「div」のように
+    // 判別できないため。anchor の無い floating メモでは行を出さない。
+    const selectorRow = head.selector
+      ? `<div class="bag-author-target-q">${escapeHtml(t('cs.author.selector'))} <code title="${escapeHtml(head.selector)}">${escapeHtml(truncate(head.selector, 120))}</code></div>`
+      : '';
     const wrap = document.createElement('div');
     wrap.className = 'bag-author';
     wrap.setAttribute(ATTR.ui, '1');
@@ -2073,6 +2121,7 @@
     wrap.innerHTML = `
       <div class="bag-author-head">${escapeHtml(t('cs.author.addNote'))}</div>
       <div class="bag-author-target">${escapeHtml(t('cs.author.target'))} <b>${escapeHtml(truncate(heading, 40))}</b> <span class="muted">&lt;${escapeHtml(head.role || head.tag || '')}&gt;</span></div>
+      ${selectorRow}
       <label class="bag-author-row">
         <span>${escapeHtml(t('cs.author.aiContent'))}</span>
         <textarea data-f="note" rows="3" placeholder="${escapeHtml(t('cs.author.aiContentPlaceholder'))}"></textarea>

@@ -145,6 +145,7 @@
   "cs.picker.hint": "Click where you want to add a note (Esc to exit)",
   "cs.author.addNote": "Add a note",
   "cs.author.target": "Target:",
+  "cs.author.selector": "Selector:",
   "cs.author.aiContent": "Instruction for AI",
   "cs.author.aiContentPlaceholder": "e.g. Always double-check the content before submitting here",
   "cs.author.cancel": "Cancel",
