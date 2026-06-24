@@ -145,6 +145,7 @@
   "cs.picker.hint": "メモを残したい場所をクリック（Escで終了）",
   "cs.author.addNote": "メモを残す",
   "cs.author.target": "対象:",
+  "cs.author.selector": "セレクタ:",
   "cs.author.aiContent": "AIへの指示",
   "cs.author.aiContentPlaceholder": "例: ここは送信前に必ず内容を確認する",
   "cs.author.cancel": "キャンセル",

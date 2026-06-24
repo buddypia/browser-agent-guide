@@ -247,6 +247,20 @@ html.bag-picking * {
 .bag-author-target .muted {
   color: #7b8783;
 }
+/* 対象要素を一意に示す CSS セレクタ(クエリ)。tag 表示だけでは判別できないため併記する。 */
+.bag-author-target-q {
+  margin: -4px 0 10px;
+  font-size: 11px;
+  color: var(--bag-muted);
+  word-break: break-all;
+}
+.bag-author-target-q code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--bag-surface-muted);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: #34423f;
+}
 .bag-author-row {
   display: flex;
   flex-direction: column;
