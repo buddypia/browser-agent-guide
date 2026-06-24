@@ -1001,6 +1001,7 @@ textarea:focus-visible {
 .tool-cap.mark::before { background: var(--ok); }
 .tool-cap.guide::before { background: #f4d28a; }
 .tool-cap.inspect::before { background: #5b9bd5; }
+.tool-cap.workflow::before { background: #c084fc; }
 
 .quick-actions.two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1043,6 +1044,185 @@ textarea:focus-visible {
 .quick-action.inspect:hover {
   background: var(--panel-2);
   border-color: #3f5156;
+}
+
+/* cross-page workflow recording — purple lane; turns red while recording */
+.quick-action.workflow-rec {
+  border-color: rgba(192, 132, 252, 0.5);
+  background: rgba(192, 132, 252, 0.12);
+  color: #e3cdfb;
+}
+
+.quick-action.workflow-rec:hover {
+  background: rgba(192, 132, 252, 0.2);
+  border-color: rgba(192, 132, 252, 0.7);
+}
+
+.quick-action.workflow-rec[aria-pressed="true"] {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.16);
+  color: #fecaca;
+}
+
+.quick-action.workflow-rec[aria-pressed="true"] .action-icon {
+  color: #ef4444;
+  animation: bag-rec-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes bag-rec-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* recorded-workflow panel (mirrors .anno-panel) */
+.workflow-hint {
+  margin: 0;
+  padding: 0 12px 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.workflow-step {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.workflow-step .wf-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #c084fc;
+  color: #1a1030;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workflow-step .wf-body {
+  min-width: 0;
+}
+
+.workflow-step .wf-text {
+  font-size: 12px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.workflow-step .wf-url {
+  font-size: 10px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.workflow-step .wf-del {
+  border: 0;
+  background: transparent;
+  color: #fca5a5;
+  font-size: 14px;
+  line-height: 1;
+  min-height: 24px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.workflow-step .wf-del:hover {
+  background: rgba(248, 113, 113, 0.14);
+  border-radius: 6px;
+}
+
+.workflow-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workflow-save {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+}
+
+.workflow-name {
+  min-width: 0;
+  width: 100%;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-height: 34px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.workflow-save-btn {
+  border: 1px solid #c084fc;
+  background: rgba(192, 132, 252, 0.18);
+  color: #e3cdfb;
+  border-radius: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.workflow-save-btn:hover {
+  background: rgba(192, 132, 252, 0.28);
+}
+
+.workflow-save-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.workflow-saved {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workflow-saved-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.workflow-saved-item .wf-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-saved-item button {
+  border: 0;
+  background: transparent;
+  color: #7dd3c7;
+  font-size: 12px;
+  min-height: 26px;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.workflow-saved-item button.wf-saved-del {
+  color: #fca5a5;
+}
+
+.workflow-saved-item button:hover {
+  background: var(--panel-2);
+  border-radius: 6px;
 }
 
 /* ── Redesign: action-first empty state ───────────────────────────────── */
