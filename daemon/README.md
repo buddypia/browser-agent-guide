@@ -217,6 +217,29 @@ codex mcp get bag_visual_feedback
 url = "http://127.0.0.1:8765/mcp"
 ```
 
+> **MCP 画像 vision の前提（Codex）**: Streamable HTTP（`url=`）MCP の base64 image content は Codex の
+> **rmcp（Rust MCP）クライアント経由でのみ**描画される。`~/.codex/config.toml` で rmcp を有効化する
+> （バージョン依存で既定 ON のこともあるが、明示しても無害）:
+>
+> ```toml
+> [features]
+> rmcp_client = true   # 古いビルドは experimental_use_rmcp_client = true（非推奨, codex#6995）
+>
+> [mcp_servers.bag_visual_feedback]
+> url = "http://127.0.0.1:8765/mcp"
+> startup_timeout_sec = 20   # cold materialize は遅いことがある
+> tool_timeout_sec = 120
+> ```
+>
+> 生きている設定キー/既定は `codex features list` で確認（`codex --enable rmcp_client` の一発指定も可）。
+> ⚠️ rmcp 有効でも、Codex は MCP の inline base64 を vision 化しないビルドがある（codex#4819:
+> `<image content>` プレースホルダのまま、base64 はトークンだけ消費）。Codex の**確実な vision 経路は
+> 組み込み `view_image`** で返り値の絶対 `file_path`（無ければ `shot_url` に `?token=` を付与）を開くこと。
+> だから本デーモンの `file_path`/`shot_url` テキスト併走は Codex にとって fallback ではなく**主経路**に
+> なりうる。なお本デーモンは image ツールに structuredContent を一切載せない設計（`get_*_visual_feedback`
+> は content[] のみ返す）ので Codex#10334（structuredContent があると content[] の image が落ちる）には
+> **該当しない**。
+
 ### Antigravity — MCP 設定（`serverUrl` キー）
 
 ```json
@@ -253,7 +276,12 @@ url = "http://127.0.0.1:8765/mcp"
    → CLI が `bag_visual_feedback:get_latest_visual_feedback_context` を呼び、`@agent:` / selector / testid を先に読む。
    → 画像が必要な時だけ、context の `id` を `contextId` に入れ、理由を `imageReason` に書いて
    `bag_visual_feedback:get_latest_visual_feedback` を呼び、返った image を vision 解釈する。
-   - **(検証済)** Claude Code / Codex が MCP image を実際に vision として読む（handoff §2.2）。
+   - **(検証済)** Claude Code は MCP image をネイティブに vision 解釈する（handoff §2.2）。Codex は
+     rmcp クライアント有効時に読むが、ビルドによっては inline image を vision 化せず、`file_path` +
+     組み込み `view_image` が確実な経路（上記「Codex CLI」節の前提を満たすこと）。
+   - Claude Code は MCP 応答に既定 ~25,000 トークンの上限があり（生の base64 文字数で測る・claude-code#9152）、
+     大きな注釈 PNG は inline 経路で拒否されうる。`MAX_MCP_OUTPUT_TOKENS` を上げる（例: `50000`）と回避でき、
+     拒否されてもデーモンは常に `file_path`/`shot_url` を併走させるのでフル解像度画像へは到達できる。
 
 ## テスト
 
