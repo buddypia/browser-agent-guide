@@ -34,8 +34,9 @@ const IMAGE_GATE_SCHEMA = {
 
 // shotUrlFor(id, kind) は、ディスクパス非依存の loopback HTTP 取得先（/shot|/raw/<id>.png?token=…）を
 // 返すオプション関数。渡された時だけ context/image テキストに shot_url/raw_url を併走させる。
-export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFAULT_LATEST_WINDOW_MS } = {}) {
+export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFAULT_LATEST_WINDOW_MS, nowMs } = {}) {
   const entryStore = asEntryStore(entrySource);
+  const currentNowMs = typeof nowMs === 'function' ? nowMs : () => (Number.isFinite(nowMs) ? nowMs : Date.now());
   const server = new McpServer(
     { name: 'bag-visual-feedback', version: '0.1.0' },
     {
@@ -85,15 +86,17 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       // 引数なし（無フィルタ）の時だけ曖昧検知。直近に複数プロジェクトが居れば単一を返さず候補一覧を返す。
       if (!urlContains && !titleContains) {
         const rows = entryStore.queryEntries({ limit: 8 });
+        const entry = rows[0];
+        if (!entry) {
+          return { content: [{ type: 'text', text: filterEmptyMessage({}) }] };
+        }
+        const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains });
+        if (stale) return stale;
         const peek = peekDistinctRecent(rows, { windowMs: latestWindowMs });
         if (peek.distinctCount >= 2) {
           return ambiguousLatestResult(peek);
         }
         // 単一プロジェクト（または空）→ 従来どおり最新を返す。
-        const entry = rows[0];
-        if (!entry) {
-          return { content: [{ type: 'text', text: filterEmptyMessage({}) }] };
-        }
         const context = buildEntryContext(entry, { shotUrlFor });
         return {
           content: [{ type: 'text', text: buildEntryContextText(context) }],
@@ -105,6 +108,8 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       if (!entry) {
         return { content: [{ type: 'text', text: filterEmptyMessage({ urlContains, titleContains }) }] };
       }
+      const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains });
+      if (stale) return stale;
       const context = buildEntryContext(entry, { shotUrlFor });
       return {
         content: [{ type: 'text', text: buildEntryContextText(context) }],
@@ -131,6 +136,12 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       // 場合だけ、その候補の image を返す（候補 context を読んだ上での再取得を妨げない）。
       if (!urlContains && !titleContains) {
         const rows = entryStore.queryEntries({ limit: 8 });
+        const entry = rows[0];
+        if (!entry) {
+          return { content: [{ type: 'text', text: filterEmptyMessage({}) }] };
+        }
+        const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains });
+        if (stale) return stale;
         const peek = peekDistinctRecent(rows, { windowMs: latestWindowMs });
         if (peek.distinctCount >= 2) {
           const picked = peek.candidates.find((c) => c.id === contextId);
@@ -146,10 +157,6 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
           return ambiguousLatestResult(peek);
         }
         // 単一プロジェクト（または空）→ 従来の imageGate 経路をそのまま。
-        const entry = rows[0];
-        if (!entry) {
-          return { content: [{ type: 'text', text: filterEmptyMessage({}) }] };
-        }
         const blocked = imageGateMessage(entry, { contextId, imageReason });
         if (blocked) return { content: [{ type: 'text', text: blocked }] };
         return { content: buildEntryContent(materializeForImage(entryStore, entry), { shotUrlFor }) };
@@ -159,6 +166,8 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       if (!entry) {
         return { content: [{ type: 'text', text: filterEmptyMessage({ urlContains, titleContains }) }] };
       }
+      const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains });
+      if (stale) return stale;
       const blocked = imageGateMessage(entry, { contextId, imageReason });
       if (blocked) return { content: [{ type: 'text', text: blocked }] };
       return { content: buildEntryContent(materializeForImage(entryStore, entry), { shotUrlFor }) };
@@ -287,6 +296,70 @@ function ambiguousLatestResult(peek) {
       },
     },
   };
+}
+
+const STALE_MESSAGE =
+  'latest が古すぎます: 最新候補が freshness window を超えているため、誤った過去画面を掴まないよう context/image は返しません。';
+const STALE_HINT =
+  'ブラウザ拡張でいまの画面を再キャプチャしてください。過去データが必要な場合だけ list_visual_feedback で id を確認し、' +
+  'get_visual_feedback_context / get_visual_feedback を id 指定で使ってください。';
+
+function staleLatestResult(entry, { latestWindowMs, nowMs, urlContains, titleContains } = {}) {
+  if (!isStaleLatest(entry, { latestWindowMs, nowMs })) return null;
+  return {
+    content: [{ type: 'text', text: staleLatestMessage(entry, { latestWindowMs, nowMs, urlContains, titleContains }) }],
+    structuredContent: {
+      stale: {
+        message: STALE_MESSAGE,
+        latest: staleLatestSummary(entry, { latestWindowMs, nowMs }),
+        scope: latestScope({ urlContains, titleContains }),
+        hint: STALE_HINT,
+      },
+    },
+  };
+}
+
+function staleLatestMessage(entry, { latestWindowMs, nowMs, urlContains, titleContains } = {}) {
+  const summary = staleLatestSummary(entry, { latestWindowMs, nowMs });
+  const lines = [STALE_MESSAGE];
+  const scope = latestScope({ urlContains, titleContains });
+  if (scope) lines.push(`scope: ${scope}`);
+  if (summary.url) lines.push(`url: ${summary.url}`);
+  if (summary.title) lines.push(`title: ${summary.title}`);
+  lines.push(`captured_at: ${summary.capturedAt || '(不明)'}`);
+  lines.push(`age_minutes: ${summary.ageMinutes}`);
+  lines.push(`freshness_window_minutes: ${summary.staleAfterMinutes}`);
+  lines.push(STALE_HINT);
+  return lines.join('\n');
+}
+
+function staleLatestSummary(entry, { latestWindowMs, nowMs } = {}) {
+  const capturedAtMs = entryTimeMs(entry);
+  const ageMs = Math.max(0, Number(nowMs) - capturedAtMs);
+  return {
+    url: entry?.url || '',
+    title: entry?.title || '',
+    capturedAt: entry?.capturedAt || (capturedAtMs > 0 ? new Date(capturedAtMs).toISOString() : ''),
+    ageMinutes: Number.isFinite(ageMs) ? Math.round(ageMs / 60000) : null,
+    staleAfterMinutes: Number.isFinite(latestWindowMs) ? Math.round(latestWindowMs / 60000) : null,
+  };
+}
+
+function latestScope({ urlContains, titleContains } = {}) {
+  return [urlContains && `urlContains=${urlContains}`, titleContains && `titleContains=${titleContains}`].filter(Boolean).join(' ');
+}
+
+function isStaleLatest(entry, { latestWindowMs, nowMs } = {}) {
+  if (!entry || !Number.isFinite(latestWindowMs) || latestWindowMs <= 0) return false;
+  const capturedAtMs = entryTimeMs(entry);
+  if (!Number.isFinite(capturedAtMs) || capturedAtMs <= 0) return true;
+  return Number(nowMs) - capturedAtMs > latestWindowMs;
+}
+
+function entryTimeMs(entry) {
+  const capturedAt = Date.parse(entry?.capturedAt || '');
+  if (!Number.isNaN(capturedAt)) return capturedAt;
+  return Number(entry?.mtime) || 0;
 }
 
 // フィルタ有無で空時メッセージを出し分ける（誤って別プロジェクトのを掴ませない案内）。

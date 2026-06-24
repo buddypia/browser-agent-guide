@@ -35,6 +35,10 @@
   「バイトはメモリ優先」方針）。materialize に失敗した時だけ `file_path` 行を省き `shot_url` を案内する。
 - context 出力は `dataAgentId` (`@agent:`) を最優先にし、`selector` / `testid` / `anchorLabel`
   で足りる時は image を取得しない。
+- `get_latest_visual_feedback_context` / `get_latest_visual_feedback` は、最新候補が鮮度窓
+  （既定90分）を超えて古い時は context/image と top-level `id` を返さない。過去データが必要な時は
+  `list_visual_feedback` で id を確認し、`get_visual_feedback_context` / `get_visual_feedback` を
+  明示 id で呼ぶ。
 
 ### storage mode（disk / hybrid）
 
@@ -93,13 +97,19 @@ bag_visual_feedback:list_visual_feedback({ titleContains: "ダッシュボード
 条件に一致しない場合は image を返さず案内テキストを返す（誤って別プロジェクトの画像を掴ませない）。
 CLI への運用ヒント: 作業中ページの URL 断片を `urlContains` に渡すよう AGENTS.md / CLAUDE.md に書いておくとよい。
 
-さらに、`urlContains` / `titleContains` を**付けずに** `get_latest_visual_feedback_context` /
-`get_latest_visual_feedback` を呼んだ時、直近（既定90分・`capturedAt` 基準）に**複数プロジェクト
+さらに、`get_latest_visual_feedback_context` / `get_latest_visual_feedback` は「古すぎる最新」を
+誤って掴ませないため、最新候補の `capturedAt`（無ければ `mtime`）が鮮度窓（既定90分）を超えている時は
+単一 capture として返さない。text/structuredContent に stale 警告だけを返し、top-level `id` も
+image も返さない。まずブラウザ拡張でいまの画面を再キャプチャする。過去データを意図して読む場合だけ
+`list_visual_feedback` で id を確認し、`get_visual_feedback_context` / `get_visual_feedback` を id 指定で使う。
+
+また、`urlContains` / `titleContains` を**付けずに** `get_latest_visual_feedback_context` /
+`get_latest_visual_feedback` を呼んだ時、鮮度窓内（既定90分・`capturedAt` 基準）に**複数プロジェクト
 （異なるホスト）のキャプチャ**があると、単一を勝手に返さず**候補一覧**を返す（image も返さない）。
 別案件を「最新」と誤認させないための安全則で、`structuredContent.disambiguation` に候補
 （id / host / title / captured_at）が入る。`urlContains` で絞れば従来どおり1件を返す。image が
 必要な時は、候補の context を読んだ上でその `id` を `contextId` に渡す。**単一プロジェクトの inbox
-では一切発火しない**（従来挙動のまま）。窓は `--latest-window-min` / `BAG_VF_LATEST_WINDOW_MIN`（分）で調整可。
+では一切発火しない**。鮮度窓/曖昧検知窓は `--latest-window-min` / `BAG_VF_LATEST_WINDOW_MIN`（分）で調整可。
 
 > 動作確認: `node scripts/probe.mjs ~/Downloads/ai-inbox --url <部分一致>` は context-only。
 > image 経路を明示的に試す時だけ `--image` を足す。
@@ -149,7 +159,7 @@ node src/index.js --storage hybrid
 確認:
 
 ```bash
-curl -s http://127.0.0.1:8765/healthz   # {"ok":true,"inboxDir":"...","imageRoute":"/shot/<id>.png","storage":"disk|hybrid",...}
+curl -s http://127.0.0.1:8765/healthz   # {"ok":true,"inboxDir":"...","imageRoute":"/shot/<id>.png","latestWindowMs":5400000,...}
 ```
 
 環境変数でも設定可: `BAG_VF_INBOX`, `BAG_VF_PORT`, `BAG_VF_HOST`, `BAG_VF_STORAGE`,
