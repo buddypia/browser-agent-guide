@@ -1202,6 +1202,8 @@
       note: a.note || '',
       intent: a.intent || '',
       shapeText: drawing ? describeShapes(a.shapes) : '',
+      // 補足/お描きは番号付きの手順。AI・人間にステップ順を伝えるための通し番号。
+      step: a.kind === 'note' ? annoNoteNumber(a) : drawing ? annoDrawingNumber(a) : undefined,
       // お描きメモは forAI 未設定の旧レコードを ON 扱いにして後方互換にする。
       forAI: drawing ? memoForAI(a) : undefined,
       shapePreview: drawing ? buildShapePreview(a.shapes) : undefined,
@@ -1872,24 +1874,28 @@
   }
 
   function renderAnnoNote(a, target) {
-    const pin = document.createElement('span');
-    pin.className = 'bag-note-pin';
-    pin.setAttribute(ATTR.anno, a.id);
-    pin.setAttribute(ATTR.ui, '1');
-    pin.textContent = 'i';
-    const tip = document.createElement('span');
-    tip.className = 'bag-note-tip';
-    tip.textContent = a.note || '';
-    pin.appendChild(tip);
+    const number = annoNoteNumber(a);
     if (target && a.placement !== 'floating') {
-      // 補足を付けた要素は赤枠で囲み、対象がひと目で分かるようにする(旧noteレコードも一律に囲む)。
-      // CSS outline ではなく独立オーバーレイで囲む(祖先の overflow/兄弟の z-index で欠けないため)。
-      addOutlineBox(target, 'note');
-      target.insertAdjacentElement('afterend', pin);
+      // 対象を赤枠で囲み、その上に「番号＋本文」を常時表示の手順キャプションとして出す。
+      // ページ内ピン/CSS outline ではなく独立した最上位レイヤに描くので、祖先の overflow や
+      // 兄弟の z-index に隠されず、メモ本文が hover 不要で常に読める。
+      addOutlineBox(target, 'note', { caption: { number, text: a.note || '' } });
     } else {
-      pin.classList.add('bag-floating');
-      floatingHost().appendChild(pin);
+      // 対象未解決/floating は浮遊キャプションで常時表示する(画面右下に番号順で積む)。
+      renderFloatingNote(a, number);
     }
+  }
+
+  // 補足の手順番号(補足だけの通し番号、作成順)。お描き手順(annoDrawingNumber)とは別系列。
+  function annoNoteNumber(a) {
+    return annotations.filter((x) => x.kind === 'note').findIndex((x) => x.id === a?.id) + 1;
+  }
+
+  function renderFloatingNote(a, number) {
+    const cap = buildStepCaption(number, a.note || '');
+    cap.classList.add('bag-floating');
+    cap.setAttribute(ATTR.anno, a.id); // renderAnnotations の [data-bag-anno] 一括クリアで作り直す
+    floatingHost().appendChild(cap);
   }
 
   function observeAnno() {
@@ -3476,28 +3482,52 @@
 
   // 対象要素を囲む赤枠 div を1つ追加する。旧 CSS outline の outline-offset:2px と見た目を
   // 揃えるため、矩形を 2px 外側へ広げて囲む(box-sizing:border-box で枠線込み)。
-  function addOutlineBox(target, kind) {
+  // opts.caption={number,text} を渡すと、枠の上に「番号＋本文」を常時表示する手順キャプションも作る。
+  function addOutlineBox(target, kind, opts) {
     if (!target || target.nodeType !== 1) return null;
     const box = document.createElement('div');
     box.className = 'bag-anno-outline-box';
     box.setAttribute(ATTR.ui, '1');
     ensureOutlineHost().appendChild(box);
-    const entry = { target, box, kind };
+    let caption = null;
+    if (opts && opts.caption) {
+      caption = buildStepCaption(opts.caption.number, opts.caption.text);
+      ensureOutlineHost().appendChild(caption);
+    }
+    const entry = { target, box, kind, caption };
     outlineBoxes.push(entry);
     positionOutlineBox(entry);
     setupDrawingReposition(); // お描きが無くてもスクロール/リサイズ追従を有効化
     return entry;
   }
 
+  // 「① 本文」の常時表示キャプション要素を作る(最上位レイヤ用、pointer-events:none)。
+  // 番号で人間に手順を示し、本文(メモ)は hover 不要で常に読める。
+  function buildStepCaption(number, text) {
+    const cap = document.createElement('div');
+    cap.className = 'bag-step-caption';
+    cap.setAttribute(ATTR.ui, '1');
+    const num = document.createElement('span');
+    num.className = 'bag-step-caption-num';
+    num.textContent = String(number);
+    const body = document.createElement('span');
+    body.className = 'bag-step-caption-text';
+    body.textContent = text || '';
+    cap.append(num, body);
+    return cap;
+  }
+
   function positionOutlineBox(entry) {
-    const { target, box } = entry;
+    const { target, box, caption } = entry;
     if (!target.isConnected) {
       box.style.display = 'none';
+      if (caption) caption.style.display = 'none';
       return;
     }
     const r = target.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) {
       box.style.display = 'none'; // detached 相当(非表示・ゼロ矩形)は枠を隠し、再描画での再解決に委ねる
+      if (caption) caption.style.display = 'none';
       return;
     }
     Object.assign(box.style, {
@@ -3507,6 +3537,23 @@
       width: `${r.width + 4}px`,
       height: `${r.height + 4}px`,
     });
+    if (caption) positionStepCaption(caption, r);
+  }
+
+  // キャプションは枠の左上の“上”に出す。上に余白が無ければ枠の下へ回し、右端も画面内へ収める。
+  function positionStepCaption(caption, r) {
+    caption.style.display = 'flex';
+    caption.style.left = '0px';
+    caption.style.top = '-9999px'; // 寸法計測のため一旦画面外で可視化
+    const cw = caption.offsetWidth || 0;
+    const ch = caption.offsetHeight || 0;
+    let left = Math.max(4, r.left - 2);
+    if (left + cw > window.innerWidth - 4) left = Math.max(4, window.innerWidth - cw - 4);
+    let top = r.top - 2 - ch - 4; // 既定は枠の上
+    if (top < 4) top = r.bottom + 2 + 4; // 上に入らなければ枠の下へ回す
+    top = Math.max(4, Math.min(top, window.innerHeight - ch - 4)); // 下端も画面内へ収める(横clampと対称)
+    caption.style.left = `${left}px`;
+    caption.style.top = `${top}px`;
   }
 
   function repositionOutlineBoxes() {
@@ -3519,6 +3566,7 @@
     outlineBoxes = outlineBoxes.filter((entry) => {
       if (kind && entry.kind !== kind) return true;
       entry.box.remove();
+      entry.caption?.remove();
       return false;
     });
   }
@@ -3917,7 +3965,7 @@
           ? `「${truncate((t.innerText || t.getAttribute('aria-label') || a.anchor.text || '').trim(), 40)}」`
           : '(対象未検出)';
         if (a.kind === 'note')
-          lines.push(`- 補足: ${a.note}${a.intent ? `（目的: ${a.intent}）` : ''} -> 対象 ${where}`);
+          lines.push(`- 手順${annoNoteNumber(a)}（人の補足｜番号順に実施）: ${a.note}${a.intent ? `（目的: ${a.intent}）` : ''} -> 対象 ${where}`);
         else if (a.kind === 'marker')
           lines.push(`- 目印「${a.name}」: ${a.intent || '(目的未設定)'} -> 対象 ${where}`);
         else if (a.kind === 'button')

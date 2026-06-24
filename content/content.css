@@ -134,55 +134,51 @@
   pointer-events: none;
 }
 
-/* コメントの吹き出しピン */
-.bag-note-pin {
+/* 補足(note)を「番号付きの手順キャプション」として常時表示する最上位レイヤのカード。
+   ページ内ピンではなく .bag-anno-outline-host(z-index 最上位)に置くので、祖先の overflow や
+   兄弟の z-index に隠されず、メモ本文が hover 不要で常に読める。pointer-events:none で操作を邪魔しない。 */
+.bag-step-caption {
+  position: fixed;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 280px;
+  box-sizing: border-box;
+  padding: 5px 9px 5px 6px;
+  font: 600 12px/1.4 system-ui, -apple-system, sans-serif;
+  color: var(--bag-text);
+  background: var(--bag-surface);
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+}
+/* 対象未解決の補足は floatingHost(右下)に積むので、座標指定ではなく通常フローに戻す。 */
+.bag-step-caption.bag-floating {
+  position: static;
+}
+.bag-step-caption-num {
+  flex: none;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
-  margin: 0 2px;
-  font-size: 12px;
-  line-height: 1;
-  vertical-align: middle;
-  cursor: help;
-  position: relative;
-  border-radius: 6px;
-  color: var(--bag-accent);
-  background: var(--bag-accent-soft);
-  box-shadow: 0 0 0 1px rgba(15, 118, 110, 0.22);
-  font-weight: 700;
-}
-.bag-note-pin.bag-floating {
-  width: auto;
-  height: auto;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: var(--bag-surface);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
-}
-.bag-note-tip {
-  display: none;
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 6px);
-  transform: translateX(-50%);
-  width: max-content;
-  max-width: 260px;
-  padding: 8px 10px;
-  font: 12px/1.45 system-ui, -apple-system, sans-serif;
+  font: 800 11px/1 system-ui, -apple-system, sans-serif;
   color: #fff;
-  background: #111827;
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  background: #ef4444;
+  border-radius: 50%;
+}
+.bag-step-caption-text {
   white-space: pre-wrap;
-  z-index: 2147483646;
-  pointer-events: none;
+  word-break: break-word;
+  /* 長文メモでも常時表示カードが画面を覆わないよう ~6 行で省略表示。全文は AI 文脈
+     (buildContextText / buildSystemPrompt) とサイドパネル一覧に渡るので情報は失わない。 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
 }
-.bag-note-pin:hover .bag-note-tip {
-  display: block;
-}
-
 /* 注釈モードのハイライト枠 */
 html.bag-picking,
 html.bag-picking * {
@@ -385,13 +381,6 @@ html.bag-drawing .bag-draw-overlay {
   background: var(--bag-surface);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(15, 118, 110, 0.28);
   pointer-events: auto;
-}
-.bag-draw-pin .bag-note-tip {
-  display: none;
-}
-.bag-draw-pin:hover .bag-note-tip,
-.bag-draw-pin:focus-visible .bag-note-tip {
-  display: block;
 }
 
 /* お描き図形 → AIメモ を結ぶ引き出し線(コネクタ)。色=お描きの色(ペア識別) */
