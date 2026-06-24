@@ -1979,13 +1979,10 @@
   let pickOverlay = null;
   let pickHintEl = null;
   let authoringEl = null;
-  // ホバーで実際にハイライトした要素を記憶し、クリック時に再利用する。クリック直前に
-  // サイトがDOMを変える(Amazonの商品カード等、hoverでオーバーレイdivが出る)と click の
-  // composedPath() が別要素を返し、見えていた赤枠と選択要素がズレるため。
-  let lastPickEl = null;
-  // pointerdown(capture段)で掴むスナップショット。サイトの mousedown ハンドラより前に走るため、
-  // タップで overlay 等が差し込まれる前の“本当に触れた要素”を確実に捕捉できる(hover より堅牢)。
-  let lastPickPointerEl = null;
+  // overlay(赤枠)が最後に描いた“その”要素を記憶し、クリック時にそれを選択対象にする。
+  // ユーザーが見ていた枠と選択要素を必ず一致させるための単一の真実源。マウスは
+  // mousemove(hover)が継続更新し、タッチ/ペンは pointerdown が設定する。
+  let lastHighlightedEl = null;
 
   function startPicker() {
     if (picking) return { picking: true };
@@ -2015,8 +2012,7 @@
     pickOverlay = null;
     pickHintEl?.remove();
     pickHintEl = null;
-    lastPickEl = null;
-    lastPickPointerEl = null;
+    lastHighlightedEl = null;
     document.removeEventListener('pointerdown', onPickPointerDown, true);
     document.removeEventListener('mousemove', onPickMove, true);
     document.removeEventListener('click', onPickClick, true);
@@ -2041,8 +2037,10 @@
     return null;
   }
 
-  // 選択中の赤枠オーバーレイを対象要素の矩形へ合わせる。hover と pointerdown で共用。
+  // 選択中の赤枠オーバーレイを対象要素の矩形へ合わせ、その要素を「最後に見せた枠」として記憶する。
+  // hover と pointerdown で共用し、onPickClick はこの記憶を使う(見えた枠=選択要素)。
   function highlightPick(el) {
+    lastHighlightedEl = el;
     if (!pickOverlay || !el) return;
     const r = el.getBoundingClientRect();
     Object.assign(pickOverlay.style, {
@@ -2055,15 +2053,14 @@
   }
 
   function onPickPointerDown(e) {
+    // マウスは mousemove(hover)が「見えている枠」を継続更新するのでそれを唯一の真実源にする。
+    // pointerdown はサイトが hover で差し込んだ overlay/巨大wrapper を掴みやすく(Amazon)、
+    // ここで上書きすると見えていたカードではなく巨大要素を選んでしまう。タッチ/ペンは
+    // mousemove が来ないため、その時だけ pointerdown で対象を確定し赤枠も即出す。
+    if (e.pointerType === 'mouse') return;
     if (e.target.closest && e.target.closest(`[${ATTR.ui}]`)) return; // 自前UIは無視
     const el = pickTargetFrom(e);
-    if (!el || el.nodeType !== 1 || (el.closest && el.closest(`[${ATTR.ui}]`))) {
-      lastPickPointerEl = null;
-      return;
-    }
-    // capture段なのでサイトの mousedown(overlay差し込み等)より前に対象を確定できる。
-    // タップで mousemove が来ない環境でも、ここで赤枠フィードバックを即出す。
-    lastPickPointerEl = el;
+    if (!el || el.nodeType !== 1 || (el.closest && el.closest(`[${ATTR.ui}]`))) return;
     highlightPick(el);
   }
 
@@ -2072,20 +2069,19 @@
     const el = pickTargetFrom(e);
     if (!el || (el.closest && el.closest(`[${ATTR.ui}]`))) {
       pickOverlay.style.display = 'none';
-      lastPickEl = null;
+      lastHighlightedEl = null;
       return;
     }
-    lastPickEl = el; // ハイライトした“その”要素をクリック時に使う
-    highlightPick(el);
+    highlightPick(el); // 見せた枠の要素を lastHighlightedEl に記録
   }
 
   function onPickClick(e) {
     if (e.target.closest && e.target.closest(`[${ATTR.ui}]`)) return; // 自前UIは無視
     e.preventDefault();
     e.stopPropagation();
-    // 優先順: pointerdown(capture=サイトのmousedown前)で掴んだ要素 > hover要素 > clickのcomposedPath。
-    // firstConnectedPick が detached/自前UI を弾くので、見えていた赤枠と実際の対象が一致する。
-    const el = firstConnectedPick(lastPickPointerEl, lastPickEl) || pickTargetFrom(e);
+    // overlay が最後に描いた要素(=ユーザーが見ていた枠)を選択対象にする。detached は弾き、
+    // 無ければ click の composedPath から解決する。
+    const el = firstConnectedPick(lastHighlightedEl) || pickTargetFrom(e);
     stopPicker();
     openAuthoring(el);
   }
