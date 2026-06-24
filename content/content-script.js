@@ -1979,6 +1979,10 @@
   let pickOverlay = null;
   let pickHintEl = null;
   let authoringEl = null;
+  // ホバーで実際にハイライトした要素を記憶し、クリック時に再利用する。クリック直前に
+  // サイトがDOMを変える(Amazonの商品カード等、hoverでオーバーレイdivが出る)と click の
+  // composedPath() が別要素を返し、見えていた赤枠と選択要素がズレるため。
+  let lastPickEl = null;
 
   function startPicker() {
     if (picking) return { picking: true };
@@ -2007,6 +2011,7 @@
     pickOverlay = null;
     pickHintEl?.remove();
     pickHintEl = null;
+    lastPickEl = null;
     document.removeEventListener('mousemove', onPickMove, true);
     document.removeEventListener('click', onPickClick, true);
     document.removeEventListener('keydown', onPickKey, true);
@@ -2026,8 +2031,10 @@
     const el = pickTargetFrom(e);
     if (!el || (el.closest && el.closest(`[${ATTR.ui}]`))) {
       pickOverlay.style.display = 'none';
+      lastPickEl = null;
       return;
     }
+    lastPickEl = el; // ハイライトした“その”要素をクリック時に使う
     const r = el.getBoundingClientRect();
     Object.assign(pickOverlay.style, {
       display: 'block',
@@ -2042,7 +2049,9 @@
     if (e.target.closest && e.target.closest(`[${ATTR.ui}]`)) return; // 自前UIは無視
     e.preventDefault();
     e.stopPropagation();
-    const el = pickTargetFrom(e);
+    // ホバーでハイライトした要素を優先する。click の composedPath() はサイトのDOM変化で
+    // 別要素を返しうるため、見えていた赤枠と一致させる(無ければ click から解決)。
+    const el = lastPickEl || pickTargetFrom(e);
     stopPicker();
     openAuthoring(el);
   }
@@ -2066,6 +2075,11 @@
     const anchor = existing ? existing.anchor : buildAnchor(el);
     const head = anchor || {};
     const heading = head.text || head.ariaLabel || head.placeholder || head.tag || t('cs.author.targetFallback');
+    // どの要素を選んだかを CSS セレクタ(クエリ)で具体的に示す。tag だけだと「div」のように
+    // 判別できないため。anchor の無い floating メモでは行を出さない。
+    const selectorRow = head.selector
+      ? `<div class="bag-author-target-q">${escapeHtml(t('cs.author.selector'))} <code title="${escapeHtml(head.selector)}">${escapeHtml(truncate(head.selector, 120))}</code></div>`
+      : '';
     const wrap = document.createElement('div');
     wrap.className = 'bag-author';
     wrap.setAttribute(ATTR.ui, '1');
@@ -2073,6 +2087,7 @@
     wrap.innerHTML = `
       <div class="bag-author-head">${escapeHtml(t('cs.author.addNote'))}</div>
       <div class="bag-author-target">${escapeHtml(t('cs.author.target'))} <b>${escapeHtml(truncate(heading, 40))}</b> <span class="muted">&lt;${escapeHtml(head.role || head.tag || '')}&gt;</span></div>
+      ${selectorRow}
       <label class="bag-author-row">
         <span>${escapeHtml(t('cs.author.aiContent'))}</span>
         <textarea data-f="note" rows="3" placeholder="${escapeHtml(t('cs.author.aiContentPlaceholder'))}"></textarea>

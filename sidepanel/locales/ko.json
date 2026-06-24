@@ -145,6 +145,7 @@
   "cs.picker.hint": "메모를 추가할 위치를 클릭하세요(Esc로 종료)",
   "cs.author.addNote": "메모 추가",
   "cs.author.target": "대상:",
+  "cs.author.selector": "셀렉터:",
   "cs.author.aiContent": "AI에게 줄 지시",
   "cs.author.aiContentPlaceholder": "예: 여기서는 전송 전에 반드시 내용을 확인할 것",
   "cs.author.cancel": "취소",

@@ -145,6 +145,7 @@
   "cs.picker.hint": "点击要添加备注的位置（按 Esc 退出）",
   "cs.author.addNote": "添加备注",
   "cs.author.target": "目标：",
+  "cs.author.selector": "选择器：",
   "cs.author.aiContent": "给 AI 的指示",
   "cs.author.aiContentPlaceholder": "例如：在此提交前务必确认内容",
   "cs.author.cancel": "取消",
