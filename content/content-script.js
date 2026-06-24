@@ -1042,6 +1042,9 @@
   //   - 要素は複数シグナルの堅牢アンカーで毎回再解決 → 軽微なDOM変化に強い(決定的)
   // ===========================================================================
   const ANNO_KEY = 'aiAdvisorAnnotations';
+  // ページ跨ぎ「ワークフロー」記録用キー(lib/workflow.js と共有)。記録ON中に残したメモを
+  // URLごと時系列(=URL順)で steps に積み、チャットで AI に一括で渡す。形は lib/workflow.js に合わせる。
+  const WF_KEY = 'aiAdvisorWorkflow';
   let annotations = []; // 現在ページに適用中の注釈
   let lastUnresolved = 0; // 直近描画で未解決だった注釈数(再描画要否の判定に使用)
 
@@ -1154,9 +1157,63 @@
     else annotations.push(saved);
     await persistAnnotations();
     notifyPageRemembered('annotation');
+    await recordWorkflowStep(saved);
     renderAnnotations();
     if (saved.kind === 'drawing') notifyVisualFeedbackChanged('upsert');
     return annoSummary(saved);
+  }
+
+  // ワークフロー記録ON中にメモ(note/お描き)を残したら、現在URLとともに1ステップを記録する。
+  // 同じメモ(annoId)の再編集は同じステップを更新し、二重に積まない(冪等)。
+  async function recordWorkflowStep(saved) {
+    if (!saved || (saved.kind !== 'note' && saved.kind !== 'drawing')) return;
+    let wf;
+    try {
+      const all = await chrome.storage.local.get(WF_KEY);
+      wf = all[WF_KEY] || {};
+    } catch {
+      return;
+    }
+    if (wf.recording !== true) return;
+    const steps = Array.isArray(wf.steps) ? wf.steps : [];
+    const summary = annoSummary(saved);
+    const step = {
+      id: saved.id ? `wfs-${saved.id}` : autoId('wfs'),
+      annoId: saved.id || '',
+      url: location.href,
+      matchType: 'page',
+      pattern: annotationScopeKey(location.href),
+      kind: saved.kind,
+      text: saved.note || '',
+      target: summary.target || '',
+      createdAt: new Date().toISOString(),
+    };
+    const at = step.annoId ? steps.findIndex((s) => s && s.annoId === step.annoId) : -1;
+    if (at >= 0) steps[at] = { ...steps[at], ...step };
+    else steps.push(step);
+    wf.steps = steps;
+    try {
+      await chrome.storage.local.set({ [WF_KEY]: wf });
+    } catch {
+      /* 記録の保存に失敗してもメモ自体は保存済みなので握りつぶす */
+    }
+  }
+
+  // メモ削除時、それに紐づく記録ステップも取り除く(記録ON/OFFに関わらず掃除する)。
+  async function unrecordWorkflowStep(annoId) {
+    if (!annoId) return;
+    try {
+      const all = await chrome.storage.local.get(WF_KEY);
+      const wf = all[WF_KEY] || {};
+      const steps = Array.isArray(wf.steps) ? wf.steps : [];
+      const next = steps.filter((s) => s && s.annoId !== annoId);
+      if (next.length !== steps.length) {
+        wf.steps = next;
+        await chrome.storage.local.set({ [WF_KEY]: wf });
+      }
+    } catch {
+      /* 掃除に失敗しても致命的でないので握りつぶす */
+    }
   }
 
   function notifyPageRemembered(source) {
@@ -1174,6 +1231,7 @@
     const removed = annotations.find((a) => a.id === id);
     annotations = annotations.filter((a) => a.id !== id);
     await persistAnnotations();
+    await unrecordWorkflowStep(id);
     renderAnnotations();
     if (removed?.kind === 'drawing') notifyVisualFeedbackChanged('delete');
     return { removed: id };

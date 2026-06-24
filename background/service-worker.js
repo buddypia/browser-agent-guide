@@ -9,6 +9,7 @@ import { callAI } from '../lib/ai-client.js';
 import { buildSystemPrompt } from '../lib/prompt.js';
 import { slugFromCapture } from '../lib/slug.js';
 import { mergeRecipeActions } from '../lib/recipe-merge.js';
+import { WORKFLOW_KEY, crossPageWorkflowForPrompt } from '../lib/workflow.js';
 import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18n.js';
 
 // ---- 設定ブロブのメモリキャッシュ ----
@@ -286,6 +287,10 @@ async function runChat({ tabId, text, history, rememberScope }) {
   const context = await collectContext(tabId);
   const verbNames = (context.verbs || []).map((v) => v.name);
 
+  // ページ跨ぎワークフロー(記録した手順)を読み、プロンプトに「URL順の操作手順」として同梱する。
+  // 現在ページの注釈だけでは別ページの手順が見えないため、ここで storage から直接読む。
+  context.crossPageWorkflow = await loadCrossPageWorkflow();
+
   const system = buildSystemPrompt({ context });
   const messages = [
     { role: 'system', content: system },
@@ -308,6 +313,16 @@ async function runChat({ tabId, text, history, rememberScope }) {
     scope,
   });
   return { reply, actions, results, remembered };
+}
+
+/** 記録済みページ跨ぎワークフローを読み、プロンプト用の {count,steps[]} か null を返す。 */
+async function loadCrossPageWorkflow() {
+  try {
+    const all = await chrome.storage.local.get(WORKFLOW_KEY);
+    return crossPageWorkflowForPrompt(all[WORKFLOW_KEY]);
+  } catch {
+    return null;
+  }
 }
 
 /** サイドパネルのツールバー等から単一動詞を直接実行する。 */
