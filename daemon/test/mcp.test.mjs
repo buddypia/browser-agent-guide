@@ -11,12 +11,15 @@ import { createHttpServer } from '../src/http.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const INBOX = resolve(here, 'fixtures/inbox');
 const NEWER = '2026-06-17T09-58-00-021Z';
+const FRESH_NOW = Date.parse('2026-06-17T10:10:00.000Z');
+const MIXED_FRESH_NOW = Date.parse('2026-06-20T10:10:00.000Z');
+const STALE_NOW = Date.parse('2026-06-17T12:00:00.000Z');
 
 let httpServer;
 let baseUrl;
 
 before(async () => {
-  httpServer = createHttpServer({ inboxDir: INBOX });
+  httpServer = createHttpServer({ inboxDir: INBOX, nowMs: FRESH_NOW });
   await new Promise((r) => httpServer.listen(0, '127.0.0.1', r));
   const { port } = httpServer.address();
   baseUrl = `http://127.0.0.1:${port}/mcp`;
@@ -118,6 +121,69 @@ test('get_latest_visual_feedback_context が image 無しで @agent と selector
   });
 });
 
+test('get_latest_visual_feedback_context: 最新候補が鮮度窓を超えたら id を返さない', async () => {
+  const server = createHttpServer({ inboxDir: INBOX, nowMs: STALE_NOW });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const client = new Client({ name: 'stale-test-client', version: '0.0.0' });
+  const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`));
+  await client.connect(transport);
+  try {
+    const res = await client.callTool({ name: 'get_latest_visual_feedback_context', arguments: {} });
+    assert.ok(!res.content.some((c) => c.type === 'image'), 'stale latest は image を返さない');
+    assert.equal(res.structuredContent.id, undefined, 'stale latest は top-level id を返さない');
+    assert.ok(res.structuredContent.stale.message.includes('latest が古すぎます'));
+    assert.equal(res.structuredContent.stale.latest.capturedAt, '2026-06-17T09:58:00.021Z');
+    const txt = res.content.find((c) => c.type === 'text').text;
+    assert.ok(txt.includes('latest が古すぎます'));
+    assert.ok(txt.includes('再キャプチャ'), '再キャプチャを促す');
+  } finally {
+    await client.close();
+    await new Promise((r) => server.close(r));
+  }
+});
+
+test('get_latest_visual_feedback: stale contextId を渡しても古い image を返さない', async () => {
+  const server = createHttpServer({ inboxDir: INBOX, nowMs: STALE_NOW });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const client = new Client({ name: 'stale-image-test-client', version: '0.0.0' });
+  const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`));
+  await client.connect(transport);
+  try {
+    const res = await client.callTool({
+      name: 'get_latest_visual_feedback',
+      arguments: {
+        contextId: NEWER,
+        imageReason: 'test verifies stale latest never returns image even when the old id is supplied',
+      },
+    });
+    assert.ok(!res.content.some((c) => c.type === 'image'), 'stale latest は image を返さない');
+    assert.equal(res.structuredContent.id, undefined, 'stale latest は top-level id を返さない');
+    assert.ok(res.structuredContent.stale.message.includes('latest が古すぎます'));
+  } finally {
+    await client.close();
+    await new Promise((r) => server.close(r));
+  }
+});
+
+test('get_latest_visual_feedback_context: filtered latest でも古ければ id を返さない', async () => {
+  const server = createHttpServer({ inboxDir: INBOX, nowMs: STALE_NOW });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const client = new Client({ name: 'stale-filter-test-client', version: '0.0.0' });
+  const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`));
+  await client.connect(transport);
+  try {
+    const res = await client.callTool({ name: 'get_latest_visual_feedback_context', arguments: { urlContains: 'example.com' } });
+    assert.equal(res.structuredContent.id, undefined, 'filtered stale latest も top-level id を返さない');
+    assert.equal(res.structuredContent.stale.scope, 'urlContains=example.com');
+  } finally {
+    await client.close();
+    await new Promise((r) => server.close(r));
+  }
+});
+
 test('get_visual_feedback_context が id 指定で image 無し context を返す', async () => {
   await withClient(async (client) => {
     const res = await client.callTool({ name: 'get_visual_feedback_context', arguments: { id: NEWER } });
@@ -197,7 +263,7 @@ const MIXED_INBOX = resolve(here, 'fixtures/inbox-mixed');
 const AMAZON_ID = '20260620-100000__amazon-co-jp__amazon__aaa0001';
 
 async function withMixedClient(fn) {
-  const server = createHttpServer({ inboxDir: MIXED_INBOX });
+  const server = createHttpServer({ inboxDir: MIXED_INBOX, nowMs: MIXED_FRESH_NOW });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const { port } = server.address();
   const client = new Client({ name: 'test-client', version: '0.0.0' });

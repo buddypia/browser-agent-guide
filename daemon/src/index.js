@@ -44,9 +44,10 @@ function sweep(dir) {
   }
 }
 
-// 引数なし latest の曖昧検知の時間窓（分指定・任意）。未指定なら server.js 既定(90分)。
+// latest の鮮度判定 + 引数なし latest の曖昧検知の時間窓（分指定・任意）。未指定は 90分。
 const latestWindowMin = Number(args.latestWindowMin || process.env.BAG_VF_LATEST_WINDOW_MIN);
-const latestWindowMs = Number.isFinite(latestWindowMin) && latestWindowMin > 0 ? latestWindowMin * 60 * 1000 : undefined;
+const effectiveLatestWindowMin = Number.isFinite(latestWindowMin) && latestWindowMin > 0 ? latestWindowMin : 90;
+const latestWindowMs = effectiveLatestWindowMin * 60 * 1000;
 
 // 拡張が報告してきた実ダウンロード先を採用する（固定時/範囲外/不正時は無視）。
 // これにより、ブラウザのダウンロード先が OS 既定と違っても（移動済み/Edge・Brave）inbox が一致する。
@@ -85,6 +86,7 @@ server.listen(port, host, () => {
   process.stderr.write(`[bag-vf] 画像配信 (GET)         http://${host}:${port}/shot/<id>.png?token=…  (raw は /raw/<id>.png)\n`);
   process.stderr.write(`[bag-vf] inbox: ${getInbox()}${inboxState.pinned ? ' (固定)' : ' (自動検出。拡張の報告で更新される場合あり)'}\n`);
   process.stderr.write(`[bag-vf] storage: ${storageMode}${storageMode === 'hybrid' ? ' (context はメモリ、image/file_path 時だけ保存)' : ' (即時保存)'}\n`);
+  process.stderr.write(`[bag-vf] latest freshness/window: ${effectiveLatestWindowMin}m (--latest-window-min / BAG_VF_LATEST_WINDOW_MIN)\n`);
   process.stderr.write(`[bag-vf] token: ${token}\n`);
   process.stderr.write(`[bag-vf]   ↑ これを拡張オプションの「視覚フィードバック デーモン」に貼る (保存先: ${tokenPath()})\n`);
   if (retentionPolicy.enabled) {
