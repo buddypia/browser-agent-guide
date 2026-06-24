@@ -113,16 +113,25 @@
   outline: 2px dashed var(--bag-accent) !important;
   outline-offset: 2px !important;
 }
-/* 補足(note)を付けた要素は赤い破線枠で囲み、ページ本来の実線ボーダーと区別する。 */
-[data-bag-anno-outline='note'] {
-  outline: 2px dashed #ef4444 !important;
-  outline-offset: 2px !important;
+/* 補足(note)/選択中(pick)の対象を囲む赤枠は、対象自身の CSS outline ではなく
+   祖先から切り離した fixed のオーバーレイ枠で描く。CSS outline は対象要素に描かれるため、
+   サイトの overflow:hidden(祖先クリップ)や z-index(兄弟の上塗り)・transform で枠が欠け、
+   「要素によって囲めたり囲めなかったり」した。hover の .bag-pick-overlay と同じ独立レイヤなら、
+   どんなページCSSでも確実に対象を囲める(座標は getBoundingClientRect、スクロール追従あり)。 */
+.bag-anno-outline-host {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483639;
+  pointer-events: none;
 }
-/* 選択直後〜メモ入力中の対象を、保存後の赤枠と同じ見た目で囲んだまま残す。
-   renderAnnotations は [data-bag-anno-outline] だけを掃除するため別属性で名前空間を分ける。 */
-[data-bag-pick-outline] {
-  outline: 2px dashed #ef4444 !important;
-  outline-offset: 2px !important;
+.bag-anno-outline-box {
+  position: fixed;
+  box-sizing: border-box;
+  /* 旧 outline と同じ「赤い破線の枠線のみ(塗りつぶし無し)」。背景塗りを足すと capture 時に
+     対象のピクセルへ赤いウォッシュが乗り、raw スクショの素の見た目が変わってしまう。 */
+  border: 2px dashed #ef4444;
+  border-radius: 4px;
+  pointer-events: none;
 }
 
 /* コメントの吹き出しピン */
@@ -811,4 +820,11 @@ html.bag-drawing .bag-draw-overlay {
    Canvas 2D で描き直すため二重描画を避ける(handoff §4.1)。 */
 .bag-capturing [data-bag-ui] {
   visibility: hidden !important;
+}
+/* 補足/選択中の赤枠だけは capture 時も残し、従来の CSS outline と同じくスクショにも
+   対象の枠が写るようにする(合成器は note 枠を描き直さないため、隠すと枠が消えてしまう)。
+   box 自身も data-bag-ui を持ち上の hidden ルールに直接マッチするので、source 順ではなく
+   specificity で確実に勝たせる(html を足して 1段重くする)。順序入れ替えで枠が消えるのを防ぐ。 */
+html.bag-capturing .bag-anno-outline-box {
+  visibility: visible !important;
 }

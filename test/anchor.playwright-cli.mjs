@@ -35,6 +35,7 @@ const hook = `
     },
     getAnnotations: () => annotations,
     clearAnnotations: () => { annotations.length = 0; },
+    getOutlineBoxes: () => outlineBoxes,
   };
 `;
 
@@ -463,7 +464,10 @@ const runnerSource = `async page => {
   });
   check('解決: 共有aria-labelでも選んだボタン自身に戻る(先頭ボタンに落ちない)', fm2.ok, JSON.stringify(fm2));
 
-  // end-to-end: メモ(note)の赤枠 data-bag-anno-outline が“選んだ”要素にだけ付くことを確認。
+  // end-to-end: メモ(note)の赤枠オーバーレイが“選んだ”要素にだけ束縛されることを確認。
+  // 枠は CSS outline ではなく独立した .bag-anno-outline-box で、レジストリ(outlineBoxes)の
+  // target が対象要素を指す。「枠が1つだけ・target が選んだ見出しリンク」で別リンクへの暴発を検出する
+  // (このランナーは content.css を読まないため、ピクセル幾何ではなく束縛先を直接検証する)。
   const outlineOnRight = await page.evaluate(async () => {
     window.__BAG_TEST__.clearAnnotations();
     const titleLink = document.querySelector('#feedZone a.title');
@@ -474,8 +478,9 @@ const runnerSource = `async page => {
       outline: true,
     });
     window.__BAG_TEST__.renderAnnotations();
-    const outlined = document.querySelector('[data-bag-anno-outline="note"]');
-    return { onTitle: outlined === titleLink, outlinedClass: outlined && outlined.className };
+    const boxes = window.__BAG_TEST__.getOutlineBoxes();
+    const onTitle = boxes.length === 1 && boxes[0].target === titleLink && boxes[0].kind === 'note';
+    return { onTitle, boxCount: boxes.length, targetIsTitle: boxes.length === 1 && boxes[0].target === titleLink };
   });
   check('メモ赤枠: 選んだ見出しリンクだけが囲まれる(別リンクに暴発しない)', outlineOnRight.onTitle, JSON.stringify(outlineOnRight));
 
