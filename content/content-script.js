@@ -66,6 +66,51 @@
 
   const CHAT_BLOCKED_VERBS = new Set(['defineMarker', 'setStyle', 'removeElement']);
   const RECIPE_BLOCKED_VERBS = new Set(['defineMarker', 'setStyle', 'removeElement']);
+  // 自動実行(autorun)は deny-by-default の allow-list。手順実行に必要な
+  // 読み取り/スクロール/入力/(ガード付き)クリックだけ許可し、submitForm/navigateTo/inject*/
+  // setStyle/removeElement/お描き系 等は拒否する。lib/workflow.js の AUTORUN_ALLOWED_VERBS と一致必須。
+  const AUTORUN_ALLOWED_VERBS = new Set([
+    'listAffordances', 'readText', 'extractData', 'readSignals', 'scrollToElement',
+    'highlightElement', 'focusElement', 'waitForElement', 'explainWorkflow', 'listAnnotations',
+    'exportContext', 'notify', 'noop',
+    'clickAffordance', 'clickElement', 'fillAffordance', 'fillInput', 'selectOption',
+  ]);
+  // autorun で「対象ラベルが確定/購入系、または名前不明なら保留」する対象動詞(クリック系)。
+  const AUTORUN_GUARD_VERBS = new Set(['clickAffordance', 'clickElement']);
+  // 不可逆/確定系ラベル。lib/workflow.js の IRREVERSIBLE_KEYWORDS と一致必須(test がパリティ検査)。
+  const IRREVERSIBLE_KEYWORDS = [
+    '確定', '確認', '決定', '同意', '購入', '買う', '今すぐ', '注文', '支払', '決済', '課金', '請求',
+    '送金', '振込', '振り込み', '送信', '削除', '退会', '解約', '申込', '申し込み', 'チェックアウト',
+    '続行', '続ける', '進む', '次へ', '予約', '登録', '寄付', 'サインアップ',
+    'buy', 'purchase', 'order', 'place order', 'place your order', 'complete order', 'checkout', 'check out',
+    'pay', 'payment', 'submit', 'confirm', 'agree', 'continue', 'proceed', 'next', 'subscribe', 'sign up',
+    'signup', 'donate', 'transfer', 'send money', 'book now', 'remove', 'delete',
+  ];
+  function isIrreversibleLabel(label) {
+    const s = String(label || '').toLowerCase();
+    return !!s && IRREVERSIBLE_KEYWORDS.some((kw) => s.includes(kw.toLowerCase()));
+  }
+  // autorun ガード用のラベル解決: labelOf に加え aria-labelledby / title / 子img[alt] も見る。
+  // 名前が一切取れない(アイコンのみ等)場合は空を返し、ガード側で保留させる(fail-safe)。
+  function guardLabelOf(el) {
+    try {
+      const base = labelOf(el);
+      if (base && base.trim()) return base;
+      const lb = el.getAttribute && el.getAttribute('aria-labelledby');
+      if (lb) {
+        const s = lb.split(/\s+/).map((id) => document.getElementById(id)?.textContent || '').join(' ').trim();
+        if (s) return s;
+      }
+      const title = el.getAttribute && el.getAttribute('title');
+      if (title && title.trim()) return title;
+      const img = el.querySelector && el.querySelector('img[alt]');
+      const alt = img && img.getAttribute('alt');
+      if (alt && alt.trim()) return alt;
+    } catch {
+      /* 解決失敗は空扱い(保留) */
+    }
+    return '';
+  }
   const MAX_INJECTED_TEXT_CHARS = 50000;
 
   // ---- 要素解決ヘルパー(優先: aiId > selector > injectedId) ----
@@ -4066,6 +4111,8 @@
   function isActionAllowed(verbName, source) {
     if (source === 'chat' && CHAT_BLOCKED_VERBS.has(verbName)) return false;
     if (source === 'recipe' && RECIPE_BLOCKED_VERBS.has(verbName)) return false;
+    // autorun は deny-by-default: 許可された安全動詞だけ通す。
+    if (source === 'autorun') return AUTORUN_ALLOWED_VERBS.has(verbName);
     return true;
   }
 
@@ -4126,6 +4173,31 @@
             error: t('cs.err.waitForTimeout', { selector: a.waitFor.selector }),
           });
           continue;
+        }
+      }
+      // 自動実行の不可逆ガード: 対象ラベルが「注文を確定/購入/削除」等、または名前が一切取れない
+      // (アイコンのみ等)クリックは自動では押さず保留する(fail-safe)。ユーザーが手動で押す前提。
+      // 要素が解決できない場合は requireEl が例外→クリックされないので安全(保留扱いは不要)。
+      if (source === 'autorun' && AUTORUN_GUARD_VERBS.has(a.verb)) {
+        let guardEl = null;
+        try {
+          guardEl = getEl(a.args || {});
+        } catch {
+          guardEl = null;
+        }
+        if (guardEl) {
+          const guardLabel = guardLabelOf(guardEl);
+          if (isIrreversibleLabel(guardLabel) || !guardLabel.trim()) {
+            results.push({
+              verb: a.verb,
+              ok: false,
+              held: true,
+              reason: a.reason || '',
+              label: truncate(guardLabel || '(名前不明 / unnamed)', 60),
+              error: t('cs.err.autorunHeld'),
+            });
+            continue;
+          }
         }
       }
       try {

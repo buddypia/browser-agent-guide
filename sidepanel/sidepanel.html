@@ -204,6 +204,20 @@
       <p id="workflow-hint" class="workflow-hint" data-i18n="workflow.hint">Recording on: every note you leave is added as a step with its page URL. The AI runs them in URL order.</p>
       <div id="workflow-steps" class="anno-list workflow-steps"></div>
       <div class="anno-foot workflow-foot">
+        <div class="workflow-autorun">
+          <button
+            id="btn-workflow-autorun"
+            type="button"
+            class="workflow-autorun-btn"
+            aria-pressed="false"
+            title="Run the recorded steps automatically, navigating across pages in URL order (final confirm/purchase buttons are never auto-clicked)"
+            data-i18n-title="workflow.autorunTitle"
+            data-i18n="workflow.autorun"
+          >
+            Auto-run
+          </button>
+          <span id="workflow-autorun-state" class="workflow-autorun-state" aria-live="polite"></span>
+        </div>
         <div class="workflow-save">
           <label class="sr-only" for="workflow-name" data-i18n="workflow.nameLabel">Workflow name</label>
           <input id="workflow-name" type="text" class="workflow-name" placeholder="Workflow name" data-i18n-placeholder="workflow.namePlaceholder" />

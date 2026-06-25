@@ -1,5 +1,5 @@
 import { getSettings, patchSettings } from '../lib/storage.js';
-import { WORKFLOW_KEY, normalizeWorkflow } from '../lib/workflow.js';
+import { WORKFLOW_KEY, RUN_KEY, normalizeWorkflow, normalizeRun } from '../lib/workflow.js';
 import { createI18n, DEFAULT_LOCALE, LANGUAGE_OPTIONS, languageName, localeToIntl, normalizeLocale, resolveLocale } from './i18n.js';
 
 // サイドパネルのチャットUI。background経由でAI呼び出しと動詞実行を行う。
@@ -38,6 +38,8 @@ const els = {
   btnWorkflowSave: document.getElementById('btn-workflow-save'),
   btnWorkflowClear: document.getElementById('btn-workflow-clear'),
   workflowSaved: document.getElementById('workflow-saved'),
+  btnWorkflowAutorun: document.getElementById('btn-workflow-autorun'),
+  workflowAutorunState: document.getElementById('workflow-autorun-state'),
 };
 
 const CHAT_HISTORY_KEY = 'aiAdvisorChatHistoryByPage';
@@ -65,6 +67,7 @@ let state = {
   activeTabState: null,
   annotations: [],
   workflow: { recording: false, steps: [], saved: [] },
+  workflowRun: { active: false, doneStepIds: [] },
   busy: false,
   // メモ(picker)/描画(drawing)モードがページ側で有効か。両モードは content 側で
   // 排他なので 1 フラグで扱い、サイドパネルにフォーカスがある状態の ESC を拾うために使う。
@@ -114,6 +117,7 @@ function rerenderLocalizedContent() {
   renderPromptHistory();
   renderAnnotationList(state.annotations);
   renderWorkflow(state.workflow);
+  renderWorkflowRun(state.workflowRun);
   if (state.activeTabState) renderBanner(state.activeTabState);
   syncHistoryButton();
 }
@@ -1202,6 +1206,33 @@ async function refreshWorkflow() {
   renderWorkflow(await readWorkflow());
 }
 
+async function readWorkflowRun() {
+  try {
+    const all = await chrome.storage.local.get(RUN_KEY);
+    return normalizeRun(all[RUN_KEY]);
+  } catch {
+    return normalizeRun(null);
+  }
+}
+
+async function refreshWorkflowRun() {
+  renderWorkflowRun(await readWorkflowRun());
+}
+
+// 自動実行ボタンの状態(開始/停止)を反映する。手順0件のときは押せない。
+function renderWorkflowRun(run) {
+  state.workflowRun = run = normalizeRun(run);
+  const btn = els.btnWorkflowAutorun;
+  if (!btn) return;
+  const stepCount = (state.workflow?.steps || []).length;
+  btn.setAttribute('aria-pressed', run.active ? 'true' : 'false');
+  btn.textContent = run.active ? t('workflow.autorunStop') : t('workflow.autorun');
+  btn.disabled = !run.active && stepCount === 0;
+  if (els.workflowAutorunState) {
+    els.workflowAutorunState.textContent = run.active ? t('workflow.autorunActive') : '';
+  }
+}
+
 function shortUrl(u) {
   try {
     const url = new URL(u);
@@ -1232,6 +1263,8 @@ function renderWorkflow(wf) {
     wf.steps.forEach((s, i) => els.workflowSteps.appendChild(renderWorkflowStep(s, i + 1)));
   }
   renderSavedWorkflows(wf.saved);
+  // 手順数が変わると自動実行ボタンの可否も変わるので追従させる。
+  renderWorkflowRun(state.workflowRun);
 }
 
 function renderWorkflowStep(s, num) {
@@ -1370,15 +1403,44 @@ async function deleteSavedWorkflow(id) {
   );
 }
 
+// 自動実行(セッション)の開始/停止。SW が遷移ごとに各ページの手順を実行する。
+async function toggleWorkflowAutoRun() {
+  if (state.tabId == null) await refreshState();
+  const run = await readWorkflowRun();
+  if (run.active) {
+    await send({ type: 'STOP_WORKFLOW_AUTORUN' });
+    return;
+  }
+  if (!(state.workflow?.steps || []).length) return;
+  // 対象タブが解決できないと SW がどのタブで実行すべきか分からないので開始しない。
+  if (state.tabId == null) {
+    showBanner(escapeHtml(t('errors.stateFetchFailed', { message: 'tab' })), false);
+    return;
+  }
+  if (!confirm(t('workflow.autorunConfirm'))) return;
+  showBanner(escapeHtml(t('workflow.autorunStartBanner')), true);
+  await send({ type: 'START_WORKFLOW_AUTORUN', tabId: state.tabId });
+}
+
 if (els.btnWorkflow) els.btnWorkflow.addEventListener('click', () => toggleWorkflowRecording().catch(() => {}));
 if (els.btnWorkflowSave) els.btnWorkflowSave.addEventListener('click', () => saveCurrentWorkflow().catch(() => {}));
 if (els.btnWorkflowClear) els.btnWorkflowClear.addEventListener('click', () => clearWorkflowSteps().catch(() => {}));
+if (els.btnWorkflowAutorun) els.btnWorkflowAutorun.addEventListener('click', () => toggleWorkflowAutoRun().catch(() => {}));
+
+// SW からの自動実行イベント(各手順の結果・保留・完了)をチャットに表示する。
+// onMessage が無い環境(テストスタブ等)では何もしない。
+chrome.runtime.onMessage?.addListener?.((msg) => {
+  if (msg?.type === 'WORKFLOW_AUTORUN_EVENT' && msg.text) {
+    addMessage('assistant', msg.text);
+  }
+});
 
 // 注釈は content 側で保存されるため、storage変化を監視して一覧を更新する。
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes.aiAdvisorAnnotations) refreshAnnotations();
   if (changes[WORKFLOW_KEY]) refreshWorkflow();
+  if (changes[RUN_KEY]) refreshWorkflowRun();
   if (changes.aiAdvisorSettings) {
     if (suppressNextSettingsRefresh) {
       suppressNextSettingsRefresh = false;
@@ -1416,6 +1478,7 @@ async function init() {
   loadPromptHistory();
   primeChatHistory();
   refreshWorkflow();
+  refreshWorkflowRun();
   refreshState();
 }
 

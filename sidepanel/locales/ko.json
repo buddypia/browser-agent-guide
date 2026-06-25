@@ -348,5 +348,21 @@
   "workflow.emptyStep": "(메모 없음)",
   "workflow.recordingBanner": "워크플로 기록 중 — 페이지를 옮겨가며 메모를 남기면 URL 순서로 수집됩니다.",
   "workflow.savedMsg": "워크플로 '{name}'을(를) 저장했습니다 ({count}단계).",
-  "workflow.loadedMsg": "워크플로를 현재 단계로 불러왔습니다. AI에게 실행을 요청하세요."
+  "workflow.loadedMsg": "워크플로를 현재 단계로 불러왔습니다. AI에게 실행을 요청하세요.",
+  "workflow.autorun": "자동 실행",
+  "workflow.autorunStop": "자동 실행 중지",
+  "workflow.autorunTitle": "기록한 단계를 자동 실행하고 URL 순서로 페이지를 이동합니다. 구매·확정 최종 버튼은 자동으로 누르지 않습니다.",
+  "workflow.autorunActive": "실행 중…",
+  "workflow.autorunConfirm": "자동 실행을 시작할까요? 기록한 페이지를 순서대로 이동하며 각 단계를 AI가 실행합니다. 구매·확정 최종 버튼은 자동으로 누르지 않습니다.",
+  "workflow.autorunStartBanner": "자동 실행 시작 — 각 단계 결과는 채팅에 표시됩니다.",
+  "cs.err.autorunHeld": "보류: 최종 확정/구매/삭제 버튼으로 보여 자동 실행에서 클릭하지 않았습니다. 직접 실행하세요.",
+  "sw.autorun.empty": "자동 실행할 단계가 없습니다. 먼저 메모를 기록하세요.",
+  "sw.autorun.started": "▶ 자동 실행을 시작했습니다 ({count}단계). 이 페이지를 실행하고 URL 순서로 이동합니다.",
+  "sw.autorun.stopped": "■ 자동 실행을 중지했습니다.",
+  "sw.autorun.complete": "✅ 자동 실행 완료 (모든 단계 실행).",
+  "sw.autorun.held": "🛑 자동 실행 일시중지: '{label}'은(는) 되돌릴 수 없는 작업(구매/확정/삭제)일 수 있습니다. 직접 실행 후 필요하면 다시 시작하세요.",
+  "sw.autorun.ranStep": "이 페이지의 기록 단계를 실행했습니다.",
+  "sw.autorun.mismatch": "자동 실행 중지: 다음 단계와 일치하는 페이지에 도달하지 못했습니다 ({url}).",
+  "sw.autorun.navigate": "→ 다음 단계로 이동합니다: {url}",
+  "sw.autorun.failed": "자동 실행 중지: 이 페이지의 단계를 실행하지 못했습니다(동작 없음). 직접 실행 후 다시 시작하세요."
 }
