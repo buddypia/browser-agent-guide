@@ -95,6 +95,24 @@
         </p>
       </section>
 
+      <!-- ワークフロー自動実行 -->
+      <section class="card">
+        <h2 data-i18n="opt.workflow.h2">ワークフロー自動実行</h2>
+        <div class="grid">
+          <label class="checkbox-row">
+            <input id="autorun-allow-irreversible" type="checkbox" />
+            <span data-i18n="opt.workflow.allowIrreversible">購入・確定・削除に見えるクリックも自動実行する</span>
+          </label>
+        </div>
+        <div class="row">
+          <button id="save-workflow" class="primary" data-agent-id="@agent:options.workflow.save" data-agent-action="submit" data-i18n="opt.common.save">保存</button>
+          <span id="workflow-status" class="status"></span>
+        </div>
+        <p class="hint" data-i18n="opt.workflow.allowIrreversibleHint">
+          OFF の場合、記録済みワークフローの自動実行中に最終確定っぽいクリックは保留されます。ON にすると、記録した手順を優先してそのままクリックします。
+        </p>
+      </section>
+
       <!-- 視覚フィードバック デーモン -->
       <section class="card">
         <h2 data-i18n="opt.daemon.h2">視覚フィードバック デーモン</h2>

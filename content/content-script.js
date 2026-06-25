@@ -194,11 +194,17 @@
     if (aria) return aria.trim();
     const text = (el.innerText || el.textContent || '').trim();
     if (text) return text.replace(/\s+/g, ' ');
+    const tag = el.tagName.toLowerCase();
+    const inputType = tag === 'input' ? (el.getAttribute('type') || 'text').toLowerCase() : '';
+    if (['button', 'submit', 'reset', 'image'].includes(inputType)) {
+      const visibleValue = el.value || el.getAttribute('value') || el.getAttribute('alt') || '';
+      if (visibleValue.trim()) return visibleValue.trim();
+    }
     return (
       el.getAttribute('placeholder') ||
-      el.getAttribute('name') ||
       el.getAttribute('title') ||
       el.value ||
+      el.getAttribute('name') ||
       ''
     ).trim();
   }
@@ -4141,7 +4147,7 @@
     return true;
   }
 
-  async function runActions(actions, source = 'manual') {
+  async function runActions(actions, source = 'manual', options = {}) {
     const results = [];
     for (const a of actions || []) {
       const verb = AI_VERBS[a.verb];
@@ -4179,7 +4185,7 @@
       // 自動実行の不可逆ガード: 対象ラベルが「注文を確定/購入/削除」等、または名前が一切取れない
       // (アイコンのみ等)クリックは自動では押さず保留する(fail-safe)。ユーザーが手動で押す前提。
       // 要素が解決できない場合は requireEl が例外→クリックされないので安全(保留扱いは不要)。
-      if (source === 'autorun' && AUTORUN_GUARD_VERBS.has(a.verb)) {
+      if (source === 'autorun' && !options.allowIrreversibleClicks && AUTORUN_GUARD_VERBS.has(a.verb)) {
         let guardEl = null;
         try {
           guardEl = getEl(a.args || {});
@@ -4243,7 +4249,7 @@
             workflow: buildWorkflowContext(),
           };
         case 'RUN_ACTIONS':
-          return { results: await runActions(msg.actions, msg.source || 'manual') };
+          return { results: await runActions(msg.actions, msg.source || 'manual', msg.options || {}) };
         case 'START_PICKER':
           await loadAnnotations();
           return startPicker();
