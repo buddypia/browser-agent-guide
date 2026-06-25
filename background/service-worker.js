@@ -9,7 +9,15 @@ import { callAI } from '../lib/ai-client.js';
 import { buildSystemPrompt } from '../lib/prompt.js';
 import { slugFromCapture } from '../lib/slug.js';
 import { mergeRecipeActions } from '../lib/recipe-merge.js';
-import { WORKFLOW_KEY, crossPageWorkflowForPrompt } from '../lib/workflow.js';
+import {
+  WORKFLOW_KEY,
+  RUN_KEY,
+  crossPageWorkflowForPrompt,
+  normalizeWorkflow,
+  normalizeRun,
+  pendingStepsForUrl,
+  isRunComplete,
+} from '../lib/workflow.js';
 import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18n.js';
 
 // ---- 設定ブロブのメモリキャッシュ ----
@@ -108,6 +116,7 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   // ここで info.url まで拾うと、同じ遷移で syncTab→ACTIVATE が二重に走り、同一レシピが二重適用される。
   if (info.status === 'complete') {
     syncTab(tabId, tab?.url).catch(() => {});
+    syncTabAutoRun(tabId, tab?.url);
   }
 });
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
@@ -138,6 +147,19 @@ async function syncTab(tabId, url) {
   await sendToContent(tabId, { type: 'ACTIVATE', recipes }).catch(() => {});
 }
 
+/**
+ * タブのURL判定後に、自動実行セッションが有効ならこのページの記録手順を実行する。
+ * syncTab(=ナビゲーション/SPA遷移)から呼ばれる。失敗してもナビゲーション処理を壊さない。
+ */
+async function syncTabAutoRun(tabId, url) {
+  if (tabId == null || !url || !/^https?:/.test(url)) return;
+  try {
+    await maybeAutoRunWorkflow(tabId, url);
+  } catch (e) {
+    console.warn('[autorun] skipped:', e?.message || e);
+  }
+}
+
 // ---- サイドパネル / options からのメッセージ処理 ----
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   handleMessage(msg, sender)
@@ -166,7 +188,12 @@ async function handleMessage(msg, sender) {
       return collectContext(msg.tabId);
     case 'SPA_NAVIGATED':
       // content から SPA内部遷移(URL変化)の通知。新URLにマッチするレシピを再適用する。
+      syncTabAutoRun(sender?.tab?.id, msg.url);
       return syncTab(sender?.tab?.id, msg.url);
+    case 'START_WORKFLOW_AUTORUN':
+      return startWorkflowAutoRun(msg.tabId);
+    case 'STOP_WORKFLOW_AUTORUN':
+      return stopWorkflowAutoRun();
     case 'START_PICKER':
       return ensureContentAndSend(msg.tabId, { type: 'START_PICKER' });
     case 'STOP_PICKER':
@@ -323,6 +350,162 @@ async function loadCrossPageWorkflow() {
   } catch {
     return null;
   }
+}
+
+// ---- ワークフロー自動実行(セッション) ----
+// 記録した手順を「ページ遷移ごとに」自動実行する。SWが次URLへ決定的にナビゲートし、各ページで
+// その手順をAI→verbs化して実行する。不可逆操作(購入確定等)は content 側で保留される(自動では押さない)。
+const autoRunInFlight = new Set(); // 実行中タブ(同一タブ多重起動の防止)
+const autoRunLastNav = new Map(); // tabId -> 直近にナビゲートしたURL(URL不一致での無限遷移を防ぐ)
+
+async function readWorkflow() {
+  try {
+    const all = await chrome.storage.local.get(WORKFLOW_KEY);
+    return normalizeWorkflow(all[WORKFLOW_KEY]);
+  } catch {
+    return normalizeWorkflow(null);
+  }
+}
+async function readWorkflowRun() {
+  try {
+    const all = await chrome.storage.local.get(RUN_KEY);
+    return normalizeRun(all[RUN_KEY]);
+  } catch {
+    return normalizeRun(null);
+  }
+}
+async function writeWorkflowRun(run) {
+  const next = normalizeRun(run);
+  await chrome.storage.local.set({ [RUN_KEY]: next });
+  return next;
+}
+function notifyAutoRun(payload) {
+  // サイドパネル等へブロードキャスト(未起動なら無視)。SW自身には届かない。
+  try {
+    chrome.runtime.sendMessage({ type: 'WORKFLOW_AUTORUN_EVENT', ...payload }, () => void chrome.runtime.lastError);
+  } catch {
+    /* 受信側不在は無視 */
+  }
+}
+
+/** 自動実行セッションを開始し、現在ページの手順を即実行する(opt-in)。 */
+async function startWorkflowAutoRun(tabId) {
+  const workflow = await readWorkflow();
+  const total = workflow.steps.filter((s) => s.text && s.text.trim()).length;
+  if (!total) {
+    notifyAutoRun({ phase: 'empty', text: t('sw.autorun.empty') });
+    return { active: false, reason: 'empty' };
+  }
+  const settings = await getSettings();
+  if (!settings.ai.apiKey) {
+    notifyAutoRun({ phase: 'error', text: t('sw.err.apiKeyMissing') });
+    return { active: false, reason: 'no-key' };
+  }
+  autoRunLastNav.delete(tabId);
+  await writeWorkflowRun({ active: true, doneStepIds: [] });
+  notifyAutoRun({ phase: 'start', text: t('sw.autorun.started', { count: total }) });
+  let url = '';
+  try {
+    url = (await chrome.tabs.get(tabId)).url || '';
+  } catch {
+    /* タブ取得不可 */
+  }
+  if (url) await maybeAutoRunWorkflow(tabId, url);
+  return { active: true };
+}
+
+/** 自動実行セッションを停止する。 */
+async function stopWorkflowAutoRun() {
+  await writeWorkflowRun({ active: false, doneStepIds: [] });
+  notifyAutoRun({ phase: 'stopped', text: t('sw.autorun.stopped') });
+  return { active: false };
+}
+
+/** セッション中、現在URLに一致する未実行手順を実行し、次の手順URLへ自動遷移する。 */
+async function maybeAutoRunWorkflow(tabId, url) {
+  if (autoRunInFlight.has(tabId)) return;
+  const run = await readWorkflowRun();
+  if (!run.active) return;
+
+  let nextUrl = null;
+  autoRunInFlight.add(tabId);
+  try {
+    const workflow = await readWorkflow();
+    const pending = pendingStepsForUrl(workflow, run, url);
+    let doneStepIds = run.doneStepIds.slice();
+
+    if (pending.length) {
+      const settings = await getSettings();
+      if (!settings.ai.apiKey) {
+        await writeWorkflowRun({ active: false, doneStepIds });
+        notifyAutoRun({ phase: 'error', text: t('sw.err.apiKeyMissing') });
+        return;
+      }
+      const outcome = await autoRunExecuteSteps(tabId, url, pending, settings);
+      doneStepIds = Array.from(new Set([...doneStepIds, ...pending.map((s) => s.id)]));
+      if (outcome.held) {
+        await writeWorkflowRun({ active: false, doneStepIds });
+        notifyAutoRun({ phase: 'held', text: t('sw.autorun.held', { label: outcome.heldLabel || '' }) });
+        return;
+      }
+      await writeWorkflowRun({ active: true, doneStepIds });
+      notifyAutoRun({ phase: 'step', text: outcome.reply || t('sw.autorun.ranStep') });
+    }
+
+    const doneSet = new Set(doneStepIds);
+    const remaining = workflow.steps.filter((s) => s.text && s.text.trim() && !doneSet.has(s.id));
+    if (!remaining.length) {
+      await writeWorkflowRun({ active: false, doneStepIds });
+      notifyAutoRun({ phase: 'done', text: t('sw.autorun.complete') });
+      return;
+    }
+    // 次の手順は別ページ(同ページ分は実行済み)。直近と同じURLへの再遷移はURL不一致ループなので止める。
+    const candidate = remaining[0].url;
+    if (autoRunLastNav.get(tabId) === candidate) {
+      await writeWorkflowRun({ active: false, doneStepIds });
+      notifyAutoRun({ phase: 'mismatch', text: t('sw.autorun.mismatch', { url: candidate }) });
+      return;
+    }
+    nextUrl = candidate;
+  } finally {
+    autoRunInFlight.delete(tabId);
+  }
+
+  if (nextUrl) {
+    autoRunLastNav.set(tabId, nextUrl);
+    notifyAutoRun({ phase: 'navigate', text: t('sw.autorun.navigate', { url: nextUrl }) });
+    try {
+      await chrome.tabs.update(tabId, { url: nextUrl });
+    } catch {
+      /* タブ更新不可は無視(次の手動遷移で再開しうる) */
+    }
+  }
+}
+
+/** 指定手順群の本文をAIへ渡し、autorun ソースでこのページを実行する(遷移はSWが担当)。 */
+async function autoRunExecuteSteps(tabId, url, steps, settings) {
+  const context = await collectContext(tabId);
+  context.crossPageWorkflow = await loadCrossPageWorkflow();
+  const verbNames = (context.verbs || []).map((v) => v.name);
+  const system = buildSystemPrompt({ context });
+  const memo = steps.map((s, i) => `${i + 1}. ${s.text}`).join('\n');
+  const instruction =
+    `次の「記録ワークフロー」の手順を、いまのページで実行してください:\n${memo}\n\n` +
+    `重要:\n` +
+    `- 購入・送信・削除・注文の「最終確定」ボタンは押さないでください(人間が確定します)。\n` +
+    `- ページ遷移はこちらで行うので navigateTo は使わず、このページの手順だけ実行してください。`;
+  const messages = [
+    { role: 'system', content: system },
+    { role: 'user', content: instruction },
+  ];
+  const { reply, actions } = await callAI({ ai: settings.ai, messages, verbNames, t });
+  let results = [];
+  if (actions.length) {
+    const res = await ensureContentAndSend(tabId, { type: 'RUN_ACTIONS', actions, source: 'autorun' });
+    results = res?.results || [];
+  }
+  const held = results.find((r) => r && r.held);
+  return { reply, results, held: Boolean(held), heldLabel: held?.label || '' };
 }
 
 /** サイドパネルのツールバー等から単一動詞を直接実行する。 */

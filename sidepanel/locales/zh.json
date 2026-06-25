@@ -348,5 +348,20 @@
   "workflow.emptyStep": "（无批注）",
   "workflow.recordingBanner": "正在记录工作流 — 跨页面留下批注，将按 URL 顺序收集。",
   "workflow.savedMsg": "已保存工作流“{name}”（{count} 个步骤）。",
-  "workflow.loadedMsg": "已把工作流载入当前步骤。请让 AI 执行。"
+  "workflow.loadedMsg": "已把工作流载入当前步骤。请让 AI 执行。",
+  "workflow.autorun": "自动执行",
+  "workflow.autorunStop": "停止自动执行",
+  "workflow.autorunTitle": "自动执行已记录的步骤，并按 URL 顺序跳转页面。购买·确认的最终按钮不会被自动点击。",
+  "workflow.autorunActive": "执行中…",
+  "workflow.autorunConfirm": "要开始自动执行吗？将按顺序跳转已记录的页面，并由 AI 执行每个步骤。购买·确认的最终按钮不会被自动点击。",
+  "workflow.autorunStartBanner": "已开始自动执行 — 每步结果会显示在聊天中。",
+  "cs.err.autorunHeld": "已保留：这看起来是最终确认/购买/删除按钮，自动执行未点击。请手动操作。",
+  "sw.autorun.empty": "没有可自动执行的步骤。请先记录批注。",
+  "sw.autorun.started": "▶ 已开始自动执行（{count} 个步骤）。先执行本页，再按 URL 顺序跳转。",
+  "sw.autorun.stopped": "■ 已停止自动执行。",
+  "sw.autorun.complete": "✅ 自动执行完成（所有步骤已执行）。",
+  "sw.autorun.held": "🛑 自动执行已暂停：“{label}”可能是不可逆操作（购买/确认/删除）。请手动执行，需要时再重新开始。",
+  "sw.autorun.ranStep": "已执行本页的记录步骤。",
+  "sw.autorun.mismatch": "自动执行已停止：无法到达与下一步骤匹配的页面（{url}）。",
+  "sw.autorun.navigate": "→ 正在跳转到下一步：{url}"
 }

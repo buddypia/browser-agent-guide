@@ -66,6 +66,20 @@
 
   const CHAT_BLOCKED_VERBS = new Set(['defineMarker', 'setStyle', 'removeElement']);
   const RECIPE_BLOCKED_VERBS = new Set(['defineMarker', 'setStyle', 'removeElement']);
+  // 自動実行(autorun): チャットと同じ破壊的動詞ブロックに加え、不可逆ラベルのクリックは保留する。
+  const AUTORUN_BLOCKED_VERBS = new Set(['defineMarker', 'setStyle', 'removeElement']);
+  // 自動実行で「対象ラベルが不可逆操作っぽければクリックを保留」する対象動詞。
+  const AUTORUN_GUARD_VERBS = new Set(['clickAffordance', 'clickElement']);
+  // 不可逆操作(購入・送信・削除の最終確定)の疑いがあるラベル。
+  // lib/workflow.js の IRREVERSIBLE_KEYWORDS と一致させること(content は import 不可のため複製)。
+  const IRREVERSIBLE_KEYWORDS = [
+    '確定', '購入', '注文', '支払', '決済', '送信', '削除', '退会', '解約', '申込', '申し込み', 'チェックアウト',
+    'buy', 'purchase', 'order', 'checkout', 'pay', 'payment', 'submit', 'place order', 'confirm', 'delete', 'remove account',
+  ];
+  function isIrreversibleLabel(label) {
+    const s = String(label || '').toLowerCase();
+    return !!s && IRREVERSIBLE_KEYWORDS.some((kw) => s.includes(kw.toLowerCase()));
+  }
   const MAX_INJECTED_TEXT_CHARS = 50000;
 
   // ---- 要素解決ヘルパー(優先: aiId > selector > injectedId) ----
@@ -4066,6 +4080,7 @@
   function isActionAllowed(verbName, source) {
     if (source === 'chat' && CHAT_BLOCKED_VERBS.has(verbName)) return false;
     if (source === 'recipe' && RECIPE_BLOCKED_VERBS.has(verbName)) return false;
+    if (source === 'autorun' && AUTORUN_BLOCKED_VERBS.has(verbName)) return false;
     return true;
   }
 
@@ -4124,6 +4139,28 @@
             ok: false,
             reason: a.reason || '',
             error: t('cs.err.waitForTimeout', { selector: a.waitFor.selector }),
+          });
+          continue;
+        }
+      }
+      // 自動実行の不可逆ガード: 対象ラベルが「注文を確定/購入/削除」等なら自動ではクリックしない(保留)。
+      // ユーザーが手動で押す前提。解決できない場合は通常どおり実行させる。
+      if (source === 'autorun' && AUTORUN_GUARD_VERBS.has(a.verb)) {
+        let guardEl = null;
+        try {
+          guardEl = getEl(a.args || {});
+        } catch {
+          guardEl = null;
+        }
+        const guardLabel = guardEl ? labelOf(guardEl) : '';
+        if (guardEl && isIrreversibleLabel(guardLabel)) {
+          results.push({
+            verb: a.verb,
+            ok: false,
+            held: true,
+            reason: a.reason || '',
+            label: truncate(guardLabel, 60),
+            error: t('cs.err.autorunHeld'),
           });
           continue;
         }

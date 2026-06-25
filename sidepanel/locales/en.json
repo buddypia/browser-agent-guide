@@ -348,5 +348,20 @@
   "workflow.emptyStep": "(no note)",
   "workflow.recordingBanner": "Recording workflow — leave notes across pages; they are captured in URL order.",
   "workflow.savedMsg": "Saved workflow “{name}” ({count} steps).",
-  "workflow.loadedMsg": "Loaded workflow into current steps. Ask the AI to run it."
+  "workflow.loadedMsg": "Loaded workflow into current steps. Ask the AI to run it.",
+  "workflow.autorun": "Auto-run",
+  "workflow.autorunStop": "Stop auto-run",
+  "workflow.autorunTitle": "Run the recorded steps automatically, navigating across pages in URL order. Final confirm/purchase buttons are never auto-clicked.",
+  "workflow.autorunActive": "running…",
+  "workflow.autorunConfirm": "Start auto-run? The extension will navigate across the recorded pages and run each step with AI. Final purchase/confirm buttons are NOT auto-clicked.",
+  "workflow.autorunStartBanner": "Auto-run started — watch the chat for each step.",
+  "cs.err.autorunHeld": "Held: this looks like a final confirm/purchase button, so auto-run did not click it. Please do it manually.",
+  "sw.autorun.empty": "No recorded steps to auto-run. Record some notes first.",
+  "sw.autorun.started": "▶ Auto-run started ({count} steps). Running this page, then navigating in URL order.",
+  "sw.autorun.stopped": "■ Auto-run stopped.",
+  "sw.autorun.complete": "✅ Auto-run finished: all recorded steps done.",
+  "sw.autorun.held": "🛑 Auto-run paused: \"{label}\" looks irreversible (purchase/confirm/delete). Do it manually, then restart if needed.",
+  "sw.autorun.ranStep": "Ran this page's recorded step.",
+  "sw.autorun.mismatch": "Auto-run stopped: could not reach a page matching the next step ({url}).",
+  "sw.autorun.navigate": "→ Navigating to next step: {url}"
 }

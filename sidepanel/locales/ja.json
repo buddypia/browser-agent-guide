@@ -348,5 +348,20 @@
   "workflow.emptyStep": "(メモなし)",
   "workflow.recordingBanner": "ワークフロー記録中 — ページをまたいでメモを残すと、URL順に取り込まれます。",
   "workflow.savedMsg": "ワークフロー「{name}」を保存しました（{count}手順）。",
-  "workflow.loadedMsg": "ワークフローを現在の手順に読み込みました。AIに実行を依頼してください。"
+  "workflow.loadedMsg": "ワークフローを現在の手順に読み込みました。AIに実行を依頼してください。",
+  "workflow.autorun": "自動実行",
+  "workflow.autorunStop": "自動実行を停止",
+  "workflow.autorunTitle": "記録した手順を自動実行し、URL順にページを遷移します。購入・確定の最終ボタンは自動で押しません。",
+  "workflow.autorunActive": "実行中…",
+  "workflow.autorunConfirm": "自動実行を開始しますか？ 記録したページを順に遷移し、各手順をAIが実行します。購入・確定の最終ボタンは自動では押しません。",
+  "workflow.autorunStartBanner": "自動実行を開始 — 各手順の結果はチャットに表示されます。",
+  "cs.err.autorunHeld": "保留: 不可逆操作(確定/購入/削除)っぽいボタンのため自動ではクリックしませんでした。手動で実行してください。",
+  "sw.autorun.empty": "自動実行する手順がありません。先にメモを記録してください。",
+  "sw.autorun.started": "▶ 自動実行を開始しました（{count}手順）。このページを実行し、URL順に遷移します。",
+  "sw.autorun.stopped": "■ 自動実行を停止しました。",
+  "sw.autorun.complete": "✅ 自動実行が完了しました（全手順を実行）。",
+  "sw.autorun.held": "🛑 自動実行を一時停止: 「{label}」は不可逆操作(購入/確定/削除)の可能性があります。手動で実行し、必要なら再開してください。",
+  "sw.autorun.ranStep": "このページの記録手順を実行しました。",
+  "sw.autorun.mismatch": "自動実行を停止: 次の手順に一致するページに到達できませんでした（{url}）。",
+  "sw.autorun.navigate": "→ 次の手順へ移動します: {url}"
 }
