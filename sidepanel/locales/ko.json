@@ -363,5 +363,6 @@
   "sw.autorun.held": "🛑 자동 실행 일시중지: '{label}'은(는) 되돌릴 수 없는 작업(구매/확정/삭제)일 수 있습니다. 직접 실행 후 필요하면 다시 시작하세요.",
   "sw.autorun.ranStep": "이 페이지의 기록 단계를 실행했습니다.",
   "sw.autorun.mismatch": "자동 실행 중지: 다음 단계와 일치하는 페이지에 도달하지 못했습니다 ({url}).",
-  "sw.autorun.navigate": "→ 다음 단계로 이동합니다: {url}"
+  "sw.autorun.navigate": "→ 다음 단계로 이동합니다: {url}",
+  "sw.autorun.failed": "자동 실행 중지: 이 페이지의 단계를 실행하지 못했습니다(동작 없음). 직접 실행 후 다시 시작하세요."
 }

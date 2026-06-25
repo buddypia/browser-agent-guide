@@ -363,5 +363,6 @@
   "sw.autorun.held": "🛑 Auto-run paused: \"{label}\" looks irreversible (purchase/confirm/delete). Do it manually, then restart if needed.",
   "sw.autorun.ranStep": "Ran this page's recorded step.",
   "sw.autorun.mismatch": "Auto-run stopped: could not reach a page matching the next step ({url}).",
-  "sw.autorun.navigate": "→ Navigating to next step: {url}"
+  "sw.autorun.navigate": "→ Navigating to next step: {url}",
+  "sw.autorun.failed": "Auto-run stopped: couldn't complete this page's step (no action ran). Do it manually, then restart."
 }

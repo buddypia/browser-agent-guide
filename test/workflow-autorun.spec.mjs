@@ -13,12 +13,17 @@ const jaLocaleJson = fs.readFileSync(path.join(projectRoot, 'sidepanel/locales/j
 
 const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"></head>
 <body style="margin:0">
-  <button id="add" data-testid="add" style="position:fixed;left:60px;top:80px;width:200px;height:40px">カートに入れる</button>
-  <button id="buy" data-testid="buy" style="position:fixed;left:60px;top:200px;width:200px;height:40px">注文を確定する</button>
+  <button id="add" data-testid="add" style="position:fixed;left:60px;top:40px;width:200px;height:40px">カートに入れる</button>
+  <button id="buy" data-testid="buy" style="position:fixed;left:60px;top:120px;width:200px;height:40px">注文を確定する</button>
+  <button id="now" data-testid="now" style="position:fixed;left:60px;top:200px;width:200px;height:40px">今すぐ買う</button>
+  <button id="icon" data-testid="icon" aria-label="" style="position:fixed;left:60px;top:280px;width:40px;height:40px"><svg width="20" height="20"></svg></button>
+  <form id="f" style="position:fixed;left:60px;top:360px"><input name="q" value="x"><button type="submit" data-testid="submit-btn">検索</button></form>
   <output id="state" data-testid="state">idle</output>
   <script>
     document.getElementById('add').addEventListener('click', function () { document.getElementById('state').textContent = 'added'; });
     document.getElementById('buy').addEventListener('click', function () { document.getElementById('state').textContent = 'ordered'; });
+    document.getElementById('now').addEventListener('click', function () { document.getElementById('state').textContent = 'bought'; });
+    document.getElementById('icon').addEventListener('click', function () { document.getElementById('state').textContent = 'icon-clicked'; });
   </script>
 </body></html>`;
 
@@ -86,5 +91,29 @@ test.describe('自動実行の不可逆ガード', () => {
     const r = await run(page, 'removeElement', { selector: '#add' }, 'autorun');
     expect(r.ok).toBe(false);
     await expect(page.locator('#add')).toHaveCount(1); // 消えていない
+  });
+
+  test('autorun: 「今すぐ買う」も保留される(キーワード拡充)', async ({ page }) => {
+    const r = await run(page, 'clickAffordance', { selector: '#now' }, 'autorun');
+    expect(r.ok).toBe(false);
+    expect(r.held).toBe(true);
+    expect(await page.getByTestId('state').innerText()).toBe('idle');
+  });
+
+  test('autorun: 名前の取れないアイコンのみボタンは fail-safe で保留', async ({ page }) => {
+    const r = await run(page, 'clickAffordance', { selector: '#icon' }, 'autorun');
+    expect(r.ok).toBe(false);
+    expect(r.held).toBe(true);
+    expect(await page.getByTestId('state').innerText()).toBe('idle');
+  });
+
+  test('autorun: allow-list 外の navigateTo / submitForm は拒否(提示も実行もしない)', async ({ page }) => {
+    const nav = await run(page, 'navigateTo', { url: 'https://example.com/' }, 'autorun');
+    expect(nav.ok).toBe(false);
+    expect(nav.held).toBeFalsy(); // held ではなく deny-by-default の拒否
+    const sub = await run(page, 'submitForm', { selector: '#f' }, 'autorun');
+    expect(sub.ok).toBe(false);
+    // フォーム送信されていない(stateは idle のまま)
+    expect(await page.getByTestId('state').innerText()).toBe('idle');
   });
 });

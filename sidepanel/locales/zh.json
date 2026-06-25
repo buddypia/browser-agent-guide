@@ -363,5 +363,6 @@
   "sw.autorun.held": "🛑 自动执行已暂停：“{label}”可能是不可逆操作（购买/确认/删除）。请手动执行，需要时再重新开始。",
   "sw.autorun.ranStep": "已执行本页的记录步骤。",
   "sw.autorun.mismatch": "自动执行已停止：无法到达与下一步骤匹配的页面（{url}）。",
-  "sw.autorun.navigate": "→ 正在跳转到下一步：{url}"
+  "sw.autorun.navigate": "→ 正在跳转到下一步：{url}",
+  "sw.autorun.failed": "自动执行已停止：无法完成本页步骤（未执行任何操作）。请手动执行后再重新开始。"
 }

@@ -16,7 +16,8 @@ import {
   normalizeWorkflow,
   normalizeRun,
   pendingStepsForUrl,
-  isRunComplete,
+  actionableSteps,
+  AUTORUN_ALLOWED_VERBS,
 } from '../lib/workflow.js';
 import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18n.js';
 
@@ -391,7 +392,7 @@ function notifyAutoRun(payload) {
 /** 自動実行セッションを開始し、現在ページの手順を即実行する(opt-in)。 */
 async function startWorkflowAutoRun(tabId) {
   const workflow = await readWorkflow();
-  const total = workflow.steps.filter((s) => s.text && s.text.trim()).length;
+  const total = actionableSteps(workflow).length;
   if (!total) {
     notifyAutoRun({ phase: 'empty', text: t('sw.autorun.empty') });
     return { active: false, reason: 'empty' };
@@ -402,7 +403,8 @@ async function startWorkflowAutoRun(tabId) {
     return { active: false, reason: 'no-key' };
   }
   autoRunLastNav.delete(tabId);
-  await writeWorkflowRun({ active: true, doneStepIds: [] });
+  // 所有タブ(tabId)を記録し、他タブの遷移で同一セッションが乗っ取られないようにする。
+  await writeWorkflowRun({ active: true, doneStepIds: [], tabId, navCount: 0 });
   notifyAutoRun({ phase: 'start', text: t('sw.autorun.started', { count: total }) });
   let url = '';
   try {
@@ -423,49 +425,69 @@ async function stopWorkflowAutoRun() {
 
 /** セッション中、現在URLに一致する未実行手順を実行し、次の手順URLへ自動遷移する。 */
 async function maybeAutoRunWorkflow(tabId, url) {
-  if (autoRunInFlight.has(tabId)) return;
+  if (tabId == null || autoRunInFlight.has(tabId)) return;
   const run = await readWorkflowRun();
   if (!run.active) return;
+  // セッション所有タブ以外の遷移では動かさない(別タブの乗っ取り/二重実行を防ぐ)。
+  if (run.tabId != null && run.tabId !== tabId) return;
+
+  const workflow = await readWorkflow();
+  const totalActionable = actionableSteps(workflow).length;
+  // 暴走/不一致ループの上限(SW再起動を跨いでも navCount は storage 由来で有効)。
+  const navCap = totalActionable * 2 + 5;
+  if (run.navCount > navCap) {
+    await writeWorkflowRun({ ...run, active: false });
+    notifyAutoRun({ phase: 'mismatch', text: t('sw.autorun.mismatch', { url }) });
+    return;
+  }
 
   let nextUrl = null;
   autoRunInFlight.add(tabId);
   try {
-    const workflow = await readWorkflow();
     const pending = pendingStepsForUrl(workflow, run, url);
     let doneStepIds = run.doneStepIds.slice();
 
     if (pending.length) {
       const settings = await getSettings();
       if (!settings.ai.apiKey) {
-        await writeWorkflowRun({ active: false, doneStepIds });
+        await writeWorkflowRun({ ...run, active: false, doneStepIds });
         notifyAutoRun({ phase: 'error', text: t('sw.err.apiKeyMissing') });
         return;
       }
       const outcome = await autoRunExecuteSteps(tabId, url, pending, settings);
-      doneStepIds = Array.from(new Set([...doneStepIds, ...pending.map((s) => s.id)]));
       if (outcome.held) {
-        await writeWorkflowRun({ active: false, doneStepIds });
+        // 不可逆操作を保留 → セッション停止(人間が判断)。done には入れない。
+        await writeWorkflowRun({ ...run, active: false, doneStepIds });
         notifyAutoRun({ phase: 'held', text: t('sw.autorun.held', { label: outcome.heldLabel || '' }) });
         return;
       }
-      await writeWorkflowRun({ active: true, doneStepIds });
+      if (!outcome.ranOk) {
+        // AIが何も実行できなかった/全失敗 → 黙って先へ進めず停止(取りこぼし防止)。
+        await writeWorkflowRun({ ...run, active: false, doneStepIds });
+        notifyAutoRun({ phase: 'failed', text: t('sw.autorun.failed') });
+        return;
+      }
+      doneStepIds = Array.from(new Set([...doneStepIds, ...pending.map((s) => s.id)]));
+      await writeWorkflowRun({ ...run, active: true, doneStepIds });
       notifyAutoRun({ phase: 'step', text: outcome.reply || t('sw.autorun.ranStep') });
     }
 
     const doneSet = new Set(doneStepIds);
-    const remaining = workflow.steps.filter((s) => s.text && s.text.trim() && !doneSet.has(s.id));
+    const remaining = actionableSteps(workflow).filter((s) => !doneSet.has(s.id));
     if (!remaining.length) {
-      await writeWorkflowRun({ active: false, doneStepIds });
+      await writeWorkflowRun({ ...run, active: false, doneStepIds });
       notifyAutoRun({ phase: 'done', text: t('sw.autorun.complete') });
       return;
     }
-    // 次の手順は別ページ(同ページ分は実行済み)。直近と同じURLへの再遷移はURL不一致ループなので止める。
+    // 次の手順は別ページ(同ページ分は実行済み)。直近と同じURLへの再遷移は不一致ループなので止める。
     const candidate = remaining[0].url;
     if (autoRunLastNav.get(tabId) === candidate) {
-      await writeWorkflowRun({ active: false, doneStepIds });
+      await writeWorkflowRun({ ...run, active: false, doneStepIds });
       notifyAutoRun({ phase: 'mismatch', text: t('sw.autorun.mismatch', { url: candidate }) });
       return;
     }
+    // navCount を進めて保存(再起動を跨いだ上限判定のため)。
+    await writeWorkflowRun({ ...run, active: true, doneStepIds, navCount: run.navCount + 1 });
     nextUrl = candidate;
   } finally {
     autoRunInFlight.delete(tabId);
@@ -482,18 +504,22 @@ async function maybeAutoRunWorkflow(tabId, url) {
   }
 }
 
-/** 指定手順群の本文をAIへ渡し、autorun ソースでこのページを実行する(遷移はSWが担当)。 */
+/**
+ * 指定手順群の本文をAIへ渡し、autorun ソースでこのページを実行する(遷移はSWが担当)。
+ * 安全のため、AIに提示する動詞を allow-list に絞る(navigateTo/submitForm/inject* 等は提示すらしない)。
+ */
 async function autoRunExecuteSteps(tabId, url, steps, settings) {
   const context = await collectContext(tabId);
   context.crossPageWorkflow = await loadCrossPageWorkflow();
-  const verbNames = (context.verbs || []).map((v) => v.name);
+  // deny-by-default: スキーマに乗せる動詞を安全集合へ絞る(構造的にナビ/送信/注入を不可能にする)。
+  const verbNames = (context.verbs || []).map((v) => v.name).filter((n) => AUTORUN_ALLOWED_VERBS.includes(n));
   const system = buildSystemPrompt({ context });
   const memo = steps.map((s, i) => `${i + 1}. ${s.text}`).join('\n');
   const instruction =
     `次の「記録ワークフロー」の手順を、いまのページで実行してください:\n${memo}\n\n` +
     `重要:\n` +
     `- 購入・送信・削除・注文の「最終確定」ボタンは押さないでください(人間が確定します)。\n` +
-    `- ページ遷移はこちらで行うので navigateTo は使わず、このページの手順だけ実行してください。`;
+    `- ページ遷移はこちらで行うので、このページの手順だけ実行してください。`;
   const messages = [
     { role: 'system', content: system },
     { role: 'user', content: instruction },
@@ -505,7 +531,9 @@ async function autoRunExecuteSteps(tabId, url, steps, settings) {
     results = res?.results || [];
   }
   const held = results.find((r) => r && r.held);
-  return { reply, results, held: Boolean(held), heldLabel: held?.label || '' };
+  // 成功判定: 1つ以上のアクションが ok で、保留も無い(空アクション/全失敗は ranOk=false)。
+  const ranOk = results.some((r) => r && r.ok) && !held;
+  return { reply, results, held: Boolean(held), heldLabel: held?.label || '', ranOk };
 }
 
 /** サイドパネルのツールバー等から単一動詞を直接実行する。 */

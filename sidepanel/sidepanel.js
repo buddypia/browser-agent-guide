@@ -1412,6 +1412,11 @@ async function toggleWorkflowAutoRun() {
     return;
   }
   if (!(state.workflow?.steps || []).length) return;
+  // 対象タブが解決できないと SW がどのタブで実行すべきか分からないので開始しない。
+  if (state.tabId == null) {
+    showBanner(escapeHtml(t('errors.stateFetchFailed', { message: 'tab' })), false);
+    return;
+  }
   if (!confirm(t('workflow.autorunConfirm'))) return;
   showBanner(escapeHtml(t('workflow.autorunStartBanner')), true);
   await send({ type: 'START_WORKFLOW_AUTORUN', tabId: state.tabId });
