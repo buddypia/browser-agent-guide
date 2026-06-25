@@ -18,6 +18,7 @@ const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"></head>
   <button id="now" data-testid="now" style="position:fixed;left:60px;top:200px;width:200px;height:40px">今すぐ買う</button>
   <button id="icon" data-testid="icon" aria-label="" style="position:fixed;left:60px;top:280px;width:40px;height:40px"><svg width="20" height="20"></svg></button>
   <button id="next" data-testid="next-btn" style="position:fixed;left:300px;top:40px;width:200px;height:40px">次へ進む</button>
+  <input id="add-submit" data-testid="add-submit" type="submit" name="submit.add-to-cart" value="Add to cart" style="position:fixed;left:300px;top:120px;width:200px;height:40px">
   <form id="f" style="position:fixed;left:60px;top:360px"><input name="q" value="x"><button type="submit" data-testid="submit-btn">検索</button></form>
   <output id="state" data-testid="state">idle</output>
   <script>
@@ -26,6 +27,7 @@ const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"></head>
     document.getElementById('now').addEventListener('click', function () { document.getElementById('state').textContent = 'bought'; });
     document.getElementById('icon').addEventListener('click', function () { document.getElementById('state').textContent = 'icon-clicked'; });
     document.getElementById('next').addEventListener('click', function () { document.getElementById('state').textContent = 'advanced'; });
+    document.getElementById('add-submit').addEventListener('click', function (e) { e.preventDefault(); document.getElementById('state').textContent = 'submit-added'; });
   </script>
 </body></html>`;
 
@@ -56,8 +58,8 @@ const CHROME_STUB = `
 `;
 
 const send = (page, m) => page.evaluate((msg) => new Promise((r) => window.__bagListener(msg, {}, r)), m);
-const run = (page, verb, args, source) =>
-  send(page, { type: 'RUN_ACTIONS', actions: [{ verb, args }], source }).then((o) => o.results[0]);
+const run = (page, verb, args, source, options) =>
+  send(page, { type: 'RUN_ACTIONS', actions: [{ verb, args }], source, options }).then((o) => o.results[0]);
 
 test.describe('自動実行の不可逆ガード', () => {
   test.beforeEach(async ({ page }) => {
@@ -82,6 +84,13 @@ test.describe('自動実行の不可逆ガード', () => {
     expect(await page.getByTestId('state').innerText()).toBe('idle'); // 押されていない
   });
 
+  test('autorun: 設定ONなら「注文を確定する」も保留せず実行される', async ({ page }) => {
+    const r = await run(page, 'clickAffordance', { selector: '#buy' }, 'autorun', { allowIrreversibleClicks: true });
+    expect(r.ok).toBe(true);
+    expect(r.held).toBeFalsy();
+    expect(await page.getByTestId('state').innerText()).toBe('ordered');
+  });
+
   test('chat: 同じ確定ボタンは保留されない(ガードは autorun 限定)', async ({ page }) => {
     const r = await run(page, 'clickAffordance', { selector: '#buy' }, 'chat');
     expect(r.ok).toBe(true);
@@ -100,6 +109,13 @@ test.describe('自動実行の不可逆ガード', () => {
     expect(r.ok).toBe(false);
     expect(r.held).toBe(true);
     expect(await page.getByTestId('state').innerText()).toBe('idle');
+  });
+
+  test('autorun: name が submit.add-to-cart でも表示 value が Add to cart なら実行される', async ({ page }) => {
+    const r = await run(page, 'clickAffordance', { selector: '#add-submit' }, 'autorun');
+    expect(r.ok).toBe(true);
+    expect(r.held).toBeFalsy();
+    expect(await page.getByTestId('state').innerText()).toBe('submit-added');
   });
 
   test('autorun: ページ送りボタン(次へ進む)は保留されず実行される', async ({ page }) => {
