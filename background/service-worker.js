@@ -17,6 +17,7 @@ import {
   normalizeRun,
   pendingStepsForUrl,
   actionableSteps,
+  isAutoRunNavLoop,
   AUTORUN_ALLOWED_VERBS,
 } from '../lib/workflow.js';
 import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18n.js';
@@ -446,6 +447,10 @@ async function maybeAutoRunWorkflow(tabId, url) {
   try {
     const pending = pendingStepsForUrl(workflow, run, url);
     let doneStepIds = run.doneStepIds.slice();
+    // このページで1件でも手順を done にできたか(=正常に到達して前進できたか)。
+    // 前進できたら、直前の遷移先メモ(autoRunLastNav)は役目を終えるのでクリアし、
+    // 次ページの遷移を「ループ」と誤判定して止めないようにする。
+    let madeProgress = false;
 
     if (pending.length) {
       const settings = await getSettings();
@@ -462,12 +467,16 @@ async function maybeAutoRunWorkflow(tabId, url) {
         return;
       }
       if (!outcome.ranOk) {
-        // AIが何も実行できなかった/全失敗 → 黙って先へ進めず停止(取りこぼし防止)。
+        // 試して全失敗(取りこぼし) → 黙って先へ進めず停止。
+        // 注: このページに打つ手が無い(空アクション/noopのみ)場合は ranOk=true で前進する
+        // (autoRunExecuteSteps 側で「実行すべき操作が無い」を成功扱いにしている)。
         await writeWorkflowRun({ ...run, active: false, doneStepIds });
         notifyAutoRun({ phase: 'failed', text: t('sw.autorun.failed') });
         return;
       }
       doneStepIds = Array.from(new Set([...doneStepIds, ...pending.map((s) => s.id)]));
+      madeProgress = true;
+      autoRunLastNav.delete(tabId);
       await writeWorkflowRun({ ...run, active: true, doneStepIds });
       notifyAutoRun({ phase: 'step', text: outcome.reply || t('sw.autorun.ranStep') });
     }
@@ -479,9 +488,11 @@ async function maybeAutoRunWorkflow(tabId, url) {
       notifyAutoRun({ phase: 'done', text: t('sw.autorun.complete') });
       return;
     }
-    // 次の手順は別ページ(同ページ分は実行済み)。直近と同じURLへの再遷移は不一致ループなので止める。
+    // 次の手順は別ページ(同ページ分は実行済み)。
+    // 「今回このページで1件も前進していないのに、直近の遷移先へ再び遷移しようとしている」時だけ
+    // 不一致ループとみなして止める(=前進できているなら、たとえ同一URLでも正当な遷移として進める)。
     const candidate = remaining[0].url;
-    if (autoRunLastNav.get(tabId) === candidate) {
+    if (isAutoRunNavLoop({ candidateUrl: candidate, lastNavUrl: autoRunLastNav.get(tabId), madeProgress })) {
       await writeWorkflowRun({ ...run, active: false, doneStepIds });
       notifyAutoRun({ phase: 'mismatch', text: t('sw.autorun.mismatch', { url: candidate }) });
       return;
@@ -513,13 +524,17 @@ async function autoRunExecuteSteps(tabId, url, steps, settings) {
   context.crossPageWorkflow = await loadCrossPageWorkflow();
   // deny-by-default: スキーマに乗せる動詞を安全集合へ絞る(構造的にナビ/送信/注入を不可能にする)。
   const verbNames = (context.verbs || []).map((v) => v.name).filter((n) => AUTORUN_ALLOWED_VERBS.includes(n));
-  const system = buildSystemPrompt({ context });
-  const memo = steps.map((s, i) => `${i + 1}. ${s.text}`).join('\n');
+  // autorun モード: プロンプトの「別URLへは navigateTo で進め」案内を出さない(allow-list で除外済みのため
+  // 矛盾指示になり、AIが手詰まりで空応答→failed停止を誘発していた)。遷移は SW が決定論的に行う。
+  const system = buildSystemPrompt({ context, autorun: true });
+  // 本文の無いお描き/対象だけの手順も拾えるよう、対象(target)も指示文に含める。
+  const memo = steps.map((s, i) => `${i + 1}. ${s.target ? `「${s.target}」を: ` : ''}${s.text || ''}`).join('\n');
   const instruction =
     `次の「記録ワークフロー」の手順を、いまのページで実行してください:\n${memo}\n\n` +
     `重要:\n` +
     `- 購入・送信・削除・注文の「最終確定」ボタンは押さないでください(人間が確定します)。\n` +
-    `- ページ遷移はこちらで行うので、このページの手順だけ実行してください。`;
+    `- ページ送り/次へ/続行など「別ページへ移動するためのボタン」は押さないでください(遷移はこちらで行います)。\n` +
+    `- このページで実行すべき操作が無ければ actions は空でかまいません(失敗ではありません)。`;
   const messages = [
     { role: 'system', content: system },
     { role: 'user', content: instruction },
@@ -531,8 +546,12 @@ async function autoRunExecuteSteps(tabId, url, steps, settings) {
     results = res?.results || [];
   }
   const held = results.find((r) => r && r.held);
-  // 成功判定: 1つ以上のアクションが ok で、保留も無い(空アクション/全失敗は ranOk=false)。
-  const ranOk = results.some((r) => r && r.ok) && !held;
+  const anyOk = results.some((r) => r && r.ok);
+  const hardFail = results.some((r) => r && r.ok === false && !r.held);
+  // 前進条件: 保留が無く、(1つ以上成功 もしくは そもそも実行すべきアクションが無かった)。
+  // 「このページに打つ手が無い(空応答/noopのみ)」は失敗ではなく前進扱いにし、SWが次ページへ進める。
+  // 実行を試みて全部失敗した(hardFail)時だけ failed 停止して取りこぼしを知らせる。
+  const ranOk = !held && (anyOk || (!actions.length && !hardFail));
   return { reply, results, held: Boolean(held), heldLabel: held?.label || '', ranOk };
 }
 
