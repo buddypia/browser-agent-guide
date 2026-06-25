@@ -78,12 +78,13 @@
   // autorun で「対象ラベルが確定/購入系、または名前不明なら保留」する対象動詞(クリック系)。
   const AUTORUN_GUARD_VERBS = new Set(['clickAffordance', 'clickElement']);
   // 不可逆/確定系ラベル。lib/workflow.js の IRREVERSIBLE_KEYWORDS と一致必須(test がパリティ検査)。
+  // ★ページ送り語(続行/続ける/進む/次へ/continue/proceed/next)は含めない(lib 側コメント参照)。
   const IRREVERSIBLE_KEYWORDS = [
     '確定', '確認', '決定', '同意', '購入', '買う', '今すぐ', '注文', '支払', '決済', '課金', '請求',
     '送金', '振込', '振り込み', '送信', '削除', '退会', '解約', '申込', '申し込み', 'チェックアウト',
-    '続行', '続ける', '進む', '次へ', '予約', '登録', '寄付', 'サインアップ',
+    '予約', '登録', '寄付', 'サインアップ',
     'buy', 'purchase', 'order', 'place order', 'place your order', 'complete order', 'checkout', 'check out',
-    'pay', 'payment', 'submit', 'confirm', 'agree', 'continue', 'proceed', 'next', 'subscribe', 'sign up',
+    'pay', 'payment', 'submit', 'confirm', 'agree', 'subscribe', 'sign up',
     'signup', 'donate', 'transfer', 'send money', 'book now', 'remove', 'delete',
   ];
   function isIrreversibleLabel(label) {

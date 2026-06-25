@@ -75,4 +75,27 @@ const ok = (name) => {
   ok('記録ワークフローが無ければ節は出ない');
 }
 
+// (6) 自動実行モードでは navigateTo 案内を出さない(allow-list で除外済みのため矛盾指示を避ける)。
+//     遷移は SW が決定論的に行うので「★現在のページの手順だけ実行」を指示する。
+{
+  const ctx = {
+    url: 'https://shop.example/cart',
+    crossPageWorkflow: {
+      count: 2,
+      steps: [
+        { order: 1, url: 'https://shop.example/item', text: 'カートに入れる', target: '購入ボタン', kind: 'note' },
+        { order: 2, url: 'https://shop.example/cart', text: '数量を2に', target: '数量欄', kind: 'note' },
+      ],
+    },
+  };
+  const auto = buildSystemPrompt({ context: ctx, autorun: true });
+  assert.match(auto, /記録ワークフロー\(URL順の操作手順\)/, '自動実行でも記録ワークフロー節は出る');
+  assert.doesNotMatch(auto, /navigateTo/, '自動実行モードでは navigateTo を案内しない');
+  assert.match(auto, /自動実行モード/, '自動実行モードの注記が出る');
+  // 既定(チャット経路)は従来どおり navigateTo を案内する(回帰防止)。
+  const chat = buildSystemPrompt({ context: ctx });
+  assert.match(chat, /navigateTo/, 'チャット経路では navigateTo を案内する');
+  ok('自動実行モードは navigateTo 案内を抑制する');
+}
+
 console.log(`\n${passed} passed`);

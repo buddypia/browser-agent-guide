@@ -17,6 +17,7 @@ const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"></head>
   <button id="buy" data-testid="buy" style="position:fixed;left:60px;top:120px;width:200px;height:40px">注文を確定する</button>
   <button id="now" data-testid="now" style="position:fixed;left:60px;top:200px;width:200px;height:40px">今すぐ買う</button>
   <button id="icon" data-testid="icon" aria-label="" style="position:fixed;left:60px;top:280px;width:40px;height:40px"><svg width="20" height="20"></svg></button>
+  <button id="next" data-testid="next-btn" style="position:fixed;left:300px;top:40px;width:200px;height:40px">次へ進む</button>
   <form id="f" style="position:fixed;left:60px;top:360px"><input name="q" value="x"><button type="submit" data-testid="submit-btn">検索</button></form>
   <output id="state" data-testid="state">idle</output>
   <script>
@@ -24,6 +25,7 @@ const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"></head>
     document.getElementById('buy').addEventListener('click', function () { document.getElementById('state').textContent = 'ordered'; });
     document.getElementById('now').addEventListener('click', function () { document.getElementById('state').textContent = 'bought'; });
     document.getElementById('icon').addEventListener('click', function () { document.getElementById('state').textContent = 'icon-clicked'; });
+    document.getElementById('next').addEventListener('click', function () { document.getElementById('state').textContent = 'advanced'; });
   </script>
 </body></html>`;
 
@@ -98,6 +100,15 @@ test.describe('自動実行の不可逆ガード', () => {
     expect(r.ok).toBe(false);
     expect(r.held).toBe(true);
     expect(await page.getByTestId('state').innerText()).toBe('idle');
+  });
+
+  test('autorun: ページ送りボタン(次へ進む)は保留されず実行される', async ({ page }) => {
+    // 「次へ/続ける」等のページ送り語は不可逆扱いから外したので、autorun でも held されず実行される。
+    // (これが held されると複数ページ手順が最初のページで止まり「ページを跨いで実行できない」原因になる)
+    const r = await run(page, 'clickAffordance', { selector: '#next' }, 'autorun');
+    expect(r.held).toBeFalsy();
+    expect(r.ok).toBe(true);
+    expect(await page.getByTestId('state').innerText()).toBe('advanced');
   });
 
   test('autorun: 名前の取れないアイコンのみボタンは fail-safe で保留', async ({ page }) => {

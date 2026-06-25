@@ -13,9 +13,11 @@ import {
   crossPageWorkflowForPrompt,
   normalizeRun,
   samePageUrl,
+  scopeKeyForUrl,
   actionableSteps,
   pendingStepsForUrl,
   isRunComplete,
+  isAutoRunNavLoop,
   isIrreversibleLabel,
   IRREVERSIBLE_KEYWORDS,
   AUTORUN_ALLOWED_VERBS,
@@ -133,14 +135,23 @@ const ok = (name) => {
   ok('samePageUrl は origin+pathname 一致を見る');
 }
 
-// (9) actionableSteps は本文のある手順だけ。
+// (9) actionableSteps は本文 or 対象のある手順だけ(本文の無いお描き/対象だけの手順も拾う)。
 {
   const wf = { steps: [{ text: 'やる', url: 'u1' }, { text: '', url: 'u2' }, { text: '  ', url: 'u3' }] };
   assert.equal(actionableSteps(wf).length, 1);
-  ok('actionableSteps は本文のある手順のみ');
+  // 本文は空でも対象(target)があれば実行対象として残す(crossPageWorkflowForPrompt と判定を揃える)。
+  const wf2 = {
+    steps: [
+      { text: '', target: '送信ボタン', url: 'u1', kind: 'drawing' }, // 対象だけ → 残る
+      { text: '', target: '', url: 'u2', kind: 'drawing' }, // 本文も対象も無い → 落ちる
+    ],
+  };
+  assert.equal(actionableSteps(wf2).length, 1, '対象だけのお描き手順は残す');
+  assert.equal(actionableSteps(wf2)[0].url, 'u1');
+  ok('actionableSteps は本文 or 対象のある手順のみ');
 }
 
-// (10) pendingStepsForUrl: 未実行 & URL一致のみ。
+// (10) pendingStepsForUrl: 未実行 & URL一致のみ。記録 pattern と着地URLの正規化ズレも吸収する。
 {
   const wf = {
     steps: [
@@ -154,7 +165,15 @@ const ok = (name) => {
   const p2 = pendingStepsForUrl(wf, run, 'https://shop/cart');
   assert.equal(p2.length, 1);
   assert.equal(p2[0].id, 's2');
-  ok('pendingStepsForUrl は未実行かつURL一致のみ返す');
+  // Amazon: 記録 pattern は /dp/ASIN へ短縮されるが、着地 URL は /Title/dp/ASIN/ref=… になる。
+  // live URL も scopeKeyForUrl で正規化して突き合わせるので、これでも未実行手順を取りこぼさない。
+  const amz = {
+    steps: [{ id: 'a1', text: 'カートに入れる', url: 'https://www.amazon.co.jp/dp/B0ABCDEFGH', pattern: 'https://www.amazon.co.jp/dp/B0ABCDEFGH' }],
+  };
+  const pa = pendingStepsForUrl(amz, { active: true, doneStepIds: [] }, 'https://www.amazon.co.jp/Some-Title/dp/B0ABCDEFGH/ref=sr_1_1?keywords=x');
+  assert.equal(pa.length, 1, 'Amazon の /dp/ASIN/ref=… でも pattern と一致して pending に出る');
+  assert.equal(pa[0].id, 'a1');
+  ok('pendingStepsForUrl は未実行かつURL一致(正規化込み)のみ返す');
 }
 
 // (11) isRunComplete: 全 actionable が done なら true。
@@ -166,19 +185,47 @@ const ok = (name) => {
   ok('isRunComplete は全手順実行で true');
 }
 
-// (12) isIrreversibleLabel: 購入/確定/送金/同意/continue 等(広めの確定動線)を検出、無害語は false。
+// (12) isIrreversibleLabel: 購入/確定/送金/同意/削除 等(真に不可逆な確定動線)だけを検出する。
+// ★ページ送り語(次へ/続ける/続行/進む/continue/proceed/next)は held しない=跨ぎを止めない。
 {
   for (const yes of [
-    '注文を確定する', '今すぐ購入', '今すぐ買う', '確認', '続ける', '次へ', '送金する', '課金する',
-    'Place your order', 'Checkout', 'アカウントを削除', 'Submit payment', 'Continue', 'Proceed', 'Subscribe', 'Remove item',
+    '注文を確定する', '今すぐ購入', '今すぐ買う', '確認', '送金する', '課金する',
+    'Place your order', 'Checkout', 'アカウントを削除', 'Submit payment', 'Subscribe', 'Remove item',
   ]) {
     assert.equal(isIrreversibleLabel(yes), true, `「${yes}」は不可逆/確定系`);
   }
-  for (const no of ['カートに入れる', '数量を更新', 'Add to cart', '戻る', '閉じる', 'Close']) {
-    assert.equal(isIrreversibleLabel(no), false, `「${no}」は無害`);
+  // ページ送り/前進ボタンは「不可逆」ではない(これらを held すると複数ページ手順が最初のページで止まる)。
+  for (const no of [
+    'カートに入れる', '数量を更新', 'Add to cart', '戻る', '閉じる', 'Close',
+    '次へ', '続ける', '続行', '進む', 'Continue', 'Proceed', 'Next', 'Go to next step',
+  ]) {
+    assert.equal(isIrreversibleLabel(no), false, `「${no}」はページ送り/無害でhold対象外`);
   }
   assert.equal(isIrreversibleLabel(''), false);
-  ok('isIrreversibleLabel は確定/不可逆系を広めに検出する');
+  ok('isIrreversibleLabel は真の確定/不可逆系のみ検出し、ページ送り語は通す');
+}
+
+// (12b) scopeKeyForUrl: content の annotationScopeKey と同じ正規化(Amazon は /dp/ASIN へ短縮)。
+{
+  assert.equal(scopeKeyForUrl('https://x.com/a?q=1#h'), 'https://x.com/a', 'origin+pathname へ正規化');
+  assert.equal(
+    scopeKeyForUrl('https://www.amazon.co.jp/Some-Title/dp/B0ABCDEFGH/ref=sr_1_1?keywords=x'),
+    'https://www.amazon.co.jp/dp/B0ABCDEFGH',
+    'Amazon 商品ページは /dp/ASIN へ短縮',
+  );
+  // 既に正規化済みキーを通しても変わらない(冪等)。
+  assert.equal(scopeKeyForUrl('https://www.amazon.co.jp/dp/B0ABCDEFGH'), 'https://www.amazon.co.jp/dp/B0ABCDEFGH', '冪等');
+  assert.equal(scopeKeyForUrl('not a url'), 'not a url', '不正URLは入力をそのまま返す');
+  ok('scopeKeyForUrl は記録時 pattern と同じ正規化を行う');
+}
+
+// (12c) isAutoRunNavLoop: 前進していれば同一URLでも遷移を許可、未前進で同一URLへ再遷移のみループ判定。
+{
+  assert.equal(isAutoRunNavLoop({ candidateUrl: 'u1', lastNavUrl: 'u1', madeProgress: false }), true, '未前進で同一URLはループ');
+  assert.equal(isAutoRunNavLoop({ candidateUrl: 'u1', lastNavUrl: 'u1', madeProgress: true }), false, '前進していれば同一URLでも許可');
+  assert.equal(isAutoRunNavLoop({ candidateUrl: 'u2', lastNavUrl: 'u1', madeProgress: false }), false, '別URLはループでない');
+  assert.equal(isAutoRunNavLoop({ candidateUrl: 'u1', lastNavUrl: undefined, madeProgress: false }), false, 'lastNav未設定はループでない');
+  ok('isAutoRunNavLoop は未前進の同一URL再遷移だけをループ判定する');
 }
 
 // (13) autorun allow-list は安全動詞のみ。危険動詞は拒否、必要動詞は許可。
