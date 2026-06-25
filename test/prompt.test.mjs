@@ -92,6 +92,10 @@ const ok = (name) => {
   assert.match(auto, /記録ワークフロー\(URL順の操作手順\)/, '自動実行でも記録ワークフロー節は出る');
   assert.doesNotMatch(auto, /navigateTo/, '自動実行モードでは navigateTo を案内しない');
   assert.match(auto, /自動実行モード/, '自動実行モードの注記が出る');
+  assert.match(auto, /最終確定ボタンは押さない/, '既定では最終確定ボタンを押さない');
+  const autoAllowed = buildSystemPrompt({ context: ctx, autorun: true, allowIrreversibleAutorun: true });
+  assert.match(autoAllowed, /設定で許可済み/, '設定ON時は最終確定クリック許可を明示する');
+  assert.doesNotMatch(autoAllowed, /最終確定ボタンは押さない/, '設定ON時は押さない指示を出さない');
   // 既定(チャット経路)は従来どおり navigateTo を案内する(回帰防止)。
   const chat = buildSystemPrompt({ context: ctx });
   assert.match(chat, /navigateTo/, 'チャット経路では navigateTo を案内する');

@@ -159,6 +159,7 @@ content-script (in the page / verb registry + executor)
 - The API key is stored only in `chrome.storage.local` and sent only to the AI API you choose.
 - Prompt history and page-scoped chat history are also stored in `chrome.storage.local`.
 - Destructive/irreversible actions (submit, purchase, delete) are stated in `reply` before running.
+- Recorded-workflow auto-run holds final confirm/purchase/delete clicks by default; Options can explicitly trust recorded steps and allow them.
 - The verb registry is a closed set, so the AI cannot perform unexpected DOM operations.
 
 ## Extending

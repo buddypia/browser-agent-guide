@@ -522,17 +522,20 @@ async function maybeAutoRunWorkflow(tabId, url) {
 async function autoRunExecuteSteps(tabId, url, steps, settings) {
   const context = await collectContext(tabId);
   context.crossPageWorkflow = await loadCrossPageWorkflow();
+  const allowIrreversibleClicks = Boolean(settings.workflow?.allowIrreversibleClicks);
   // deny-by-default: スキーマに乗せる動詞を安全集合へ絞る(構造的にナビ/送信/注入を不可能にする)。
   const verbNames = (context.verbs || []).map((v) => v.name).filter((n) => AUTORUN_ALLOWED_VERBS.includes(n));
   // autorun モード: プロンプトの「別URLへは navigateTo で進め」案内を出さない(allow-list で除外済みのため
   // 矛盾指示になり、AIが手詰まりで空応答→failed停止を誘発していた)。遷移は SW が決定論的に行う。
-  const system = buildSystemPrompt({ context, autorun: true });
+  const system = buildSystemPrompt({ context, autorun: true, allowIrreversibleAutorun: allowIrreversibleClicks });
   // 本文の無いお描き/対象だけの手順も拾えるよう、対象(target)も指示文に含める。
   const memo = steps.map((s, i) => `${i + 1}. ${s.target ? `「${s.target}」を: ` : ''}${s.text || ''}`).join('\n');
   const instruction =
     `次の「記録ワークフロー」の手順を、いまのページで実行してください:\n${memo}\n\n` +
     `重要:\n` +
-    `- 購入・送信・削除・注文の「最終確定」ボタンは押さないでください(人間が確定します)。\n` +
+    (allowIrreversibleClicks
+      ? `- 記録済み手順に含まれるクリックは、最終確定/購入/削除に見える場合でも実行してください(ユーザーが設定で許可済み)。\n`
+      : `- 購入・送信・削除・注文の「最終確定」ボタンは押さないでください(人間が確定します)。\n`) +
     `- ページ送り/次へ/続行など「別ページへ移動するためのボタン」は押さないでください(遷移はこちらで行います)。\n` +
     `- このページで実行すべき操作が無ければ actions は空でかまいません(失敗ではありません)。`;
   const messages = [
@@ -542,7 +545,12 @@ async function autoRunExecuteSteps(tabId, url, steps, settings) {
   const { reply, actions } = await callAI({ ai: settings.ai, messages, verbNames, t });
   let results = [];
   if (actions.length) {
-    const res = await ensureContentAndSend(tabId, { type: 'RUN_ACTIONS', actions, source: 'autorun' });
+    const res = await ensureContentAndSend(tabId, {
+      type: 'RUN_ACTIONS',
+      actions,
+      source: 'autorun',
+      options: { allowIrreversibleClicks },
+    });
     results = res?.results || [];
   }
   const held = results.find((r) => r && r.held);

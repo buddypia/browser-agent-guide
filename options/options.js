@@ -43,6 +43,7 @@ async function init() {
   applyI18n();
   fillAiForm();
   fillMemoryForm();
+  fillWorkflowForm();
   fillDaemonForm();
   renderRules();
   renderRecipeSites();
@@ -133,6 +134,10 @@ function fillMemoryForm() {
   $('default-scope').value = normalizeRememberScope(settings.memory?.defaultScope);
 }
 
+function fillWorkflowForm() {
+  $('autorun-allow-irreversible').checked = Boolean(settings.workflow?.allowIrreversibleClicks);
+}
+
 // ---- AI設定 ----
 function fillAiForm() {
   $('provider').value = settings.ai.provider;
@@ -173,6 +178,15 @@ async function saveMemory() {
   };
   await saveSettings(settings);
   setStatus('memory-status', t('opt.status.saved'), true);
+}
+
+async function saveWorkflowSettings() {
+  settings.workflow = {
+    ...(settings.workflow || {}),
+    allowIrreversibleClicks: $('autorun-allow-irreversible').checked,
+  };
+  await saveSettings(settings);
+  setStatus('workflow-status', t('opt.status.saved'), true);
 }
 
 // ---- サイトルール ----
@@ -357,6 +371,7 @@ function importSettings(file) {
       ...data,
       ai: { ...DEFAULT_SETTINGS.ai, ...(data.ai || {}) },
       memory: { ...DEFAULT_SETTINGS.memory, ...(data.memory || {}) },
+      workflow: { ...DEFAULT_SETTINGS.workflow, ...(data.workflow || {}) },
       ui: { ...DEFAULT_SETTINGS.ui, ...(data.ui || {}) },
       daemon: { ...DEFAULT_SETTINGS.daemon, ...(data.daemon || {}) },
       visualFeedback: { ...DEFAULT_SETTINGS.visualFeedback, ...(data.visualFeedback || {}) },
@@ -368,6 +383,7 @@ function importSettings(file) {
       applyI18n();
       fillAiForm();
       fillMemoryForm();
+      fillWorkflowForm();
       fillDaemonForm();
       renderRules();
       renderRecipeSites();
@@ -412,6 +428,7 @@ function bindEvents() {
   $('provider').addEventListener('change', toggleProviderFields);
   $('save-ai').addEventListener('click', saveAi);
   $('save-memory').addEventListener('click', saveMemory);
+  $('save-workflow').addEventListener('click', saveWorkflowSettings);
   $('save-daemon').addEventListener('click', saveDaemon);
   $('test-daemon').addEventListener('click', testDaemon);
   $('add-rule').addEventListener('click', addRule);
