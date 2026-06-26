@@ -73,6 +73,8 @@ Open any page and type natural-language instructions into the side-panel chat:
 - "Type *Chrome extension* into the search box and submit"
 - "Inject a fixed notice on this page and keep showing it next time"
 - "Inject CSS for this domain so headings are easier to scan"
+- On X/Twitter: "Draft a post about this idea and attach this generated image URL" creates a draft in the
+  compose box and stops there. It does **not** click **Post/Tweet**.
 
 The AI returns a structured `reply` (explanation) plus `actions` (verbs), which run in order. Each
 verb's result is shown inline in the chat. When a saved annotation or chat-driven page change succeeds,
@@ -105,6 +107,7 @@ Implemented in `content/content-script.js` as `AI_VERBS`. Every function name is
 | `annotatePage` / `listAffordances` | Assign stable IDs / list interactive elements |
 | `clickAffordance` / `clickElement` | Click |
 | `fillAffordance` / `fillInput` / `selectOption` | Fill / select |
+| `draftXPost` | Create an X/Twitter compose draft, optionally attaching an image URL/Data URL, without posting |
 | `submitForm` / `focusElement` / `scrollToElement` | Submit / focus / scroll |
 | `highlightElement` / `outlineElement` | Temporary highlight / persistent outline |
 | `injectHtml` / `injectCss` / `injectScript` | Inject explicit HTML / CSS / JS and re-apply it on revisit |

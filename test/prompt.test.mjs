@@ -102,4 +102,17 @@ const ok = (name) => {
   ok('自動実行モードは navigateTo 案内を抑制する');
 }
 
+// (7) X/Twitter では下書き verb を使い、投稿ボタンを押さない方針を明示する。
+{
+  const p = buildSystemPrompt({
+    context: {
+      url: 'https://x.com/home',
+      verbs: [{ name: 'draftXPost', description: 'X下書き', args: { text: '本文' } }],
+    },
+  });
+  assert.match(p, /draftXPost/, 'X下書き専用 verb を案内する');
+  assert.match(p, /Post\/Tweet\/ポスト\/投稿ボタンはクリックしない/, '投稿ボタンを押さない方針を明示する');
+  ok('X/Twitter 下書きでは投稿ボタンを押さない');
+}
+
 console.log(`\n${passed} passed`);

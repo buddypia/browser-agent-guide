@@ -113,6 +113,26 @@
     return '';
   }
   const MAX_INJECTED_TEXT_CHARS = 50000;
+  const MAX_DRAFT_IMAGE_BYTES = 10 * 1024 * 1024;
+  const X_DRAFT_HOSTS = new Set(['x.com', 'twitter.com', 'mobile.twitter.com']);
+  const X_EDITOR_SELECTOR = [
+    '[data-testid^="tweetTextarea_"][contenteditable="true"]',
+    '[role="textbox"][contenteditable="true"][aria-label*="Post"]',
+    '[role="textbox"][contenteditable="true"][aria-label*="Tweet"]',
+    '[contenteditable="true"][aria-label*="ポスト"]',
+    '[contenteditable="true"][aria-label*="ツイート"]',
+  ].join(',');
+  const X_COMPOSE_OPENERS = [
+    '[data-testid="SideNav_NewTweet_Button"]',
+    'a[href="/compose/post"]',
+    'a[href="/compose/tweet"]',
+    '[aria-label="Post"][role="button"]',
+    '[aria-label="Tweet"][role="button"]',
+  ].join(',');
+  const X_MEDIA_INPUT_SELECTOR = [
+    'input[data-testid="fileInput"][type="file"]',
+    'input[type="file"][accept*="image"]',
+  ].join(',');
 
   // ---- 要素解決ヘルパー(優先: aiId > selector > injectedId) ----
   function getEl(args = {}) {
@@ -470,6 +490,18 @@
       args: { selector: 'CSSセレクタ', value: '入力値' },
       run: async (a) => fillValue(requireEl(a), a.value),
     },
+    draftXPost: {
+      description:
+        'X/Twitter の投稿作成欄に下書きだけを作る。本文を入力し、任意の画像URL/Data URLを添付するが、Post/Tweetボタンは絶対に押さない。',
+      args: {
+        text: '下書きとして入力する投稿本文。投稿はしない。',
+        imageUrl: '添付する画像URL(任意、http/https/data URL)。外部AI/CLIが生成した画像をローカルHTTPで渡せる。',
+        imageDataUrl: '添付する画像Data URL(任意、data:image/...;base64,...)',
+        filename: '画像ファイル名(任意)',
+        openComposer: '投稿欄が無ければ開くか。falseなら開かない(既定true)',
+      },
+      run: async (a) => draftXPost(a),
+    },
     selectOption: {
       description: 'select要素で指定値(value/ラベル)を選択する。',
       args: { aiId: 'aiId(任意)', selector: 'セレクタ(任意)', value: 'value または表示テキスト' },
@@ -778,15 +810,200 @@
   function fillValue(el, value) {
     el.focus();
     if (el.isContentEditable) {
-      el.textContent = value;
+      fillContentEditable(el, value);
     } else {
       const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
       setter ? setter.call(el, value) : (el.value = value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
     }
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
     return { filled: true };
+  }
+
+  function fillContentEditable(el, value) {
+    const text = String(value ?? '');
+    el.focus();
+    const sel = window.getSelection?.();
+    if (sel && document.createRange) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    let inserted = false;
+    try {
+      inserted = document.execCommand && document.execCommand('insertText', false, text);
+    } catch {
+      inserted = false;
+    }
+    if (!inserted) {
+      el.textContent = text;
+    }
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  async function draftXPost(args = {}) {
+    if (!isXDraftHost(location.hostname)) throw new Error(t('cs.err.xDraftHost'));
+    const text = String(args.text ?? '');
+    if (!text.trim()) throw new Error(t('cs.err.xDraftTextEmpty'));
+
+    const editor = await findOrOpenXEditor(args.openComposer !== false);
+    if (!editor) throw new Error(t('cs.err.xComposerNotFound'));
+    fillContentEditable(editor, text);
+
+    let image = null;
+    if (args.imageDataUrl || args.imageUrl) {
+      const file = await fileFromDraftImage(args);
+      const input = findXMediaInput(editor);
+      if (!input) throw new Error(t('cs.err.xImageInputNotFound'));
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      input.files = dt.files;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      image = { name: file.name, type: file.type, size: file.size };
+    }
+
+    return {
+      drafted: true,
+      textLength: text.length,
+      editor: describeElementForResult(editor),
+      image,
+      postButtonPresent: Boolean(findVisibleElement('[data-testid="tweetButton"],[data-testid="tweetButtonInline"]')),
+      posted: false,
+    };
+  }
+
+  function isXDraftHost(hostname) {
+    return X_DRAFT_HOSTS.has(String(hostname || '').toLowerCase());
+  }
+
+  async function findOrOpenXEditor(openComposer) {
+    let editor = findXEditor();
+    if (editor || !openComposer) return editor;
+    const opener = findVisibleElement(X_COMPOSE_OPENERS);
+    if (opener) opener.click();
+    editor = await waitForVisible(X_EDITOR_SELECTOR, 5000);
+    return editor || findXEditor();
+  }
+
+  function findXEditor() {
+    const editors = visibleElements(X_EDITOR_SELECTOR).filter((el) => el.isContentEditable);
+    if (!editors.length) return null;
+    return (
+      editors.find((el) => el.closest('[role="dialog"]')) ||
+      editors.find((el) => el.getAttribute('data-testid') === 'tweetTextarea_0') ||
+      editors[0]
+    );
+  }
+
+  function findVisibleElement(selector) {
+    return visibleElements(selector)[0] || null;
+  }
+
+  function visibleElements(selector) {
+    try {
+      return Array.from(document.querySelectorAll(selector)).filter((el) => !isOwnUi(el) && isVisible(el));
+    } catch {
+      return [];
+    }
+  }
+
+  function waitForVisible(selector, timeoutMs) {
+    const existing = findVisibleElement(selector);
+    if (existing) return Promise.resolve(existing);
+    return new Promise((resolve) => {
+      const obs = new MutationObserver(() => {
+        const el = findVisibleElement(selector);
+        if (el) {
+          obs.disconnect();
+          resolve(el);
+        }
+      });
+      obs.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+      setTimeout(() => {
+        obs.disconnect();
+        resolve(findVisibleElement(selector));
+      }, timeoutMs);
+    });
+  }
+
+  function findXMediaInput(editor) {
+    const dialog = editor?.closest?.('[role="dialog"]');
+    const scopes = [dialog, document].filter(Boolean);
+    for (const scope of scopes) {
+      const input = Array.from(scope.querySelectorAll(X_MEDIA_INPUT_SELECTOR)).find((el) => {
+        const accept = String(el.getAttribute('accept') || '').toLowerCase();
+        return !accept || accept.includes('image') || accept.includes('png') || accept.includes('jpeg') || accept.includes('webp');
+      });
+      if (input) return input;
+    }
+    return null;
+  }
+
+  async function fileFromDraftImage(args) {
+    const source = String(args.imageDataUrl || args.imageUrl || '');
+    const payload = source.startsWith('data:')
+      ? { dataUrl: source }
+      : await fetchImageAsDataUrl(source);
+    return dataUrlToFile(payload.dataUrl, args.filename || payload.filename || 'bag-x-draft-image.png');
+  }
+
+  async function fetchImageAsDataUrl(url) {
+    return new Promise((resolve, reject) => {
+      if (!url) {
+        reject(new Error(t('cs.err.xImageInvalidDataUrl')));
+        return;
+      }
+      chrome.runtime.sendMessage({ type: 'FETCH_IMAGE_AS_DATA_URL', url }, (response) => {
+        const runtimeError = chrome.runtime.lastError;
+        if (runtimeError) {
+          reject(new Error(runtimeError.message || String(runtimeError)));
+          return;
+        }
+        if (!response?.ok) {
+          reject(new Error(response?.error || t('cs.err.xImageInvalidDataUrl')));
+          return;
+        }
+        resolve(response.result || {});
+      });
+    });
+  }
+
+  function dataUrlToFile(dataUrl, filename) {
+    const m = String(dataUrl || '').match(/^data:([^;,]+)(;base64)?,(.*)$/s);
+    if (!m || !m[1].toLowerCase().startsWith('image/')) throw new Error(t('cs.err.xImageInvalidDataUrl'));
+    const mime = m[1];
+    const body = m[3] || '';
+    const bytes = m[2]
+      ? Uint8Array.from(atob(body), (c) => c.charCodeAt(0))
+      : new TextEncoder().encode(decodeURIComponent(body));
+    if (bytes.byteLength > MAX_DRAFT_IMAGE_BYTES) {
+      throw new Error(t('cs.err.xImageTooLarge', { max: `${MAX_DRAFT_IMAGE_BYTES}` }));
+    }
+    return new File([bytes], sanitizeFilename(filename, mime), { type: mime });
+  }
+
+  function sanitizeFilename(filename, mime) {
+    const fallbackExt = mime === 'image/jpeg' ? 'jpg' : String(mime || '').split('/')[1] || 'png';
+    const clean = String(filename || '')
+      .replace(/[\\/:*?"<>|]+/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120);
+    if (!clean) return `bag-x-draft-image.${fallbackExt}`;
+    return /\.[a-z0-9]{2,5}$/i.test(clean) ? clean : `${clean}.${fallbackExt}`;
+  }
+
+  function describeElementForResult(el) {
+    return {
+      aiId: el.getAttribute(ATTR.id) || '',
+      selector: cssPath(el),
+      label: labelOf(el),
+      testid: el.getAttribute('data-testid') || '',
+    };
   }
 
   function injectHtml(a) {
@@ -4123,6 +4340,23 @@
     return true;
   }
 
+  function isXPostSubmitAction(verbName, args) {
+    if (!isXDraftHost(location.hostname)) return false;
+    if (verbName !== 'clickAffordance' && verbName !== 'clickElement') return false;
+    let el = null;
+    try {
+      el = getEl(args || {});
+    } catch {
+      el = null;
+    }
+    return isXPostSubmitElement(el);
+  }
+
+  function isXPostSubmitElement(el) {
+    if (!el || el.nodeType !== 1) return false;
+    return Boolean(el.closest?.('[data-testid="tweetButton"],[data-testid="tweetButtonInline"]'));
+  }
+
   // レシピ/アクションの実行条件(when)を評価する。満たさなければそのアクションはスキップ。
   //   when.urlContains    : 現在URL(location.href)に指定文字列を含むときだけ実行(SPAの画面別出し分け)
   //   when.selectorExists : 指定セレクタの要素が存在するときだけ実行
@@ -4161,6 +4395,15 @@
           ok: false,
           reason: a.reason || '',
           error: t('cs.err.verbBlocked'),
+        });
+        continue;
+      }
+      if ((source === 'chat' || source === 'autorun') && isXPostSubmitAction(a.verb, a.args || {})) {
+        results.push({
+          verb: a.verb,
+          ok: false,
+          reason: a.reason || '',
+          error: t('cs.err.xPostBlocked'),
         });
         continue;
       }

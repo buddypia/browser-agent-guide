@@ -100,6 +100,7 @@ const REMEMBER_SCOPES = new Set(['page', 'domain', 'all']);
 const AUTO_SYNC_DEFAULT_DEBOUNCE_MS = 1800;
 const AUTO_SYNC_MIN_DEBOUNCE_MS = 750;
 const AUTO_SYNC_MAX_DEBOUNCE_MS = 10000;
+const MAX_FETCH_IMAGE_BYTES = 10 * 1024 * 1024;
 const autoSyncTimers = new Map();
 const autoSyncInFlight = new Set();
 
@@ -219,6 +220,8 @@ async function handleMessage(msg, sender) {
         tabId: sender?.tab?.id,
         sendCount: msg.sendCount,
       });
+    case 'FETCH_IMAGE_AS_DATA_URL':
+      return fetchImageAsDataUrl(msg.url);
     case 'EXECUTE_USER_SCRIPT':
       return executeUserScript({ id: msg.id, code: msg.code, sender });
     case 'OPEN_OPTIONS':
@@ -280,6 +283,64 @@ ${String(code || '')}
     marker,
     result: result.result ?? null,
   };
+}
+
+async function fetchImageAsDataUrl(rawUrl) {
+  let url;
+  try {
+    url = new URL(String(rawUrl || ''));
+  } catch {
+    throw new Error(t('sw.err.fetchImageUrlInvalid'));
+  }
+  if (!['http:', 'https:', 'data:'].includes(url.protocol)) {
+    throw new Error(t('sw.err.fetchImageUrlInvalid'));
+  }
+  if (url.protocol === 'data:') {
+    const dataUrl = String(rawUrl || '');
+    if (!/^data:image\//i.test(dataUrl)) throw new Error(t('sw.err.fetchImageType'));
+    if (approxDataUrlBytes(dataUrl) > MAX_FETCH_IMAGE_BYTES) {
+      throw new Error(t('sw.err.fetchImageTooLarge', { max: `${MAX_FETCH_IMAGE_BYTES}` }));
+    }
+    return { dataUrl, mime: dataUrl.slice(5, dataUrl.indexOf(';') > 0 ? dataUrl.indexOf(';') : dataUrl.indexOf(',')) || 'image/png' };
+  }
+
+  const res = await fetch(url.href, { credentials: 'omit', cache: 'no-store' });
+  if (!res.ok) throw new Error(t('sw.err.fetchImageFailed', { status: res.status }));
+  const len = Number(res.headers.get('content-length') || '0');
+  if (len > MAX_FETCH_IMAGE_BYTES) {
+    throw new Error(t('sw.err.fetchImageTooLarge', { max: `${MAX_FETCH_IMAGE_BYTES}` }));
+  }
+  const blob = await res.blob();
+  if (blob.size > MAX_FETCH_IMAGE_BYTES) {
+    throw new Error(t('sw.err.fetchImageTooLarge', { max: `${MAX_FETCH_IMAGE_BYTES}` }));
+  }
+  const mime = blob.type || res.headers.get('content-type') || '';
+  if (!mime.toLowerCase().startsWith('image/')) throw new Error(t('sw.err.fetchImageType'));
+  const dataUrl = `data:${mime};base64,${arrayBufferToBase64(await blob.arrayBuffer())}`;
+  return { dataUrl, mime, size: blob.size, filename: filenameFromUrl(url) };
+}
+
+function approxDataUrlBytes(dataUrl) {
+  const comma = dataUrl.indexOf(',');
+  if (comma < 0) return dataUrl.length;
+  const meta = dataUrl.slice(0, comma).toLowerCase();
+  const body = dataUrl.slice(comma + 1);
+  return meta.includes(';base64') ? Math.floor((body.length * 3) / 4) : decodeURIComponent(body).length;
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunk = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function filenameFromUrl(url) {
+  const last = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() || '');
+  return last || 'bag-x-draft-image.png';
 }
 
 /** アクティブタブの状態(URL/一致状況)を返す。 */
