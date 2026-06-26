@@ -1,8 +1,11 @@
 // 視覚フィードバック entry の保存・検索境界。
 // disk は従来どおり <inbox>/<slug>/... を即時保存し、hybrid はまずメモリに保持して
-// image/file_path が必要になった時だけ disk へ materialize する。
-import { existsSync } from 'node:fs';
+// image/file_path が必要になった時だけ <inbox> へ materialize する。
+// memory は inbox を一切作らず、image/file_path 要求時だけ OS tmp へ一時 materialize し
+// プロセス終了時に破棄する（inbox 完全撤去・既定）。
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { findEntry as findDiskEntry, matchesFilter, queryEntries as queryDiskEntries } from './inbox.js';
 import { slugFromCapture } from './slug.js';
 import { decodeBase64, writeEntry } from './writer.js';
@@ -35,15 +38,28 @@ export function createDiskEntryStore(inboxDir) {
 export function createVisualFeedbackStore({ inboxDir, storageMode = 'disk', memoryLimit = DEFAULT_MEMORY_LIMIT } = {}) {
   const mode = normalizeStorageMode(storageMode);
   if (mode === 'disk') return createDiskEntryStore(inboxDir);
+  return createMemoryBackedStore({ inboxDir, mode, memoryLimit });
+}
 
+// hybrid / memory 共通のメモリ優先 store。差は materialize 先だけ:
+//   - hybrid: image/file_path 要求時に <inbox>/<id>/ へ保存する（従来どおり）。
+//   - memory: ユーザーの inbox を一切作らず、要求時だけプロセス専用の OS tmp へ
+//             一時 materialize する（cleanup で破棄）。→ inbox 完全撤去。
+function createMemoryBackedStore({ inboxDir, mode, memoryLimit }) {
   const currentInbox = () => (typeof inboxDir === 'function' ? inboxDir() : inboxDir);
   const memory = [];
+  // memory モードの一時 materialize 先（初回 materialize で遅延作成し、cleanup で丸ごと消す）。
+  let tmpRoot = null;
+  const memoryMaterializeRoot = () => {
+    if (!tmpRoot) tmpRoot = mkdtempSync(join(tmpdir(), 'bag-vf-'));
+    return tmpRoot;
+  };
 
   return {
-    kind: 'hybrid',
+    kind: mode,
     getInboxDir: currentInbox,
     info() {
-      return { storage: 'hybrid', inboxDir: currentInbox(), memoryEntries: memory.length };
+      return { storage: mode, inboxDir: currentInbox(), memoryEntries: memory.length };
     },
     save(payload, opts) {
       const entry = createMemoryEntry({
@@ -71,19 +87,32 @@ export function createVisualFeedbackStore({ inboxDir, storageMode = 'disk', memo
     },
     materialize(entry) {
       if (!entry || entry.storage !== 'memory' || entry.materialized) return entry;
-      const written = writeEntry(entry.inboxDir || currentInbox(), entry.payload, { id: entry.id });
+      // hybrid は inbox、memory は OS tmp に書く（後者はユーザーの ai-inbox を作らない）。
+      const root = mode === 'memory' ? memoryMaterializeRoot() : entry.inboxDir || currentInbox();
+      const written = writeEntry(root, entry.payload, { id: entry.id });
       entry.dir = written.dir;
       entry.shot = join(written.dir, 'shot.png');
       entry.files = written.files;
       entry.materialized = true;
       return entry;
     },
+    // memory モードの一時 materialize 先を破棄する（プロセス終了時に index.js が呼ぶ）。
+    cleanup() {
+      if (!tmpRoot) return;
+      try {
+        rmSync(tmpRoot, { recursive: true, force: true });
+      } catch {
+        /* tmp 後始末失敗は無視 */
+      }
+      tmpRoot = null;
+    },
   };
 }
 
 export function normalizeStorageMode(value) {
   const mode = String(value || 'disk').toLowerCase();
-  if (mode === 'hybrid' || mode === 'memory') return 'hybrid';
+  if (mode === 'memory') return 'memory';
+  if (mode === 'hybrid') return 'hybrid';
   return 'disk';
 }
 
