@@ -12,6 +12,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { createHttpServer } from '../src/http.js';
 import { attachWebSocketServer } from '../src/ws.js';
 import { createVisualFeedbackStore, normalizeStorageMode } from '../src/store.js';
+import { listEntries } from '../src/inbox.js';
 
 const PNG_B64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -52,11 +53,12 @@ async function withMcpClient(baseUrl, fn) {
   }
 }
 
-test('normalizeStorageMode: disk 既定、memory は hybrid alias', () => {
+test('normalizeStorageMode: disk/hybrid/memory を区別し、不明は disk', () => {
   assert.equal(normalizeStorageMode(''), 'disk');
   assert.equal(normalizeStorageMode('disk'), 'disk');
   assert.equal(normalizeStorageMode('hybrid'), 'hybrid');
-  assert.equal(normalizeStorageMode('memory'), 'hybrid');
+  assert.equal(normalizeStorageMode('memory'), 'memory');
+  assert.equal(normalizeStorageMode('MEMORY'), 'memory');
   assert.equal(normalizeStorageMode('unknown'), 'disk');
 });
 
@@ -161,6 +163,79 @@ test('hybrid store: 異なる host の memory push 2件で bare context が disa
       assert.equal(res.structuredContent.id, undefined, 'foreign id を載せない');
       assert.equal(res.structuredContent.disambiguation.distinctCount, 2, 'memory entry の capturedAt で 2 案件を検知');
     });
+  } finally {
+    wss.close();
+    await new Promise((r) => httpServer.close(r));
+    rmSync(inboxDir, { recursive: true, force: true });
+  }
+});
+
+test('memory store (既定): inbox を作らず、image 要求時のみ OS tmp に一時 materialize する', async () => {
+  const inboxDir = mkdtempSync(join(tmpdir(), 'vf-memory-'));
+  const entryStore = createVisualFeedbackStore({ inboxDir, storageMode: 'memory' });
+  const httpServer = createHttpServer({ inboxDir, entryStore, token: TOKEN, nowMs: Date.parse('2026-06-22T01:10:00.000Z') });
+  const wss = attachWebSocketServer(httpServer, { inboxDir, entryStore, token: TOKEN });
+  await new Promise((r) => httpServer.listen(0, '127.0.0.1', r));
+  const { port } = httpServer.address();
+  const wsUrl = `ws://127.0.0.1:${port}/ws`;
+  const mcpUrl = `http://127.0.0.1:${port}/mcp`;
+  let materializedPath = '';
+
+  try {
+    const ack = await sendOnce(`${wsUrl}?token=${TOKEN}`, {
+      type: 'visual_feedback',
+      capturedAt: '2026-06-22T01:02:03.004Z',
+      url: 'https://memory.example/page',
+      title: 'Memory Capture',
+      image: { shot: PNG_B64, raw: PNG_B64 },
+      annotation: {
+        url: 'https://memory.example/page',
+        title: 'Memory Capture',
+        capturedAt: '2026-06-22T01:02:03.004Z',
+        items: [{ n: 1, note: 'memory mode', selector: '#target' }],
+      },
+      memo: '# memo\n',
+    });
+    assert.equal(ack.type, 'ack');
+    assert.equal(ack.storage, 'memory');
+    assert.equal(ack.materialized, false);
+
+    await withMcpClient(mcpUrl, async (client) => {
+      const contextRes = await client.callTool({
+        name: 'get_latest_visual_feedback_context',
+        arguments: { urlContains: 'memory.example' },
+      });
+      assert.ok(!contextRes.content.some((c) => c.type === 'image'), 'context は image なし');
+      assert.equal(contextRes.structuredContent.id, ack.id);
+      assert.equal(listEntries(inboxDir, 10).length, 0, 'context 取得でも inbox を作らない');
+
+      const imageRes = await client.callTool({
+        name: 'get_latest_visual_feedback',
+        arguments: {
+          urlContains: 'memory.example',
+          contextId: ack.id,
+          imageReason: 'test verifies memory mode materializes to OS tmp, not the inbox',
+        },
+      });
+      const img = imageRes.content.find((c) => c.type === 'image');
+      const txt = imageRes.content.find((c) => c.type === 'text').text;
+      assert.ok(img, 'image はメモリから返る');
+      assert.equal(img.mimeType, 'image/png');
+      // Codex#10334 パリティ: image 結果は structuredContent を持たない。
+      assert.equal(imageRes.structuredContent, undefined, 'image 結果は structuredContent を持たない');
+      // file_path は OS tmp 配下（inbox 配下ではない）に出る。
+      const m = txt.match(/file_path: (.+)/);
+      assert.ok(m, 'memory モードでも file_path を出す（OS tmp 上）');
+      materializedPath = m[1].trim();
+      assert.ok(materializedPath.startsWith(tmpdir()), 'file_path は OS tmp 配下');
+      assert.ok(!materializedPath.startsWith(inboxDir), 'file_path は inbox 配下ではない');
+      assert.ok(existsSync(materializedPath), 'tmp に一時 materialize されている');
+      assert.equal(listEntries(inboxDir, 10).length, 0, 'image 要求でも inbox は空のまま');
+    });
+
+    // cleanup で一時 materialize 先を破棄する（プロセス終了時に index.js が呼ぶのと同じ）。
+    entryStore.cleanup();
+    assert.equal(existsSync(materializedPath), false, 'cleanup で OS tmp の一時ファイルを破棄する');
   } finally {
     wss.close();
     await new Promise((r) => httpServer.close(r));

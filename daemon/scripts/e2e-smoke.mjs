@@ -39,6 +39,9 @@ const proc = spawn(
   'node',
   [
     indexJs, '--inbox', inbox, '--port', String(PORT), '--token', TOKEN,
+    // このスモークは inbox への即時保存と retention(done/ 退避)を検証するので disk を明示する
+    // （既定の memory モードは inbox を作らないため、ここでは disk に固定する）。
+    '--storage', 'disk',
     '--retention', 'on', '--retention-max-age', '5s', '--retention-grace', '1s',
     '--retention-max-per-family', '1', '--retention-done-ttl', '100d',
   ],

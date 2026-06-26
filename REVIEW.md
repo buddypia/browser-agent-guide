@@ -1,73 +1,63 @@
-# レビュー依頼: 記録ワークフローのページ跨ぎ自動実行が動かない問題の根治
+# REVIEW — daemon の既定 storage を `memory` 化（inbox 完全撤去）
 
 ## 概要
-PR #49/#50 で入った「記録ワークフローの自動実行(autorun)」が、ページを跨いで実行されない問題を根治する。
-5観点の並列調査＋敵対的検証で確認した根本原因①〜⑤を、安全境界を保ったまま最小修正する。
+視覚フィードバック daemon の既定 storage を `disk` から **`memory`** に変更し、ユーザーの
+`<Downloads>/ai-inbox/` を**一切作らない**経路を既定にした。`memory` は受信した合成 PNG を
+RAM 保持し、image/`file_path` 要求時だけ**プロセス専用の OS tmp** に一時 materialize して
+終了時に破棄する。永続化・履歴・retention が要る人向けに `hybrid` / `disk` を明示オプトインとして残す。
 
-## なぜ (背景・根本原因)
-autorun は「現在ページの記録手順を AI で実行 → SW が次手順の URL へ決定論的に遷移 → 着地後また実行」を1本の鎖で回す。
-この鎖が次の理由で最初の数歩で止まっていた(いずれも実コード＋node実行で確認済み):
-
-1. **ページ送りボタンを不可逆扱いして held → セッション停止** (最有力・全サイト)
-   `IRREVERSIBLE_KEYWORDS` に「次へ/続ける/続行/進む/continue/proceed/next」が入っており、これらは
-   複数ページ手順を次ページへ送る通常ボタンのラベルそのもの。autorun のクリックが held → SW がセッションを
-   `active:false` 停止 → 2ページ目に到達できない。
-2. **記録 pattern と着地 URL の正規化ズレで pending=0** (Amazon/リダイレクト系)
-   記録時 `pattern = annotationScopeKey(href)`(Amazon は `/dp/ASIN` へ短縮)に対し、`pendingStepsForUrl` は
-   生の origin+pathname で厳密比較していたため、`/dp/ASIN/ref=…` の着地で一致せず手順が実行も done もされない。
-3. **`autoRunLastNav` が到達成功後もクリアされず、リダイレクト1回で恒久停止**(増幅要因)
-4. **プロンプトは `navigateTo` を指示するが allow-list で除外 → AI が空応答 → failed 停止**(副因)
-5. **本文の無いお描き/対象だけの手順が `actionableSteps` から脱落**して手順欠落・順序ずれ(副因)
-
-詳細な調査・敵対的検証ログはセッション内の root-cause ワークフロー結果を参照。
+## なぜ (背景)
+「Chrome 拡張 × MCP 連携で inbox（ディスク上の `ai-inbox/<slug>/` ステージング）を完全に消せるか」
+という要望への回答。調査で確認した前提:
+- MCP 仕様は画像を inline `ImageContent`（base64）で返せる＝ファイル不要（Claude Code は inline 解釈可）。
+- MCP Streamable HTTP は stateless 設計で、状態はメモリ＋明示ハンドル（`contextId`）で持てる。
+- MV3 拡張はサーバを待ち受けられない（`chrome.sockets.tcpServer` は Apps 専用）ため daemon プロセス自体は
+  消せないが、**daemon がディスクにステージングする必要はない**。
+- 既存コードに in-memory `entryStore`（`hybrid`）が既にあり土台が揃っていた。
 
 ## 何を (変更点)
-- **①** `IRREVERSIBLE_KEYWORDS` からページ送り語(`続行/続ける/進む/次へ/continue/proceed/next`)を分離。
-  真に不可逆な確定系(購入/注文/支払/決済/送金/削除/退会/解約/送信/確定/同意/登録/checkout/pay/delete 等)に限定。
-  `lib/workflow.js` と `content/content-script.js` の2コピーをパリティ維持で同時修正。
-- **②** `lib/workflow.js` に共有正規化 `scopeKeyForUrl(url)`(content の `annotationScopeKey` 相当、Amazon `/dp/ASIN`
-  短縮・`/s` クエリ間引きを含む)を実装。`pendingStepsForUrl` で live URL も同じ正規化を通して突き合わせる。
-- **③** SW `maybeAutoRunWorkflow`: 前進(`madeProgress`)できたら `autoRunLastNav.delete()`。遷移ループ判定を
-  純関数 `isAutoRunNavLoop({candidateUrl,lastNavUrl,madeProgress})` に切り出し、「未前進で同一URLへ再遷移」時だけ停止。
-- **④** `buildSystemPrompt({context, autorun})` を追加し、autorun では `navigateTo` 案内を出さず「★現在のページの
-  手順だけ実行・ページ送りは押さない・打つ手が無ければ空でよい」を指示。`autoRunExecuteSteps` の `ranOk` を
-  「空応答/noopのみ＝前進」「試して全失敗(hardFail)のみ停止」に緩和。memo に対象(target)も含める。
-- **⑤** `actionableSteps` を `(text && text.trim()) || target` に揃え、`crossPageWorkflowForPrompt` と判定を一致。
+- `daemon/src/store.js`: storage に **`memory`** モードを追加（`hybrid` と共通の memory-backed store を共有化）。
+  `memory` の `materialize()` は inbox ではなく `mkdtemp` の OS tmp に書き、`cleanup()` で破棄。
+  `normalizeStorageMode` を `memory`/`hybrid`/`disk` の3値に（旧: `memory`→`hybrid` alias を廃止）。
+- `daemon/src/index.js`: 既定を `memory` に。起動 stderr のモード説明、終了時 `entryStore.cleanup()`、使い方コメント。
+- `daemon/test/store.test.mjs`: `normalizeStorageMode` の期待値更新＋`memory` モードの統合テスト追加。
+- `daemon/scripts/e2e-smoke.mjs`: ディスク+retention 検証スモークなので `--storage disk` を明示。
+- `daemon/README.md` / `AGENTS.md`: 3モード化・既定 `memory`・`store.js` の挙動を反映。
 
 ## どうやって (検証)
-`npm run check` 全ステージ green (EXIT=0):
-- check:js / check:markers(75/75) / anchor(9) / slug / recipe / **prompt(6)** / **workflow-lib(17)** / vf(14) / **test:ui(72)**。
-- 追加した回帰テスト:
-  - `workflow-lib.test.mjs`: actionableSteps の対象だけ手順保持 / pendingStepsForUrl の Amazon ref URL 一致 /
-    isIrreversibleLabel でページ送り語が false / scopeKeyForUrl の Amazon短縮・冪等 / isAutoRunNavLoop の真偽表。
-  - `prompt.test.mjs`: autorun モードで `navigateTo` 案内を抑制(チャット経路は従来どおり案内、回帰防止)。
-  - `workflow-autorun.spec.mjs`: 「次へ進む」ボタンが autorun でも held されず実行される(=primary原因の実ブラウザ固定)。
+`hybrid` の挙動は不変のまま materialize 先だけ mode 分岐。`memory` は既存の「materialize 失敗時も
+inline image + `shot_url` で返す」経路（既にテスト済み）と同型で、file_path を OS tmp に出す点だけが違う。
+既存の回帰ガード（Codex `structuredContent` なし、memory-first、disambiguate-latest、stale window）は据え置き。
+- `daemon npm test`: **86 件 green**（新規 memory 統合テスト含む）。
+- 実バイナリ: 既定 `memory` で **inbox 未作成**＋image は inline＋OS tmp の `file_path`、`--storage disk` で
+  従来の e2e-smoke（push→MCP→retention）が通ることを確認。
+- `node --check src/store.js src/index.js` OK。
 
 ## 影響
-- 既存の安全境界は不変: 真の確定/購入/削除ボタンは引き続き held、アイコンのみボタンの fail-safe hold も維持、
-  破壊的動詞・`navigateTo`/`submitForm` の deny-by-default も不変。chat/recipe 経路は無変更。
-- 単一プロジェクト/非Amazonの突き合わせは従来と同等(scopeKeyForUrl は origin+pathname を返すため byte 等価)。
+- 既定で daemon-ON でも `ai-inbox` ツリーが作られない（Claude Code はディスク完全不使用）。
+- `--storage` 未指定の常駐サービス（install-service）も memory＝再起動で揮発。永続化が要るなら
+  `--storage disk`/`hybrid` を明示（README/起動ログ/コメントに明記）。
+- Codex は inline base64（rmcp）＋ OS tmp の `file_path`（`view_image` 可）/ `shot_url` で取得。
 
 ## トレードオフ / 留意
-- ①で `送信/確認/登録` は held のまま残した(安全側)。これらが純粋なページ送りのサイトでは保留が出うるが、
-  購入・送信系の事故防止を優先。必要なら後続でラベル分離を精緻化できる。
-- ④で「空応答＝前進」にしたため、AIがそのページで何もしなくても次ページへ進む。取りこぼしは hardFail(全失敗)
-  検知で停止して知らせる。silent-skip より「跨いで進む」を優先した判断。
+- `memory` は再起動跨ぎの永続化・`list_visual_feedback` 履歴・retention/`done/` を持たない（割り切り）。
+  → 必要時は `--storage hybrid`（遅延 inbox）/ `disk`（即時 inbox）。
+- OS tmp はプロセス crash 時に残りうるが、ユーザーの Downloads は汚さない（OS 側で自浄）。
 
-## 残作業 (既知のギャップ)
-- SW の遷移オーケストレーション(maybeAutoRunWorkflow の2ページ実連鎖)を実 LLM 込みで回す end-to-end は、
-  テスト環境に LLM が無いため未追加。代わりに純粋判定(isAutoRunNavLoop / pendingStepsForUrl 正規化)と
-  content 側 held 挙動を unit/spec で固定した。将来 chrome.* をモックした SW 単体ハーネスがあれば連鎖もロック可能。
+## 残作業
+- なし（必須）。任意: 拡張オプション UI 文言やリリースノートへの反映は別 PR でも可。
 
-## ファイル構造
-- `lib/workflow.js` … scopeKeyForUrl + amazon系ヘルパー追加 / actionableSteps・pendingStepsForUrl 改修 /
-  IRREVERSIBLE_KEYWORDS 絞り込み / isAutoRunNavLoop 追加。
-- `lib/prompt.js` … buildSystemPrompt に autorun 分岐。
-- `background/service-worker.js` … maybeAutoRunWorkflow(前進追跡・ループ判定) / autoRunExecuteSteps(プロンプト・ranOk・memo)。
-- `content/content-script.js` … IRREVERSIBLE_KEYWORDS のパリティ更新。
-- `test/{workflow-lib.test.mjs,prompt.test.mjs,workflow-autorun.spec.mjs}` … 回帰テスト追加。
+## ファイル構造（変更）
+```
+AGENTS.md                     # 既定 memory・3モード・store.js を反映
+daemon/README.md              # storage mode（memory/hybrid/disk）章を更新
+daemon/scripts/e2e-smoke.mjs  # --storage disk を明示
+daemon/src/index.js           # 既定 memory・起動ログ・終了時 cleanup・使い方
+daemon/src/store.js           # memory モード追加（OS tmp materialize + cleanup）
+daemon/test/store.test.mjs    # normalizeStorageMode 更新 + memory 統合テスト
+```
 
 ## レビュー依頼
-- ①のキーワード分離方針(`送信/確認/登録` を held に残す線引き)が運用と合っているか。
-- ④の「空応答＝前進」緩和が、取りこぼし(本来やるべき手順をスキップ)を生まないか(hardFail検知で十分か)。
-- ②の scopeKeyForUrl は content の annotationScopeKey と挙動一致が前提(drift 注意)。共有方法(将来のパリティテスト)で良いか。
+- 既定を `memory` にする判断（永続化を opt-in に降格）でよいか。常駐サービスのユーザー影響の許容可否。
+- `memory` の materialize 先を OS tmp にする実装（cleanup タイミング・crash 時残留）の妥当性。
+- Codex 利用者向けに OS tmp の `file_path` で十分か（純 inline 不可ビルドの `view_image` 対応）。

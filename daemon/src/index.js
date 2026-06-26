@@ -4,12 +4,18 @@
 // context-first で annotation メタを読み、必要時だけ image+パスを取得できるようにする。
 //
 // 使い方:
-//   node src/index.js                       # 既定 inbox=<自動検出した Downloads>/ai-inbox, port=8765
-//   node src/index.js --inbox ./.ai-inbox --port 8765   # 明示指定すると「固定」され拡張の報告で上書きされない
+//   node src/index.js                       # 既定 storage=memory（inbox を一切作らない）, port=8765
 //   node src/index.js --storage hybrid      # 受信時はメモリ保持、image/file_path 要求時だけ inbox に保存
-//   BAG_VF_INBOX=/path BAG_VF_PORT=8765 BAG_VF_STORAGE=hybrid node src/index.js
+//   node src/index.js --storage disk        # 受信ごとに inbox へ即時保存（再起動を跨ぐ永続化・retention 用）
+//   node src/index.js --inbox ./.ai-inbox --port 8765   # 明示指定すると「固定」され拡張の報告で上書きされない
+//   BAG_VF_INBOX=/path BAG_VF_PORT=8765 BAG_VF_STORAGE=disk node src/index.js
 //
-// 既定 inbox は OS の Downloads を自動検出する（Win=レジストリ / Linux=XDG / mac=~/Downloads）。
+// storage 既定は memory: 合成PNG はメモリ保持のみで <Downloads>/ai-inbox/ を作らない（inbox 完全撤去）。
+//   image を読める CLI（Claude Code）は inline image、読めない CLI（Codex）は image/file_path 要求時に
+//   OS tmp へ一時 materialize した file_path か shot_url(?token=) で取得する。終了時に tmp は破棄される。
+//   再起動を跨ぐ永続化・履歴・retention が要る時だけ --storage disk（または hybrid）を明示する。
+//
+// inbox を使うモード（disk/hybrid）の既定 inbox は OS の Downloads を自動検出する（Win=レジストリ / Linux=XDG / mac=~/Downloads）。
 // さらに拡張が WS で報告する downloadsDir を採用して、ブラウザの実ダウンロード先（移動済み/Edge・Brave）に追従する。
 
 import { mkdirSync } from 'node:fs';
@@ -28,8 +34,15 @@ const getInbox = () => inboxState.dir;
 const port = Number(args.port || process.env.BAG_VF_PORT || 8765);
 const host = args.host || process.env.BAG_VF_HOST || '127.0.0.1';
 const token = loadOrCreateToken(args.token);
-const storageMode = normalizeStorageMode(args.storage || process.env.BAG_VF_STORAGE || 'disk');
+const storageMode = normalizeStorageMode(args.storage || process.env.BAG_VF_STORAGE || 'memory');
 const entryStore = createVisualFeedbackStore({ inboxDir: getInbox, storageMode });
+
+// 起動ログ用の storage モード説明（memory が既定 = inbox を作らない）。
+const STORAGE_DESC = {
+  memory: ' (inbox を作らない。image/file_path 要求時のみ OS tmp に一時 materialize し終了時破棄)',
+  hybrid: ' (context はメモリ、image/file_path 要求時だけ inbox に保存)',
+  disk: ' (受信ごとに inbox へ即時保存)',
+};
 
 // 共有 inbox の堆積掃除（既定 OFF・opt-in）。enabled の時だけ起動/定期/保存後/採用時に sweep する。
 const retentionPolicy = resolveRetentionPolicy({ args, env: process.env });
@@ -85,7 +98,7 @@ server.listen(port, host, () => {
   process.stderr.write(`[bag-vf] 拡張 push (WebSocket)  ws://${host}:${port}/ws\n`);
   process.stderr.write(`[bag-vf] 画像配信 (GET)         http://${host}:${port}/shot/<id>.png?token=…  (raw は /raw/<id>.png)\n`);
   process.stderr.write(`[bag-vf] inbox: ${getInbox()}${inboxState.pinned ? ' (固定)' : ' (自動検出。拡張の報告で更新される場合あり)'}\n`);
-  process.stderr.write(`[bag-vf] storage: ${storageMode}${storageMode === 'hybrid' ? ' (context はメモリ、image/file_path 時だけ保存)' : ' (即時保存)'}\n`);
+  process.stderr.write(`[bag-vf] storage: ${storageMode}${STORAGE_DESC[storageMode] || ''}\n`);
   process.stderr.write(`[bag-vf] latest freshness/window: ${effectiveLatestWindowMin}m (--latest-window-min / BAG_VF_LATEST_WINDOW_MIN)\n`);
   process.stderr.write(`[bag-vf] token: ${token}\n`);
   process.stderr.write(`[bag-vf]   ↑ これを拡張オプションの「視覚フィードバック デーモン」に貼る (保存先: ${tokenPath()})\n`);
@@ -103,14 +116,18 @@ server.listen(port, host, () => {
   }
 });
 
-process.on('SIGINT', () => {
+function shutdown() {
   if (sweepTimer) clearInterval(sweepTimer);
+  // memory モードが一時 materialize した OS tmp を破棄する（disk/hybrid は no-op）。
+  try {
+    entryStore.cleanup?.();
+  } catch {
+    /* tmp 後始末失敗は無視 */
+  }
   server.close(() => process.exit(0));
-});
-process.on('SIGTERM', () => {
-  if (sweepTimer) clearInterval(sweepTimer);
-  server.close(() => process.exit(0));
-});
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 function parseArgs(argv) {
   const out = {};
