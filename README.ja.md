@@ -19,6 +19,14 @@
 > クリックで残せるのは **💬メモ（AIへの指示）** と **🖍描画メモ（要素を円・四角・矢印・ペンで囲む）**。
 > **📌対象名（要素に決定的な名前を付ける）** / **🔘合図ボタン** は AI が付ける種類です。
 
+## デモ / Demo
+
+ブラウザ操作AIがAmazonで特定の商品を検索し、カートに入れるデモ動画です。
+
+<p align="center">
+  <video src="docs/media/browser-automation1_compressed.mp4" width="100%" controls></video>
+</p>
+
 ## コンセプト（なぜ決定的か）
 
 | 要件 | 実装 |

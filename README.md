@@ -22,6 +22,14 @@ deterministic verb registry** (`clickAffordance`, `fillAffordance`, `markElement
 Combined with **stable element IDs** and **Structured Outputs**, *the same prompt produces the same
 actions*.
 
+## Demo
+
+Here is a demo showing the browser-operating AI shopping on Amazon, searching for specific items, and adding them to the cart:
+
+<p align="center">
+  <video src="docs/media/browser-automation1_compressed.mp4" width="100%" controls></video>
+</p>
+
 ## Why guardrails?
 
 | Goal | How Browser Agent Guide delivers it |
