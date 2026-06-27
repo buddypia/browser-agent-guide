@@ -28,11 +28,9 @@
 
 브라우저 조작 AI가 아마존(Amazon)에서 특정 상품을 검색하고 장바구니에 담는 데모 동영상입니다.
 
-<p align="center">
-  <video src="docs/media/browser-automation1_compressed.mp4" width="100%" controls></video>
-  <br>
-  <a href="docs/media/browser-automation1_compressed.mp4">🎥 데모 동영상 직접 보기 (docs/media/browser-automation1_compressed.mp4)</a>
-</p>
+![Demo](docs/media/browser-automation1.gif)
+
+*애니메이션이 표시되지 않는 경우, [🎥 오리지널 MP4 동영상 직접 보기](docs/media/browser-automation1_compressed.mp4)를 클릭하세요.*
 
 ## 왜 가드레일인가
 

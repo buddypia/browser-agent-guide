@@ -23,11 +23,9 @@
 
 ブラウザ操作AIがAmazonで特定の商品を検索し、カートに入れるデモ動画です。
 
-<p align="center">
-  <video src="docs/media/browser-automation1_compressed.mp4" width="100%" controls></video>
-  <br>
-  <a href="docs/media/browser-automation1_compressed.mp4">🎥 デモ動画を直接再生する (docs/media/browser-automation1_compressed.mp4)</a>
-</p>
+![Demo](docs/media/browser-automation1.gif)
+
+*アニメーションが表示されない場合は、[🎥 オリジナルのMP4動画を直接再生](docs/media/browser-automation1_compressed.mp4)してください。*
 
 ## コンセプト（なぜ決定的か）
 
