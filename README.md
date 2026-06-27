@@ -26,11 +26,9 @@ actions*.
 
 Here is a demo showing the browser-operating AI shopping on Amazon, searching for specific items, and adding them to the cart:
 
-<p align="center">
-  <video src="docs/media/browser-automation1_compressed.mp4" width="100%" controls></video>
-  <br>
-  <a href="docs/media/browser-automation1_compressed.mp4">🎥 Watch the Amazon shopping demo video directly (docs/media/browser-automation1_compressed.mp4)</a>
-</p>
+![Demo](docs/media/browser-automation1.gif)
+
+*If the animation does not load, you can [🎥 watch the original MP4 video directly](docs/media/browser-automation1_compressed.mp4).*
 
 ## Why guardrails?
 

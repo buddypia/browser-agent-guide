@@ -28,11 +28,9 @@
 
 浏览器操作 AI 在亚马逊（Amazon）上搜索特定商品并将其加入购物车的演示视频：
 
-<p align="center">
-  <video src="docs/media/browser-automation1_compressed.mp4" width="100%" controls></video>
-  <br>
-  <a href="docs/media/browser-automation1_compressed.mp4">🎥 直接观看演示视频 (docs/media/browser-automation1_compressed.mp4)</a>
-</p>
+![Demo](docs/media/browser-automation1.gif)
+
+*如果动画未加载，您可以 [🎥 直接观看原始 MP4 视频](docs/media/browser-automation1_compressed.mp4)。*
 
 ## 为什么需要护栏
 
