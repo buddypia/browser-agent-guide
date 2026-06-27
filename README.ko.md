@@ -24,6 +24,14 @@
 > 클릭으로 붙이는 것은 **💬메모(AI에게 줄 지시)** 와 **🖍그리기(요소를 원/사각형/화살표/펜으로 둘러싸기)** 입니다.
 > **📌표식(요소에 결정적인 이름 부여)** / **🔘신호 버튼** 은 AI가 붙이는 종류입니다.
 
+## 데모 / Demo
+
+브라우저 조작 AI가 아마존(Amazon)에서 특정 상품을 검색하고 장바구니에 담는 데모 동영상입니다.
+
+<p align="center">
+  <video src="docs/media/browser-automation1_compressed.mp4" width="100%" controls></video>
+</p>
+
 ## 왜 가드레일인가
 
 | 목표 | Browser Agent Guide의 구현 |

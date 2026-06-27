@@ -24,6 +24,14 @@
 > 点击添加的是 **💬备注（给 AI 的指示）** 与 **🖍绘制（用圆/方框/箭头/笔围住元素）**。
 > **📌标记（为元素赋予确定性名称）** / **🔘提示按钮** 是由 AI 添加的种类。
 
+## 演示 / Demo
+
+浏览器操作 AI 在亚马逊（Amazon）上搜索特定商品并将其加入购物车的演示视频：
+
+<p align="center">
+  <video src="docs/media/browser-automation1_compressed.mp4" width="100%" controls></video>
+</p>
+
 ## 为什么需要护栏
 
 | 目标 | Browser Agent Guide 的实现 |
