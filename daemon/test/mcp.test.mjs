@@ -11,6 +11,7 @@ import { createHttpServer } from '../src/http.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const INBOX = resolve(here, 'fixtures/inbox');
 const NEWER = '2026-06-17T09-58-00-021Z';
+const OLDER = '2026-06-17T08-00-00-000Z';
 const FRESH_NOW = Date.parse('2026-06-17T10:10:00.000Z');
 const MIXED_FRESH_NOW = Date.parse('2026-06-20T10:10:00.000Z');
 const STALE_NOW = Date.parse('2026-06-17T12:00:00.000Z');
@@ -62,6 +63,7 @@ test('list_visual_feedback が新しい順に id を返す', async () => {
     const res = await client.callTool({ name: 'list_visual_feedback', arguments: {} });
     const text = res.content.find((c) => c.type === 'text').text;
     assert.ok(text.includes(`id=${NEWER}`));
+    assert.ok(text.includes('tab=tabId=321 windowId=9 index=2 active=true'));
     // 新しい方が先頭行
     assert.ok(text.split('\n')[0].includes(NEWER));
   });
@@ -111,13 +113,25 @@ test('get_latest_visual_feedback_context が image 無しで @agent と selector
     assert.ok(txt.text.includes('visual_feedback_context: image omitted'));
     assert.ok(txt.text.includes('agent="@agent:docs/api-list"'));
     assert.ok(txt.text.includes('selector="main h2"'));
+    assert.ok(txt.text.includes('chrome_tab: tabId=321 windowId=9 index=2 active=true'));
     assert.ok(txt.text.includes('candidate: source=nearest-link'));
     assert.ok(txt.text.includes('agent_lookup:'));
     assert.ok(txt.text.includes('image_gate: pass contextId='));
     assert.equal(res.structuredContent.id, NEWER);
+    assert.deepEqual(res.structuredContent.tab, { tabId: 321, windowId: 9, index: 2, active: true });
     assert.equal(res.structuredContent.annotations[0].dataAgentId, '@agent:docs/api-list');
     assert.equal(res.structuredContent.annotations[0].targetCandidates[0].dataAsin, 'B012345678');
     assert.equal(res.structuredContent.agentLookup.imageGate.contextId, NEWER);
+  });
+});
+
+test('get_latest_visual_feedback_context: tabId で同一URLの別タブを絞れる', async () => {
+  await withClient(async (client) => {
+    const res = await client.callTool({ name: 'get_latest_visual_feedback_context', arguments: { urlContains: 'example.com/api', tabId: 111 } });
+    assert.equal(res.structuredContent.id, OLDER);
+    assert.deepEqual(res.structuredContent.tab, { tabId: 111, windowId: 9, index: 0, active: false });
+    const text = res.content.find((c) => c.type === 'text').text;
+    assert.ok(text.includes('chrome_tab: tabId=111 windowId=9 index=0 active=false'));
   });
 });
 
@@ -212,8 +226,6 @@ test('get_visual_feedback_context: 不明 id は isError', async () => {
     assert.equal(res.isError, true);
   });
 });
-
-const OLDER = '2026-06-17T08-00-00-000Z'; // fixture: title="OLD"
 
 test('list_visual_feedback: titleContains で該当のみ（OLD で古い方だけ）', async () => {
   await withClient(async (client) => {
