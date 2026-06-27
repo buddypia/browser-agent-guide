@@ -290,6 +290,9 @@ async function getActiveTabState() {
   const rules = findMatchingRules(tab.url || '', settings.sites);
   return {
     tabId: tab.id,
+    windowId: tab.windowId,
+    tabIndex: tab.index,
+    tabActive: Boolean(tab.active),
     url: tab.url,
     title: tab.title,
     matched: rules.length > 0,
@@ -843,8 +846,10 @@ async function captureVisualFeedback({ tabId, autoSync = false }) {
     return { transport: 'skipped', reason: 'auto-sync-disabled' };
   }
   const tab = await chrome.tabs.get(tabId);
-  if (autoSync && !tab?.active) {
-    return { transport: 'skipped', reason: 'tab-not-active' };
+  const tabMeta = buildTabMetadata(tab);
+  if (!tab?.active) {
+    if (autoSync) return { transport: 'skipped', reason: 'tab-not-active' };
+    throw new Error(t('sw.err.captureTabNotActive'));
   }
 
   // 1) 注釈を px へ解決し、自前UIを隠す。
@@ -875,8 +880,8 @@ async function captureVisualFeedback({ tabId, autoSync = false }) {
 
   // 4) 保存。デーモン有効時は WebSocket push、未到達時は chrome.downloads にフォールバック。
   const capturedAt = new Date().toISOString();
-  const annotation = buildAnnotationJson({ data, composite, capturedAt });
-  const memo = buildMemoMarkdown({ data, composite, capturedAt });
+  const annotation = buildAnnotationJson({ data, composite, capturedAt, tab: tabMeta });
+  const memo = buildMemoMarkdown({ data, composite, capturedAt, tab: tabMeta });
   const common = {
     items: data.items.length,
     drawn: composite.drawn,
@@ -903,6 +908,7 @@ async function captureVisualFeedback({ tabId, autoSync = false }) {
           capturedAt,
           url: data.url,
           title: data.title,
+          tab: tabMeta,
           dpr: data.dpr,
           viewport: data.viewport,
           downloadsDir: (daemon.saveDir || '').trim() || knownDownloadsDir || undefined,
@@ -1115,12 +1121,22 @@ function textToDataUrl(text, mime) {
   return `data:${mime};charset=utf-8;base64,${btoa(bin)}`;
 }
 
-function buildAnnotationJson({ data, composite, capturedAt }) {
+function buildTabMetadata(tab) {
+  return {
+    tabId: Number.isInteger(tab?.id) ? tab.id : null,
+    windowId: Number.isInteger(tab?.windowId) ? tab.windowId : null,
+    index: Number.isInteger(tab?.index) ? tab.index : null,
+    active: Boolean(tab?.active),
+  };
+}
+
+function buildAnnotationJson({ data, composite, capturedAt, tab }) {
   return {
     schema: 'bag.visual-feedback/v0',
     url: data.url,
     title: data.title,
     capturedAt,
+    tab,
     dpr: data.dpr,
     viewport: data.viewport,
     image: {
@@ -1155,7 +1171,7 @@ function buildAnnotationJson({ data, composite, capturedAt }) {
   };
 }
 
-function buildMemoMarkdown({ data, composite, capturedAt }) {
+function buildMemoMarkdown({ data, composite, capturedAt, tab }) {
   const lines = [];
   lines.push(t('memo.title'));
   lines.push('');
@@ -1167,6 +1183,16 @@ function buildMemoMarkdown({ data, composite, capturedAt }) {
   lines.push(t('memo.urlLine', { url: data.url }));
   lines.push(t('memo.titleLine', { title: data.title }));
   lines.push(t('memo.capturedAt', { at: capturedAt }));
+  if (tab) {
+    lines.push(
+      t('memo.tabLine', {
+        tabId: tab.tabId ?? 'unknown',
+        windowId: tab.windowId ?? 'unknown',
+        index: tab.index == null ? 'unknown' : tab.index + 1,
+        active: tab.active ? t('memo.tabActiveYes') : t('memo.tabActiveNo'),
+      })
+    );
+  }
   lines.push(
     t('memo.imageLine', {
       width: composite.width,

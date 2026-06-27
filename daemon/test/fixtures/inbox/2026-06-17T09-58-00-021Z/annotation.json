@@ -3,6 +3,12 @@
   "url": "https://example.com/api",
   "title": "API",
   "capturedAt": "2026-06-17T09:58:00.021Z",
+  "tab": {
+    "tabId": 321,
+    "windowId": 9,
+    "index": 2,
+    "active": true
+  },
   "dpr": 2,
   "viewport": {
     "width": 1440,

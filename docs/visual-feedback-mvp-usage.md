@@ -24,7 +24,7 @@
 <ダウンロードフォルダ>/ai-inbox/<slug>/      # slug = {ローカル日時}__{ホスト}__{タイトル}__{ID}
   shot.png         # 注釈を焼き込んだ合成本（vision 1次）
   raw.png          # 注釈なしの元スクショ（位置ずれ比較・将来のデーモン用）
-  annotation.json  # 座標(frac)/selector/testid/intent/bbox（テキスト fallback）
+  annotation.json  # URL/title/Chrome tab + 座標(frac)/selector/testid/intent/bbox（テキスト fallback）
   memo.md          # 人間可読 + 各CLIでの画像の渡し方 + describeShapes
 ```
 
@@ -33,6 +33,7 @@
 1. `chrome://extensions` で「パッケージ化されていない拡張機能を読み込む」→ このリポジトリのルートを選択。
    （JS注入を使う場合は拡張詳細で「Allow User Scripts」も有効化。視覚フィードバックだけなら不要。）
 2. 対象ページを開き、拡張アイコンでサイドパネルを開く。
+   サイドパネル上部には対象 Chrome タブの `tabId` / `windowId` / タブ位置が表示される。
 3. 「お描き」で対象を円/四角/矢印/ペンで囲み、隣のメモに指示を書く（複数可）。
 4. お描きが保存されると、注釈パネル「このページの補足」の下に **「お描きを画像でAIへ」** が出る。
    それを押すと `Downloads/ai-inbox/<...>/` に4ファイルが保存される。
@@ -58,6 +59,9 @@
 最新のお描き注釈メタを **画像なし**で先に取得する。見た目の判断が必要な時だけ
 context の `id` を `contextId` に渡し、`imageReason` に理由を書いて
 `get_latest_visual_feedback` で **image+パス**を取得する（既定 inbox は MVP の保存先 `~/Downloads/ai-inbox`）。
+同じ URL を複数タブで開いている場合は、拡張に表示された `tabId` を
+`get_latest_visual_feedback_context({ tabId })` / `get_latest_visual_feedback({ tabId, contextId, imageReason })`
+へ渡して絞り込める。context には `tab: { tabId, windowId, index, active }` も含まれる。
 
 ```bash
 cd daemon && npm install && npm start   # http://127.0.0.1:8765/mcp
@@ -76,7 +80,7 @@ CLI 登録方法と検証は `daemon/README.md` を参照。WebSocket 常時 pus
 
 - 各注釈は「図形」+「角の丸数字①」+「すぐ隣のメモ吹き出し（先頭に同じ①）」を引き出し線で結んで描く。
   キーは丸数字に統一し、色見本の四角は使わない（AI が「①の指示＝この図形」と取り違えないため）。
-- `captureVisibleTab` は **可視領域のみ**。スクロール外/未解決の注釈は図形を描けず、左上のリストに「画面外」として出る。
+- `captureVisibleTab` は **可視領域のみ**で、対象タブがアクティブでなければ別タブを撮らずエラーにする。スクロール外/未解決の注釈は図形を描けず、左上のリストに「画面外」として出る。
 - cross-origin iframe / WebGL は黒く写る（ブラウザ仕様、回避不可）。
 - `chrome://` や拡張ページなど注入できないページでは保存できない（その旨エラー表示）。
 - フォルダ監視は無い。AI には人が `shot.png` を渡す（Phase 1 の MCP で自動化）。

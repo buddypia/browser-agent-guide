@@ -18,6 +18,9 @@ const els = {
   btnSettings: document.getElementById('btn-settings'),
   languageSelect: document.getElementById('language-select'),
   rememberScope: document.getElementById('remember-scope'),
+  targetTab: document.getElementById('target-tab'),
+  targetTabTitle: document.getElementById('target-tab-title'),
+  targetTabMeta: document.getElementById('target-tab-meta'),
   annoPanel: document.getElementById('anno-panel'),
   annoList: document.getElementById('anno-list'),
   annoFoot: document.getElementById('anno-foot'),
@@ -56,6 +59,9 @@ let suppressNextSettingsRefresh = false;
 
 let state = {
   tabId: null,
+  windowId: null,
+  tabIndex: null,
+  tabActive: false,
   url: '',
   title: '',
   pageKey: '',
@@ -119,6 +125,7 @@ function rerenderLocalizedContent() {
   renderWorkflow(state.workflow);
   renderWorkflowRun(state.workflowRun);
   if (state.activeTabState) renderBanner(state.activeTabState);
+  renderTargetTab(state.activeTabState);
   syncHistoryButton();
 }
 
@@ -194,6 +201,9 @@ async function refreshState() {
     const s = await send({ type: 'GET_ACTIVE_TAB_STATE' });
     state.activeTabState = s;
     state.tabId = s.tabId;
+    state.windowId = s.windowId ?? null;
+    state.tabIndex = s.tabIndex ?? null;
+    state.tabActive = Boolean(s.tabActive);
     state.url = s.url || '';
     state.title = s.title || '';
     state.rememberScope = normalizeRememberScope(s.rememberScope);
@@ -203,11 +213,28 @@ async function refreshState() {
       state.pageKey = nextPageKey;
       await loadChatHistory();
     }
+    renderTargetTab(s);
     renderBanner(s);
     refreshAnnotations();
   } catch (e) {
     showBanner(escapeHtml(t('errors.stateFetchFailed', { message: e.message })), false);
   }
+}
+
+function renderTargetTab(s = {}) {
+  const tabId = s?.tabId ?? state.tabId;
+  const windowId = s?.windowId ?? state.windowId;
+  const tabIndex = s?.tabIndex ?? state.tabIndex;
+  const title = s?.title || state.title || t('targetTab.unknownTitle');
+  const url = s?.url || state.url || '';
+  els.targetTabTitle.textContent = title;
+  els.targetTabTitle.title = url || title;
+  els.targetTabMeta.textContent = t('targetTab.meta', {
+    tabId: tabId ?? 'unknown',
+    windowId: windowId ?? 'unknown',
+    index: tabIndex == null ? 'unknown' : tabIndex + 1,
+  });
+  els.targetTabMeta.title = url || '';
 }
 
 function normalizeRememberScope(scope) {

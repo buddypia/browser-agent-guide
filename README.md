@@ -94,6 +94,8 @@ Toolbar:
 - **Inspect page**: **List elements** shows current operable elements.
 - **History** reuses sent prompts, also via ↑/↓ at the textarea edge. **Settings** opens AI connection, memory, recipe, and daemon settings.
 
+The side panel also shows the addressed Chrome tab (`tabId`, `windowId`, and tab position). Visual-feedback captures store the same tab metadata in `annotation.json` / `memo.md` and expose it through the daemon MCP context, so two tabs on the same URL can be disambiguated by passing `tabId` (or `windowId`) to the MCP tools.
+
 ### Drawing (circle/box/arrow/freehand around an element)
 
 Press **🖍 お描き/Draw** to enter drawing mode and sketch on the page (◯circle / ▭box / ↗arrow / ✎pen +
@@ -161,6 +163,8 @@ content-script (in the page / verb registry + executor)
 - `lib/prompt.js` — system prompt carrying the verb catalog + affordances
 - `lib/site-matcher.js` — URL / domain / regex matching
 - `lib/storage.js` — settings persistence
+
+The `tabId` is the live Chrome-session target for page actions. Visual-feedback exports additionally persist `{tabId, windowId, index, active}` as capture metadata; `tabId` is not a durable browser-history ID, but it is the right discriminator while the tabs are open.
 
 ## Security / privacy
 

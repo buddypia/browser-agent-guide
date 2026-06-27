@@ -142,6 +142,7 @@ function createMemoryEntry({ inboxDir, payload, now, taken }) {
     memo: payload?.memo || '',
     url: payload?.annotation?.url || payload?.url || '',
     title: payload?.annotation?.title || payload?.title || '',
+    tab: payload?.annotation?.tab || payload?.tab || null,
     files: [],
   };
 }
@@ -161,10 +162,10 @@ function trimMemory(memory, memoryLimit) {
   if (memory.length > limit) memory.splice(limit);
 }
 
-function memoryMatches(memory, { urlContains, titleContains, limit = 20 } = {}) {
+function memoryMatches(memory, { urlContains, titleContains, tabId, windowId, limit = 20 } = {}) {
   const out = [];
   for (const entry of memory) {
-    if (!matchesFilter(entry.annotation || entry, { urlContains, titleContains })) continue;
+    if (!matchesFilter(entry.annotation || entry, { urlContains, titleContains, tabId, windowId })) continue;
     out.push(entry);
     if (out.length >= Math.max(1, limit)) break;
   }

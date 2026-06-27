@@ -83,6 +83,7 @@ test('hybrid store: context はメモリから返し、image 要求時だけ inb
         url: 'https://hybrid.example/page',
         title: 'Hybrid Capture',
         capturedAt: '2026-06-18T01:02:03.004Z',
+        tab: { tabId: 44, windowId: 5, index: 1, active: true },
         items: [{ n: 1, note: 'memory only', selector: '#target' }],
       },
       memo: '# memo\n',
@@ -104,8 +105,15 @@ test('hybrid store: context はメモリから返し、image 要求時だけ inb
       assert.equal(contextRes.structuredContent.id, ack.id);
       assert.equal(contextRes.structuredContent.storage, 'memory');
       assert.equal(contextRes.structuredContent.materialized, false);
+      assert.deepEqual(contextRes.structuredContent.tab, { tabId: 44, windowId: 5, index: 1, active: true });
       assert.equal(contextRes.structuredContent.annotations[0].selector, '#target');
       assert.equal(existsSync(join(ack.dir, 'shot.png')), false, 'context 取得でも disk に保存しない');
+
+      const scopedByTab = await client.callTool({
+        name: 'get_latest_visual_feedback_context',
+        arguments: { tabId: 44 },
+      });
+      assert.equal(scopedByTab.structuredContent.id, ack.id, 'memory entry も tabId で絞れる');
 
       const imageRes = await client.callTool({
         name: 'get_latest_visual_feedback',

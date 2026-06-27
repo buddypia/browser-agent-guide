@@ -70,6 +70,7 @@ test('buildEntryContext: image 無しの軽量文脈に @agent と selector を�
   const entry = findEntry(INBOX, NEWER);
   const context = buildEntryContext(entry);
   assert.equal(context.id, NEWER);
+  assert.deepEqual(context.tab, { tabId: 321, windowId: 9, index: 2, active: true });
   assert.equal(context.annotations[0].dataAgentId, '@agent:docs/api-list');
   assert.equal(context.annotations[0].selector, 'main h2');
   assert.equal(context.annotations[0].targetCandidates[0].href, 'https://example.com/dp/B012345678');
@@ -77,6 +78,7 @@ test('buildEntryContext: image 無しの軽量文脈に @agent と selector を�
   assert.equal(context.agentLookup.imageGate.contextId, NEWER);
   const text = buildEntryContextText(context);
   assert.ok(text.includes('visual_feedback_context: image omitted'));
+  assert.ok(text.includes('chrome_tab: tabId=321 windowId=9 index=2 active=true'));
   assert.ok(text.includes('agent_lookup:'));
   assert.ok(text.includes("source_search: rg -n 'data-agent-id=\"@agent:'"));
   assert.ok(text.includes(`image_gate: pass contextId="${NEWER}"`));
@@ -86,14 +88,18 @@ test('buildEntryContext: image 無しの軽量文脈に @agent と selector を�
   assert.ok(text.includes('href="https://example.com/dp/B012345678"'));
 });
 
-test('matchesFilter: url/title の部分一致（大文字小文字無視）。未指定は素通し', () => {
-  const ann = { url: 'https://example.com/API', title: 'API ダッシュボード' };
+test('matchesFilter: url/title/tab の条件一致。未指定は素通し', () => {
+  const ann = { url: 'https://example.com/API', title: 'API ダッシュボード', tab: { tabId: 321, windowId: 9 } };
   assert.equal(matchesFilter(ann, {}), true);
   assert.equal(matchesFilter(ann, { urlContains: 'example.com' }), true);
   assert.equal(matchesFilter(ann, { urlContains: 'EXAMPLE' }), true); // 大小無視
   assert.equal(matchesFilter(ann, { urlContains: 'other.com' }), false);
   assert.equal(matchesFilter(ann, { titleContains: 'ダッシュボード' }), true);
   assert.equal(matchesFilter(ann, { urlContains: 'example.com', titleContains: '存在しない' }), false); // AND
+  assert.equal(matchesFilter(ann, { tabId: 321 }), true);
+  assert.equal(matchesFilter(ann, { tabId: 111 }), false);
+  assert.equal(matchesFilter(ann, { windowId: 9 }), true);
+  assert.equal(matchesFilter(ann, { windowId: 10 }), false);
 });
 
 test('queryEntries: フィルタで該当 slug だけ返し、url/title/capturedAt メタを付与', () => {
@@ -102,8 +108,11 @@ test('queryEntries: フィルタで該当 slug だけ返し、url/title/captured
   assert.equal(hit.length, 2);
   assert.ok(hit.every((e) => e.url === 'https://example.com/api'));
   assert.ok('title' in hit[0]);
+  assert.deepEqual(hit[0].tab, { tabId: 321, windowId: 9, index: 2, active: true });
   assert.ok('capturedAt' in hit[0], 'capturedAt メタも付与');
   assert.equal(hit[0].capturedAt, '2026-06-17T09:58:00.021Z');
+  assert.deepEqual(queryEntries(INBOX, { tabId: 321 }).map((e) => e.id), [NEWER]);
+  assert.deepEqual(queryEntries(INBOX, { tabId: 111 }).map((e) => e.id), [OLDER]);
   assert.equal(queryEntries(INBOX, { urlContains: 'no-such-project' }).length, 0);
 });
 

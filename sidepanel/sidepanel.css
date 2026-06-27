@@ -102,6 +102,52 @@ textarea:focus-visible {
   flex: 0 0 auto;
 }
 
+.target-tab {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.target-tab-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.target-tab-kicker {
+  color: #7dd3c7;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.target-tab-title,
+.target-tab-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-tab-title {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.target-tab-meta {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
 .language-control {
   display: inline-grid;
   grid-template-columns: 18px minmax(38px, auto);

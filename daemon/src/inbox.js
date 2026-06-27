@@ -161,9 +161,9 @@ export function findEntry(inboxDir, id, scan = 500) {
   return { id, dir, shot, mtime };
 }
 
-// annotation の url/title が部分一致するか（複数プロジェクトが1つの inbox に積まれる時の絞り込み）。
+// annotation の url/title/tab が一致するか（複数プロジェクト・同一URL複数タブの絞り込み）。
 // urlContains/titleContains は大文字小文字を無視する部分一致。未指定の条件は素通し。
-export function matchesFilter(annotation, { urlContains, titleContains } = {}) {
+export function matchesFilter(annotation, { urlContains, titleContains, tabId, windowId } = {}) {
   if (urlContains) {
     const u = String(annotation?.url || '').toLowerCase();
     if (!u.includes(String(urlContains).toLowerCase())) return false;
@@ -172,19 +172,53 @@ export function matchesFilter(annotation, { urlContains, titleContains } = {}) {
     const t = String(annotation?.title || '').toLowerCase();
     if (!t.includes(String(titleContains).toLowerCase())) return false;
   }
+  if (!filterNumberMatches(annotation?.tab?.tabId, tabId)) return false;
+  if (!filterNumberMatches(annotation?.tab?.windowId, windowId)) return false;
   return true;
 }
 
-// 新しい順スキャン + url/title フィルタ。each entry に {url,title} メタを付けて返す。
-export function queryEntries(inboxDir, { urlContains, titleContains, limit = 20, scan = 500 } = {}) {
+// 新しい順スキャン + url/title/tab フィルタ。each entry に {url,title,tab} メタを付けて返す。
+export function queryEntries(inboxDir, { urlContains, titleContains, tabId, windowId, limit = 20, scan = 500 } = {}) {
   const out = [];
   for (const e of listEntries(inboxDir, scan)) {
     const annotation = readAnnotation(e.dir);
-    if (!matchesFilter(annotation, { urlContains, titleContains })) continue;
-    out.push({ ...e, url: annotation?.url || '', title: annotation?.title || '', capturedAt: annotation?.capturedAt || '' });
+    if (!matchesFilter(annotation, { urlContains, titleContains, tabId, windowId })) continue;
+    out.push({
+      ...e,
+      url: annotation?.url || '',
+      title: annotation?.title || '',
+      capturedAt: annotation?.capturedAt || '',
+      tab: normalizeTabMetadata(annotation?.tab),
+    });
     if (out.length >= Math.max(1, limit)) break;
   }
   return out;
+}
+
+function filterNumberMatches(value, expected) {
+  if (expected == null) return true;
+  return Number.isInteger(value) && value === Number(expected);
+}
+
+function normalizeTabMetadata(tab) {
+  if (!tab || typeof tab !== 'object') return null;
+  const out = {};
+  if (Number.isInteger(tab.tabId)) out.tabId = tab.tabId;
+  if (Number.isInteger(tab.windowId)) out.windowId = tab.windowId;
+  if (Number.isInteger(tab.index)) out.index = tab.index;
+  if (typeof tab.active === 'boolean') out.active = tab.active;
+  return Object.keys(out).length ? out : null;
+}
+
+function tabSummary(tab) {
+  if (!tab) return '';
+  const parts = [
+    Number.isInteger(tab.tabId) && `tabId=${tab.tabId}`,
+    Number.isInteger(tab.windowId) && `windowId=${tab.windowId}`,
+    Number.isInteger(tab.index) && `index=${tab.index}`,
+    typeof tab.active === 'boolean' && `active=${tab.active}`,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' ') : '';
 }
 
 // 引数なし latest が「別プロジェクトのキャプチャ」にサイレントに乗っ取られないための曖昧検知。
@@ -264,6 +298,7 @@ export function buildEntryContext(entry, { shotUrlFor } = {}) {
     url: annotation.url || entry.url || '',
     title: annotation.title || entry.title || '',
     capturedAt: annotation.capturedAt || '',
+    tab: normalizeTabMetadata(annotation.tab || entry.tab),
     viewport: annotation.viewport || null,
     image: annotation.image || null,
     annotations: items.map((it) => ({
@@ -313,6 +348,8 @@ export function buildEntryContextText(context) {
   if (context.url) lines.push(`url: ${context.url}`);
   if (context.title) lines.push(`title: ${context.title}`);
   if (context.capturedAt) lines.push(`captured_at: ${context.capturedAt}`);
+  const contextTab = tabSummary(context.tab);
+  if (contextTab) lines.push(`chrome_tab: ${contextTab}  (tabId is Chrome-session scoped)`);
   if (context.viewport) lines.push(`viewport: ${context.viewport.width}x${context.viewport.height}`);
   lines.push('agent_lookup:');
   lines.push('  priority: dataAgentId -> selector -> testid -> anchorLabel -> targetCandidates -> image');
@@ -424,6 +461,8 @@ export function buildEntryText(entry, annotation, { shotUrlFor } = {}) {
   if (annotation?.url) lines.push(`url: ${annotation.url}`);
   if (annotation?.title) lines.push(`title: ${annotation.title}`);
   if (annotation?.capturedAt) lines.push(`captured_at: ${annotation.capturedAt}`);
+  const annotationTab = tabSummary(normalizeTabMetadata(annotation?.tab || entry?.tab));
+  if (annotationTab) lines.push(`chrome_tab: ${annotationTab}  (tabId is Chrome-session scoped)`);
   const items = Array.isArray(annotation?.items) ? annotation.items : [];
   if (items.length) {
     lines.push('annotations:');

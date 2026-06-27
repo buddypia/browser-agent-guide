@@ -75,6 +75,9 @@ async function installChromeMock(page, seed = {}) {
         case 'GET_ACTIVE_TAB_STATE':
           return {
             tabId: 1,
+            windowId: 2,
+            tabIndex: 0,
+            tabActive: true,
             url: 'https://example.com/app',
             title: 'Example App',
             rememberScope: 'page',
@@ -160,7 +163,7 @@ async function installChromeMock(page, seed = {}) {
         // サイドパネルは init 時に自前で active tab を解決し、SW 往復を待たずに
         // 当該ページのチャット履歴を先読みする(primeChatHistory)。
         async query() {
-          return [{ id: 1, url: 'https://example.com/app', title: 'Example App' }];
+          return [{ id: 1, windowId: 2, index: 0, active: true, url: 'https://example.com/app', title: 'Example App' }];
         },
         onActivated: { addListener() {} },
         onUpdated: { addListener() {} },
@@ -190,6 +193,8 @@ test.describe('UI quality gates', () => {
     await page.goto(pageUrl('sidepanel/sidepanel.html'));
 
     await expect(page.getByRole('heading', { name: 'Start by typing an instruction' })).toBeVisible();
+    await expect(page.getByLabel('Target tab')).toContainText('Example App');
+    await expect(page.getByLabel('Target tab')).toContainText('Tab 1 / Window 2 / Pos 1');
     await expect(page.getByLabel('Language')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Add note' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Copy for AI' })).toBeVisible();
