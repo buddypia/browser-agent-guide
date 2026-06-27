@@ -30,6 +30,8 @@
 
 <p align="center">
   <video src="docs/media/browser-automation1_compressed.mp4" width="100%" controls></video>
+  <br>
+  <a href="docs/media/browser-automation1_compressed.mp4">🎥 直接观看演示视频 (docs/media/browser-automation1_compressed.mp4)</a>
 </p>
 
 ## 为什么需要护栏

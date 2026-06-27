@@ -28,6 +28,8 @@ Here is a demo showing the browser-operating AI shopping on Amazon, searching fo
 
 <p align="center">
   <video src="docs/media/browser-automation1_compressed.mp4" width="100%" controls></video>
+  <br>
+  <a href="docs/media/browser-automation1_compressed.mp4">🎥 Watch the Amazon shopping demo video directly (docs/media/browser-automation1_compressed.mp4)</a>
 </p>
 
 ## Why guardrails?

@@ -30,6 +30,8 @@
 
 <p align="center">
   <video src="docs/media/browser-automation1_compressed.mp4" width="100%" controls></video>
+  <br>
+  <a href="docs/media/browser-automation1_compressed.mp4">🎥 데모 동영상 직접 보기 (docs/media/browser-automation1_compressed.mp4)</a>
 </p>
 
 ## 왜 가드레일인가
