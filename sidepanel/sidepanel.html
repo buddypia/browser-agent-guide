@@ -65,10 +65,21 @@
         </div>
       </div>
       <section id="target-tab" class="target-tab" aria-label="Target tab" data-i18n-aria-label="targetTab.label">
-        <div class="target-tab-main">
+        <div class="target-tab-head">
           <span class="target-tab-kicker" data-i18n="targetTab.kicker">Target tab</span>
-          <span id="target-tab-title" class="target-tab-title" data-i18n="targetTab.unknownTitle">No active tab</span>
+          <button id="btn-copy-tab-id" class="target-tab-id" type="button" title="Copy tab ID" aria-label="Copy tab ID" disabled>
+            <span class="target-tab-id-label" data-i18n="targetTab.idLabel">Tab ID</span>
+            <span id="target-tab-id-value" class="target-tab-id-value">—</span>
+            <svg class="target-tab-id-icon copy-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="8" y="8" width="11" height="11" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
+            </svg>
+            <svg class="target-tab-id-icon copied-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          </button>
         </div>
+        <span id="target-tab-title" class="target-tab-title" data-i18n="targetTab.unknownTitle">No active tab</span>
         <div id="target-tab-meta" class="target-tab-meta"></div>
       </section>
       <div class="toolbar">

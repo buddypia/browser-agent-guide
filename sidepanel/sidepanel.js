@@ -21,6 +21,8 @@ const els = {
   targetTab: document.getElementById('target-tab'),
   targetTabTitle: document.getElementById('target-tab-title'),
   targetTabMeta: document.getElementById('target-tab-meta'),
+  btnCopyTabId: document.getElementById('btn-copy-tab-id'),
+  targetTabIdValue: document.getElementById('target-tab-id-value'),
   annoPanel: document.getElementById('anno-panel'),
   annoList: document.getElementById('anno-list'),
   annoFoot: document.getElementById('anno-foot'),
@@ -75,10 +77,13 @@ let state = {
   workflow: { recording: false, steps: [], saved: [] },
   workflowRun: { active: false, doneStepIds: [] },
   busy: false,
+  copiedTabId: null,
   // メモ(picker)/描画(drawing)モードがページ側で有効か。両モードは content 側で
   // 排他なので 1 フラグで扱い、サイドパネルにフォーカスがある状態の ESC を拾うために使う。
   pickerActive: false,
 };
+
+let copyTabIdResetTimer = null;
 
 function t(key, values) {
   return i18n?.t(key, values) ?? key;
@@ -227,14 +232,48 @@ function renderTargetTab(s = {}) {
   const tabIndex = s?.tabIndex ?? state.tabIndex;
   const title = s?.title || state.title || t('targetTab.unknownTitle');
   const url = s?.url || state.url || '';
+  const tabIdText = tabId == null ? '—' : String(tabId);
+  const copyTitle =
+    tabId == null ? t('targetTab.copyUnavailable') : t('targetTab.copyTitle', { tabId: tabIdText });
+  els.targetTabIdValue.textContent = tabIdText;
+  els.btnCopyTabId.disabled = tabId == null;
+  els.btnCopyTabId.title = copyTitle;
+  els.btnCopyTabId.setAttribute('aria-label', copyTitle);
+  if (state.copiedTabId !== tabIdText) els.btnCopyTabId.classList.remove('copied');
   els.targetTabTitle.textContent = title;
   els.targetTabTitle.title = url || title;
   els.targetTabMeta.textContent = t('targetTab.meta', {
-    tabId: tabId ?? 'unknown',
     windowId: windowId ?? 'unknown',
     index: tabIndex == null ? 'unknown' : tabIndex + 1,
   });
   els.targetTabMeta.title = url || '';
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const ok = document.execCommand('copy');
+  textarea.remove();
+  if (!ok) throw new Error(t('errors.clipboardUnavailable'));
+}
+
+function markTabIdCopied(tabId) {
+  state.copiedTabId = String(tabId);
+  els.btnCopyTabId.classList.add('copied');
+  clearTimeout(copyTabIdResetTimer);
+  copyTabIdResetTimer = setTimeout(() => {
+    if (state.copiedTabId === String(tabId)) state.copiedTabId = null;
+    els.btnCopyTabId.classList.remove('copied');
+  }, 1400);
 }
 
 function normalizeRememberScope(scope) {
@@ -768,6 +807,22 @@ els.languageSelect.addEventListener('change', (e) => {
   changeLanguage(e.target.value);
 });
 
+els.btnCopyTabId.addEventListener('click', async () => {
+  if (state.tabId == null) await refreshState();
+  if (state.tabId == null) {
+    showBanner(escapeHtml(t('errors.targetTabMissing')), false);
+    return;
+  }
+  const tabId = String(state.tabId);
+  try {
+    await copyTextToClipboard(tabId);
+    markTabIdCopied(tabId);
+    showBanner(escapeHtml(t('targetTab.copied', { tabId })), true);
+  } catch (e) {
+    showBanner(escapeHtml(t('errors.tabIdCopyFailed', { message: e.message })), false);
+  }
+});
+
 // 「メモを残す」: ページ上で要素をクリックしてメモを残すモードを開始。
 els.btnPick.addEventListener('click', async () => {
   if (state.tabId == null) await refreshState();
@@ -848,7 +903,7 @@ els.btnContext.addEventListener('click', async () => {
   try {
     const res = await send({ type: 'EXPORT_CONTEXT', tabId: state.tabId });
     const text = res?.text || '';
-    await navigator.clipboard.writeText(text);
+    await copyTextToClipboard(text);
     addMessage('assistant', t('context.copied', { text }));
   } catch (e) {
     addMessage('error', t('errors.contextCopyFailed', { message: e.message }));
