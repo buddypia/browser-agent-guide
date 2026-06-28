@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 0 # check-staleness の merge-base 比較に履歴が必要
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22 # node --test のグロブ展開(test:glossary)は Node 21+ が必要
       - name: validate (schema / refs / freshness / markers)
         run: node scripts/glossary/validate.mjs
       - name: staleness (code change must re-verify bound terms)
