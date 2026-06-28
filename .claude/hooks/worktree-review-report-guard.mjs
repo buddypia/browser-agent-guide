@@ -4,8 +4,9 @@
  * worktree-review-report-guard.mjs — Stop Hook
  *
  * 본 세션이 소유한 worktree 에 **commit 된 작업(unmerged ≥ 1)** 이 있는데, 사람이
- * 리뷰할 수 있는 구조화 레포트(`REVIEW.md`)가 부재 / 미완성 / stale 이면 Stop 을 BLOCK 한다.
- * = "worktree 에서 작업이 끝났으면, 사람이 리뷰할 본문을 반드시 출력해야 한다" 의 결정론적 강제.
+ * merge/cleanup 승인 여부를 판단할 수 있는 구조화 승인依頼レビュー(`REVIEW.md`)가 부재 /
+ * 미완성 / stale 이면 Stop 을 BLOCK 한다.
+ * = "worktree 에서 작업이 끝났으면, 사람이 리뷰/승인할 본문을 반드시 출력해야 한다" 의 결정론적 강제.
  *
  * 정책 SSOT: R-CM-030 (worktree-auto-ship.md) — "Worktree Review Report Gate" 절.
  *   기존 `pre-ship-review-guard` 는 마커 *존재만* 검사하여 "패널 없이 마커 생성 후 ship" 우회가
@@ -205,10 +206,10 @@ function sectionTitle(key) {
 
 export function buildBlockMessage(projectDir, candidates) {
   const lines = [
-    '[worktree-review-report-guard] Stop 차단: worktree 작업 완료 — 사람이 리뷰할 REVIEW.md 가 필요합니다.',
+    '[worktree-review-report-guard] Stop 차단: worktree 작업 완료 — 사람이 승인 판단할 REVIEW.md 가 필요합니다.',
     '',
     '사용자 정책 (R-CM-030 Worktree Review Report Gate): worktree 에서 commit 한 작업은 최종 응답 전,',
-    '사람이 머지 여부를 판단할 수 있는 구조화 레포트(REVIEW.md)를 반드시 출력해야 합니다.',
+    '사람이 merge / cleanup 진행 여부를 판단할 수 있는 구조화 승인依頼レビュー(REVIEW.md)를 반드시 출력해야 합니다.',
     'pre-ship-review-guard 의 마커 검사만으로는 본문 출력이 보장되지 않으므로, 본 gate 가 REVIEW.md 본문을 검증합니다.',
     '',
     '대상 worktree:',
@@ -225,10 +226,8 @@ export function buildBlockMessage(projectDir, candidates) {
   }
   lines.push('');
   lines.push('進め方:');
-  lines.push('  1. 各 worktree の REVIEW.md に次の9セクションを記述（trivial 변경도 헤더는 유지・본문 축약可）:');
-  lines.push('       Summary/概要(作業内容) · Why/なぜ · Changed Files/変更ファイル · How/作業方法 ·');
-  lines.push('       Impact/影響範囲 · Trade-offs/トレードオフ · Remaining Work/残作業 ·');
-  lines.push('       File Structure/フォルダー構造 · Review Requests/レビュー依頼(確認してほしい項目)');
+  lines.push('  1. 各 worktree の REVIEW.md に次の11セクションを記述（trivial 변경도 헤더는 유지・본문 축약可）:');
+  lines.push(`       ${REQUIRED_SECTIONS.map((s) => s.title).join(' · ')}`);
   lines.push('     雛形生成 (任意): node .claude/scripts/mark-worktree-reviewed.mjs <branch> --scaffold');
   lines.push('  2. 記述後、現在 HEAD で stamp + 検証:');
   for (const c of candidates) {

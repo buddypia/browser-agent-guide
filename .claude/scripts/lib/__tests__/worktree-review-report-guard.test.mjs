@@ -33,15 +33,17 @@ const PORCELAIN = [
 function validReport() {
   return [
     `<!-- bag-review: head=${SHA} -->`,
-    '## Summary / 概要', 'a',
-    '## Why / なぜ', 'a',
-    '## Changed Files / 変更ファイル', 'a',
-    '## How / 作業方法', 'a',
-    '## Impact / 影響範囲', 'a',
-    '## Trade-offs / トレードオフ', 'a',
-    '## Remaining Work / 残作業', 'a',
-    '## File Structure / フォルダー構造', 'a',
-    '## Review Requests / レビュー依頼', 'a',
+    '## 1. 承認依頼', '承認して進める / 修正が必要 / 停止する',
+    '## 2. 状態サマリー', '- Worktree path: .worktrees/feature/foo',
+    '## 3. Worktree のコミット情報', '- Commit count: 1',
+    '## 4. PR Draft', '- PR status: not created',
+    '## 5. 修正 / 追加したファイル', 'content/content-script.js',
+    '## 6. 変更内容', '| Path | 種別 | 役割 | 変更理由 |\n| --- | --- | --- | --- |\n| x | EDIT | y | z |',
+    '## 7. なぜ修正したか', '- 背景: a',
+    '## 8. トレードオフ', '- 採用案: a',
+    '## 9. リスク / Rollback', '- Rollback 方法: revert',
+    '## 10. セッション内の残タスク', '- なし / あり: なし',
+    '## 11. セッション内の問題点や改善点', '- 問題点: なし',
   ].join('\n');
 }
 
@@ -146,10 +148,10 @@ test('isEscapeHatchBranch: hotfix/* + hotfix-*', () => {
 
 test('buildBlockMessage: 미작성 섹션 제목 포함 + throw 없음', () => {
   const msg = buildBlockMessage(PROJECT, [
-    { path: '/repo/.worktrees/feature/foo', branch: 'feature/foo', unmerged: 2, present: true, missing: ['impact', 'review_requests'], stale: false, reportPath: '/repo/.worktrees/feature/foo/.tmp/worktree-feature__foo/REVIEW.md' },
+    { path: '/repo/.worktrees/feature/foo', branch: 'feature/foo', unmerged: 2, present: true, missing: ['risks_rollback', 'session_issues'], stale: false, reportPath: '/repo/.worktrees/feature/foo/.tmp/worktree-feature__foo/REVIEW.md' },
   ]);
-  assert.match(msg, /Impact/);
-  assert.match(msg, /Review Requests/);
+  assert.match(msg, /リスク \/ Rollback/);
+  assert.match(msg, /セッション内の問題点や改善点/);
   assert.match(msg, /feature\/foo/);
   assert.match(msg, /mark-worktree-reviewed/);
 });

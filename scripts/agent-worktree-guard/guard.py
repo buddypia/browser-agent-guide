@@ -18,10 +18,9 @@ from typing import Any
 
 
 PROMPT_QUESTION = (
-    "すべてのworktreeの作業が完了しました。PR（プルリクエスト）を作成しますか？\n"
-    "(모든 worktree 작업이 완료되었습니다. PR(풀 리퀘스트)을 생성하시겠습니까?)"
+    "以下の worktree 作業は完了状態です。\n"
+    "内容を確認し、merge / cleanup に進めてよいか承認してください。"
 )
-PROMPT = PROMPT_QUESTION
 
 TOOL_NAME = "Agent Worktree Guard"
 SCHEMA_VERSION = "1.0"
@@ -558,113 +557,54 @@ def find_review_report(worktree_path: Path, branch: str | None) -> tuple[Path | 
     return None, None
 
 
-def review_sections(content: str) -> list[tuple[str, list[str]]]:
-    """markdown を heading 境界で分解し `(heading, body行)` を返す。code fence 内の `#` は heading
-    扱いしない。review-report.mjs#splitSections の最小移植 (briefing 表示用)。"""
-    sections: list[tuple[str, list[str]]] = []
-    heading: str | None = None
-    body: list[str] = []
-    in_code = False
-    for line in content.splitlines():
-        if re.match(r"^\s*```", line):
-            in_code = not in_code
-            if heading is not None:
-                body.append(line)
-            continue
-        match = None if in_code else re.match(r"^\s{0,3}#{1,6}\s+(.*\S)\s*$", line)
-        if match:
-            if heading is not None:
-                sections.append((heading, body))
-            heading = match.group(1).strip()
-            body = []
-        elif heading is not None:
-            body.append(line)
-    if heading is not None:
-        sections.append((heading, body))
-    return sections
-
-
-def summarize_review_body(body: list[str], limit: int = 2) -> list[str]:
-    """body から HTML コメント(scaffold ガイド)と空行を除き、先頭 limit 行に clip。"""
-    cleaned: list[str] = []
-    for line in body:
-        stripped = re.sub(r"<!--.*?-->", "", line).strip()
-        if not stripped:
-            continue
-        cleaned.append(stripped)
-        if len(cleaned) >= limit:
-            break
-    return cleaned
+def strip_review_stamp(content: str) -> str:
+    """REVIEW.md の HEAD stamp は gate 用メタデータなので human briefing からは外す。"""
+    return re.sub(r"<!--\s*bag-review:\s*head\s*=[0-9a-fA-F_]+[^>]*-->\n?", "", content).strip()
 
 
 def render_review_brief(root: Path, wt_path: Path, branch: str | None) -> list[str]:
-    """worktree の REVIEW.md(= 人間レビュー項目)を briefing 用に要約。
-    存在すれば概要/なぜ/何を/どうやって/影響/トレードオフ/残作業/ファイル構造/レビュー依頼の
-    各見出しと要点を出し、無ければ scaffold 作成を促す(Stop の review gate が完成まで block する)。"""
+    """worktree の REVIEW.md(= 承認依頼レビュー)を briefing 用に出力。
+    存在すれば 11 セクション本文をそのまま出し、無ければ scaffold 作成を促す
+    (Stop の review gate が完成まで block する)。"""
     review_path, review_text = find_review_report(wt_path, branch)
     if review_text:
-        lines = [f"  human review (REVIEW.md): {relative_display(review_path, root)}"]
-        for heading, raw_body in review_sections(review_text):
-            summary = summarize_review_body(raw_body)
-            if summary:
-                lines.append(f"    - {heading}: {summary[0]}")
-                lines.extend(f"      {extra}" for extra in summary[1:])
-            else:
-                lines.append(f"    - {heading}")
-        return lines
+        body = strip_review_stamp(review_text)
+        return [
+            f"REVIEW.md: {relative_display(review_path, root)}",
+            "",
+            body,
+        ]
     scaffold_branch = branch if branch else "<branch>"
     return [
-        "  human review (REVIEW.md): 未作成 — 人間レビュー項目を作成してください:",
-        "    概要 / なぜ / 何を / どうやって / 影響 / トレードオフ / 残作業 / ファイル構造 / レビュー依頼",
-        f"    node .claude/scripts/mark-worktree-reviewed.mjs {scaffold_branch} --scaffold",
-        "    (Stop の worktree-review-report-guard が REVIEW.md 完成まで停止を block します)",
+        "# Worktree 承認依頼レビュー",
+        "",
+        f"REVIEW.md: 未作成 — {relative_display(wt_path, root)}",
+        "",
+        "11 セクションの承認依頼レビューを作成してください:",
+        f"  node .claude/scripts/mark-worktree-reviewed.mjs {scaffold_branch} --scaffold",
+        "  (Stop の worktree-review-report-guard が REVIEW.md 完成まで停止を block します)",
     ]
 
 
 def render_worktree_brief(root: Path, item: dict[str, Any]) -> list[str]:
     wt_path = Path(str(item["path"]))
-    branch = item.get("branch") or "(detached)"
-    base, commit_count = first_git_range(wt_path, item)
-    done_reason = item.get("done_reason") or "done"
-    lines = [
-        f"- branch: {branch}",
-        f"  path: {relative_display(wt_path, root)}",
-        f"  state: {item.get('status', 'open')} / {done_reason}",
-    ]
-    if commit_count is not None:
-        lines.append(f"  commits ahead of {base}: {commit_count}")
-    else:
-        lines.append("  commits ahead: unavailable")
-
-    if base:
-        log = clipped_lines(git_text(["log", "--oneline", "--max-count=5", f"{base}..HEAD"], wt_path), 5)
-        if log:
-            lines.append("  recent commits:")
-            lines.extend([f"    {line}" for line in log])
-        changed = clipped_lines(git_text(["diff", "--name-status", f"{base}...HEAD"], wt_path), 12)
-        if changed:
-            lines.append("  changed files:")
-            lines.extend([f"    {line}" for line in changed])
     branch_raw = item.get("branch")
-    lines.extend(render_review_brief(root, wt_path, branch_raw if isinstance(branch_raw, str) and branch_raw else None))
-    return lines
+    return render_review_brief(root, wt_path, branch_raw if isinstance(branch_raw, str) and branch_raw else None)
 
 
 def build_pr_briefing(root: Path, items: list[dict[str, Any]]) -> str:
-    lines = [
-        PROMPT_QUESTION,
-        "",
-        "作業ブリーフィング / Work briefing:",
-    ]
+    lines = []
     for item in items:
+        if lines:
+            lines.extend(["", "---", ""])
         lines.extend(render_worktree_brief(root, item))
     lines.extend(
         [
             "",
-            "Human decision required:",
-            "  - Yes / 進行: PR 作成を許可。AI は `agent-worktree-guard confirm-pr --confirmed` を実行してから `gh pr create` へ進む。",
-            "  - Stop / 停止: PR 作成・merge・cleanup を行わない。",
-            "  - Fix needed / 修正必要: worktree に戻って追加修正する。",
+            "Human decision required / ユーザー確認:",
+            "  - 承認して進める: AI は `agent-worktree-guard confirm-pr --confirmed` を実行してから `gh pr create` へ進む。",
+            "  - 修正が必要: worktree に戻って追加修正する。",
+            "  - 停止する: PR 作成・merge・cleanup を行わない。",
         ]
     )
     return "\n".join(lines)
@@ -692,6 +632,8 @@ def build_cleanup_required_message(root: Path, items: list[dict[str, Any]]) -> s
         "",
         "Run:",
         "  agent-worktree-guard cleanup --confirmed",
+        "",
+        "The cleanup command prints `# PR 承認後の完了報告` after the worktree/branch cleanup finishes.",
         "",
         "Merged worktrees waiting for cleanup:",
     ]
@@ -891,6 +833,7 @@ def _remove_worktree_item(item: dict[str, Any], root: Path, session_id: str, *, 
     """1 件の worktree を git から除去し、ledger item を cleaned に更新する(save は呼び出し側)。
     git remove に失敗したら owner marker を復元して raise する(原子性)。worktree 除去後に、
     merge 済みローカル branch と当該 branch を起点とする stash も掃除する(best-effort, 除去成功後)。"""
+    capture_cleanup_snapshot(item)
     marker_data = verify_owner_marker(item, session_id, root)
     marker = owner_path(Path(str(item["path"])))
     try:
@@ -984,6 +927,96 @@ def cleanup_summary_line(count: int, items: list[dict[str, Any]]) -> str:
     return f"cleaned {count} worktree(s){suffix}"
 
 
+def parse_name_status_paths(status_text: str | None) -> list[str]:
+    paths: list[str] = []
+    if not status_text:
+        return paths
+    for line in status_text.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            paths.append(parts[-1])
+    return paths
+
+
+def changed_files_tree(status_text: str | None) -> str:
+    paths = parse_name_status_paths(status_text)
+    if not paths:
+        return "(changed files unavailable)"
+    return "\n".join(f"- {path}" for path in paths)
+
+
+def capture_cleanup_snapshot(item: dict[str, Any]) -> None:
+    """worktree を削除する前に completion report 用の差分情報を保存する。"""
+    wt_path = Path(str(item["path"]))
+    base, commit_count = first_git_range(wt_path, item)
+    snapshot: dict[str, Any] = {
+        "base": base,
+        "commit_count": commit_count,
+        "log": None,
+        "changed_files": None,
+    }
+    if base:
+        snapshot["log"] = git_text(["log", "--oneline", f"{base}..HEAD"], wt_path)
+        snapshot["changed_files"] = git_text(["diff", "--name-status", f"{base}...HEAD"], wt_path)
+    item["cleanup_snapshot"] = snapshot
+
+
+def pr_display(item: dict[str, Any]) -> str:
+    pr = item.get("pr")
+    if isinstance(pr, str) and pr.strip():
+        return pr.strip()
+    return "未取得 / not captured"
+
+
+def render_completion_report(root: Path, items: list[dict[str, Any]]) -> str:
+    cleaned_paths = [relative_display(Path(str(item["path"])), root) for item in items]
+    branch_cleanup = [
+        f"{item.get('branch')}: {'deleted' if item.get('branch_deleted') else 'not deleted / already absent'}"
+        for item in items
+    ]
+    stash_count = sum(len(item.get("stashes_dropped") or []) for item in items)
+    active_stash = git_text(["stash", "list"], root)
+    active_stash_text = active_stash if active_stash else "なし"
+
+    lines = [
+        "# PR 承認後の完了報告",
+        "## 1. PR",
+        f"- PR URL: {', '.join(pr_display(item) for item in items)}",
+        "- PR Merged 状況: merged recorded by agent-worktree-guard",
+        "- Merge commit / squash commit: 未取得 / not captured",
+        "- CI status: 未取得 / not captured",
+        "## 2. Cleanup 状況",
+        f"- Worktree cleanup: cleaned {len(items)} ({', '.join(cleaned_paths)})",
+        f"- Branch cleanup: {', '.join(branch_cleanup)}",
+        "- Remote branch cleanup: 未確認 / not managed by local guard",
+        "- main への ff 状況: 未実行 / local main not fast-forwarded by cleanup",
+        "- stash の復元状況: 対象外 / no restore performed",
+        f"- active stash: {active_stash_text}",
+        "## 3. 反映されたファイル",
+        "```text",
+    ]
+    for item in items:
+        snapshot = item.get("cleanup_snapshot") if isinstance(item.get("cleanup_snapshot"), dict) else {}
+        lines.append(f"# {item.get('branch') or '(detached)'}")
+        lines.append(changed_files_tree(snapshot.get("changed_files")))
+    lines.extend(
+        [
+            "```",
+            "## 4. 残った対応",
+            "- 残タスク: なし (guard 観測範囲)",
+            "- 手動対応が必要なもの: GitHub 上の CI / remote branch 状態は必要に応じて確認",
+            "- 次回セッションへの引き継ぎ: なし",
+            "## 5. 問題 / 改善メモ",
+            "- 発生した問題: なし",
+            "- 回避策: なし",
+            "- 仕組みに反映したい改善: なし",
+        ]
+    )
+    if stash_count:
+        lines.append(f"- cleanup note: dropped {stash_count} branch-local stash item(s)")
+    return "\n".join(lines)
+
+
 def cmd_cleanup(args: argparse.Namespace) -> int:
     if not args.confirmed:
         raise GuardError("cleanup requires --confirmed")
@@ -1032,6 +1065,9 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
             cleaned_items.append(item)
         _clear_status(root)
         print(cleanup_summary_line(len(removed), cleaned_items))
+        if cleaned_items:
+            print()
+            print(render_completion_report(root, cleaned_items))
         return 0
 
     # 引数なし: まず現 session ledger を処理(後方互換の主経路)。
@@ -1101,6 +1137,9 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
     _clear_status(root)
     print(cleanup_summary_line(len(removed), cleaned_items))
+    if cleaned_items:
+        print()
+        print(render_completion_report(root, cleaned_items))
     return 0
 
 
@@ -1243,6 +1282,35 @@ def gh_pr_action(tokens: list[str]) -> str | None:
             i += 2
             continue
         i += 1
+    return None
+
+
+def gh_pr_target(command: str, action: str) -> str | None:
+    for tokens in shell_segments(command):
+        try:
+            idx = tokens.index("gh")
+        except ValueError:
+            continue
+        args = tokens[idx + 1 :]
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg in {"--repo", "-R", "--hostname"}:
+                i += 2
+                continue
+            if arg == "pr" and i + 1 < len(args) and args[i + 1] == action:
+                j = i + 2
+                while j < len(args):
+                    candidate = args[j]
+                    if candidate == "--":
+                        j += 1
+                        continue
+                    if candidate.startswith("-"):
+                        j += 1
+                        continue
+                    return candidate
+                return None
+            i += 1
     return None
 
 
@@ -1450,7 +1518,7 @@ def hook_post_tool(args: argparse.Namespace) -> int:
         if item:
             verify_owner_marker(item, session_id, root)
             if reason == "merge":
-                mark_item_merged(ledger, item, source="hook")
+                mark_item_merged(ledger, item, source="hook", pr=gh_pr_target(command, "merge"))
             else:
                 item["done"] = True
                 item["status"] = "done"

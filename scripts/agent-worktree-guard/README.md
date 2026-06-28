@@ -86,12 +86,14 @@ generated `.claude/settings.json` includes:
 - `Stop`: if every ledger worktree is done, continue the agent with a generated
   work briefing and the exact PR question until `confirm-pr --confirmed`; after
   confirmation it continues until merge is recorded; after merge it continues
-  until `cleanup --confirmed` removes the worktree. The briefing surfaces each
-  worktree's human-review report (`REVIEW.md`, the 概要/なぜ/何を/どうやって/影響/
-  トレードオフ/残作業/ファイル構造/レビュー依頼 sections) so the PR question is
-  answered from the review content, not a bare yes/no — and when `REVIEW.md` is
-  missing it points at the scaffold command (the `worktree-review-report-guard`
-  Stop hook still blocks until that report is complete).
+  until `cleanup --confirmed` removes the worktree and prints `# PR 承認後の完了報告`.
+  The briefing surfaces each worktree's full 11-section approval review
+  (`REVIEW.md`: 承認依頼 / 状態サマリー / コミット情報 / PR Draft / 修正ファイル /
+  変更内容 / なぜ / トレードオフ / リスク・Rollback / 残タスク / セッション改善) so
+  the PR question is answered from the review content, not a bare yes/no — and
+  when `REVIEW.md` is missing it points at the scaffold command (the
+  `worktree-review-report-guard` Stop hook still blocks until that report is
+  complete).
 - `WorktreeCreate` / `WorktreeRemove`: route Claude `--worktree` lifecycle
   through the same ledger and owner-marker checks.
 
@@ -101,7 +103,8 @@ Codex trust review, and shell interception is not a complete security boundary,
 so the wrapper CLI and Git hook are kept as additional layers.
 
 Antigravity is wired in `.agents/hooks.json` with the same shared guard for
-`run_command` SessionStart/PreToolUse/PostToolUse/Stop coverage. Local
+`run_command` SessionStart/PreToolUse/PostToolUse coverage, plus the same
+Stop-time shipping/review report gates via Antigravity adapters. Local
 `.agents/config.json` remains ignored because `worktree-init.mjs` writes
 per-machine `GIT_WORK_TREE` / `GIT_DIR` values there.
 
@@ -139,12 +142,13 @@ block `git push --no-verify` in AI tool calls.
 - Hook command parsing uses `shlex` tokenization and Git argument structure for
   common shell command forms, but shell hooks remain defense in depth rather
   than the only enforcement layer.
-- If all registered worktrees are complete, the required prompt is:
+- If all registered worktrees are complete, the required approval prompt begins:
 
 ```text
-すべてのworktreeの作業が完了しました。PR（プルリクエスト）を作成しますか？
-(모든 worktree 작업이 완료되었습니다. PR(풀 리퀘스트)을 생성하시겠습니까?)
+以下の worktree 作業は完了状態です。
+内容を確認し、merge / cleanup に進めてよいか承認してください。
 ```
 
-The hook output must also include the generated work briefing before that human
-decision, so the user can answer from evidence instead of a bare yes/no prompt.
+The hook output must also include the 11-section `REVIEW.md` approval review
+before that human decision, so the user can answer from evidence instead of a
+bare yes/no prompt.

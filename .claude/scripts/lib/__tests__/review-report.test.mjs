@@ -18,44 +18,77 @@ import {
 
 const SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
 
-/** 9 섹션 모두 채운 유효 REVIEW.md (bilingual heading + HEAD stamp). */
+/** 11 섹션 모두 채운 유효 REVIEW.md (bilingual heading + HEAD stamp). */
 function fullReport(sha = SHA) {
   return [
-    '# Worktree Review — feature/x',
+    '# Worktree 承認依頼レビュー — feature/x',
     '',
     `<!-- bag-review: head=${sha} -->`,
     '',
-    '## Summary / 概要 (作業内容)',
-    'Added a Stop-hook gate that enforces REVIEW.md.',
+    '## 1. 承認依頼',
+    '以下の worktree 作業は完了状態です。承認して進める / 修正が必要 / 停止する。',
     '',
-    '## Why / なぜ',
-    'Closes the marker-only bypass documented in R-CM-030.',
+    '## 2. 状態サマリー',
+    '- Worktree path: .worktrees/feature/x',
+    '- Branch: feature/x',
+    '- PLAN.md checklist: all checked',
     '',
-    '## Changed Files / 変更ファイル',
-    '- lib/review-report.mjs | NEW | 120 | validation SSOT',
+    '## 3. Worktree のコミット情報',
+    '```text',
+    'abc1234 test commit',
+    '```',
+    '- Commit count: 1',
+    '- Commit range: origin/main..HEAD',
+    '- Latest commit: abc1234 test commit',
     '',
-    '## How / 作業方法',
-    'Pure-function lib + Stop hook + Codex adapter + node:test.',
+    '## 4. PR Draft',
+    '- PR URL: not created yet',
+    '- PR status: Draft',
+    '- Merge status: pending',
+    '- CI status: not run',
     '',
-    '## Impact / 影響範囲',
-    'Adds one Stop hook; fail-open; owned+committed worktrees only.',
+    '## 5. 修正 / 追加したファイル',
+    '```text',
+    '.claude/scripts/lib/review-report.mjs',
+    '```',
     '',
-    '## Trade-offs / トレードオフ',
-    'File artifact over transcript scan (deterministic, testable).',
+    '## 6. 変更内容',
+    '| Path | 種別 | 役割 | 変更理由 |',
+    '| --- | --- | --- | --- |',
+    '| .claude/scripts/lib/review-report.mjs | EDIT | validation SSOT | enforce approval review |',
     '',
-    '## Remaining Work / 残作業',
-    'None; cleanup + PR after approval.',
+    '## 7. なぜ修正したか',
+    '- 背景: marker-only bypass.',
+    '- 解決した問題: review body is now required.',
+    '- 採用した方針: file artifact validation.',
+    '- ユーザー要求との対応: approval review before PR.',
     '',
-    '## File Structure / フォルダー構造',
-    '.claude/hooks/, .claude/scripts/lib/',
+    '## 8. トレードオフ',
+    '- 採用案: REVIEW.md artifact.',
+    '- 代替案: transcript scan.',
+    '- 採用理由: deterministic.',
+    '- 犠牲にした点: one more local artifact.',
+    '- 将来見直す条件: CLI hook API improves.',
     '',
-    '## Review Requests / レビュー依頼',
-    '- Confirm the 9-section list matches intent.',
+    '## 9. リスク / Rollback',
+    '- 影響範囲: governance hooks.',
+    '- 既知リスク: stale report.',
+    '- 未検証事項: none.',
+    '- Rollback 方法: revert hook change.',
+    '',
+    '## 10. セッション内の残タスク',
+    '- なし / あり: なし',
+    '- 次に必要な作業: PR approval.',
+    '',
+    '## 11. セッション内の問題点や改善点',
+    '- 問題点: none.',
+    '- 改善案: none.',
+    '- 次回の注意: keep report updated.',
     '',
   ].join('\n');
 }
 
-test('validateReport: 완전한 9 섹션 + 일치 stamp → ok', () => {
+test('validateReport: 완전한 11 섹션 + 일치 stamp → ok', () => {
   const v = validateReport(fullReport(), { headSha: SHA });
   assert.equal(v.ok, true, JSON.stringify(v));
   assert.deepEqual(v.missing, []);
@@ -70,20 +103,32 @@ test('validateReport: 본문 null/빈 → present=false + 모든 섹션 missing'
   assert.equal(v.missing.length, REQUIRED_SECTIONS.length);
 });
 
-test('validateReport: 한 섹션(Impact) 누락 → missing 에 impact', () => {
-  const without = fullReport().replace('## Impact / 影響範囲\nAdds one Stop hook; fail-open; owned+committed worktrees only.\n', '');
+test('validateReport: 한 섹션(리스크/Rollback) 누락 → missing 에 risks_rollback', () => {
+  const without = fullReport().replace(
+    '## 9. リスク / Rollback\n- 影響範囲: governance hooks.\n- 既知リスク: stale report.\n- 未検証事項: none.\n- Rollback 方法: revert hook change.\n',
+    '',
+  );
   const v = validateReport(without, { headSha: SHA });
   assert.equal(v.ok, false);
-  assert.ok(v.missing.includes('impact'), JSON.stringify(v.missing));
+  assert.ok(v.missing.includes('risks_rollback'), JSON.stringify(v.missing));
 });
 
 test('validateReport: placeholder/공란 본문 → 미작성으로 missing', () => {
   const report = fullReport().replace(
-    '## Review Requests / レビュー依頼\n- Confirm the 9-section list matches intent.\n',
-    '## Review Requests / レビュー依頼\nTODO\n',
+    '## 11. セッション内の問題点や改善点\n- 問題点: none.\n- 改善案: none.\n- 次回の注意: keep report updated.\n',
+    '## 11. セッション内の問題点や改善点\nTODO\n',
   );
   const v = validateReport(report, { headSha: SHA });
-  assert.ok(v.missing.includes('review_requests'), JSON.stringify(v.missing));
+  assert.ok(v.missing.includes('session_issues'), JSON.stringify(v.missing));
+});
+
+test('validateReport: 빈 field label / table header only → 미작성으로 missing', () => {
+  const report = fullReport()
+    .replace('- Worktree path: .worktrees/feature/x\n- Branch: feature/x\n- PLAN.md checklist: all checked\n', '- Worktree path:\n- Branch:\n- PLAN.md checklist:\n')
+    .replace('| .claude/scripts/lib/review-report.mjs | EDIT | validation SSOT | enforce approval review |\n', '|  | NEW/EDIT/DELETE |  |  |\n');
+  const v = validateReport(report, { headSha: SHA });
+  assert.ok(v.missing.includes('state_summary'), JSON.stringify(v.missing));
+  assert.ok(v.missing.includes('change_table'), JSON.stringify(v.missing));
 });
 
 test('validateReport: stamp 부재 → stale (headSha 제공 시)', () => {
@@ -135,14 +180,17 @@ test('resolveReviewReportPath / reviewReportRelPath: safeBranch 경로', () => {
   );
 });
 
-test('renderTemplate: 생성 템플릿은 9 섹션 헤더를 모두 가진다', () => {
+test('renderTemplate: 생성 템플릿은 11 섹션 헤더를 모두 가진다', () => {
   const t = renderTemplate({ branch: 'feature/x', headSha: SHA });
   const secs = splitSections(t);
-  // 템플릿 본문은 placeholder 주석이라 missing 이지만, 헤더는 9개 모두 매칭돼야 한다.
+  // 템플릿 본문은 placeholder/빈 필드라 missing 이지만, 헤더는 11개 모두 매칭돼야 한다.
   for (const req of REQUIRED_SECTIONS) {
-    const present = secs.some((s) => new RegExp(req.aliases[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(s.heading));
+    const present = secs.some((s) =>
+      req.aliases.some((a) => new RegExp(a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(s.heading)),
+    );
     assert.ok(present, `template missing heading for ${req.key}`);
   }
   // stamp 가 박혀 있으면 staleness 통과
   assert.equal(validateReport(t, { headSha: SHA }).stale, false);
+  assert.equal(validateReport(t, { headSha: SHA }).ok, false);
 });

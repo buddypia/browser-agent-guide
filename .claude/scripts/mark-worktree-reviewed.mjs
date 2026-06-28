@@ -10,7 +10,7 @@
  *
  * Usage:
  *   node .claude/scripts/mark-worktree-reviewed.mjs <branch | worktree-path> [--scaffold]
- *     --scaffold : REVIEW.md 부재 시 9 섹션 템플릿을 생성 (현재 HEAD 로 stamp). 존재 시 미변경.
+ *     --scaffold : REVIEW.md 부재 시 11 섹션 승인依頼レビュー 템플릿을 생성 (현재 HEAD 로 stamp). 존재 시 미변경.
  *     (default)  : REVIEW.md 를 검증 + 현재 HEAD 로 stamp 갱신.
  *                  · 미작성 섹션 있으면 exit 1 + 목록 출력
  *                  · 전부 작성됐으면 stamp 갱신 후 exit 0
@@ -127,7 +127,7 @@ function main(argv) {
     }
     mkdirSync(dirname(reportPath), { recursive: true });
     writeFileSync(reportPath, renderTemplate({ branch, headSha: head }));
-    process.stdout.write(`${reportPath}\n(9 섹션 템플릿 생성 — 각 섹션을 실내용으로 채운 뒤 인자 없이 재실행하여 검증/stamp)\n`);
+    process.stdout.write(`${reportPath}\n(11 섹션 승인依頼レビュー 템플릿 생성 — 각 섹션을 실내용으로 채운 뒤 인자 없이 재실행하여 검증/stamp)\n`);
     process.exit(0);
   }
 
@@ -178,7 +178,7 @@ function main(argv) {
   const post = validateReport(head ? stampHead(content, head) : content, { headSha: head });
   process.stdout.write(
     `${reportPath}\n` +
-      `OK — 9 섹션 작성 완료${head ? ` + HEAD ${head.slice(0, 12)} stamp` : ''}${post.ok ? '' : ' (경고: 검증 미통과)'}\n`,
+      `OK — 11 섹션 승인依頼レビュー 작성 완료${head ? ` + HEAD ${head.slice(0, 12)} stamp` : ''}${post.ok ? '' : ' (경고: 검증 미통과)'}\n`,
   );
   process.exit(post.ok ? 0 : 1);
 }

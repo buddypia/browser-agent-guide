@@ -4,8 +4,9 @@
  * Why (R-CM-030 "한계 (정직 명시)" 갭 폐쇄):
  *   기존 Pre-Ship Human Review Panel 강제는 `pre-ship-review-guard` 가 **마커 존재만**
  *   검사한다 (룰 자체가 "AI 가 패널 없이 마커 생성 후 호출 시 우회 가능" 으로 명시).
- *   본 lib 는 "사람이 리뷰할 수 있는 본문이 실제로 출력되었는가" 를 **결정론적으로**
- *   검증하기 위한 단일 출처다. 검증 대상은 worktree-local `REVIEW.md` 파일(artifact).
+ *   본 lib 는 "사람이 merge/cleanup 승인 여부를 판단할 수 있는 승인依頼レビュー 본문이
+ *   실제로 출력되었는가" 를 **결정론적으로** 검증하기 위한 단일 출처다. 검증 대상은
+ *   worktree-local `REVIEW.md` 파일(artifact).
  *
  * 왜 transcript 가 아니라 file 인가 (의도된 trade-off):
  *   - 결정론적이고 node:test 로 검증 가능 (transcript header 매칭은 CLI 간 취약).
@@ -25,23 +26,25 @@ import { basename, join } from 'node:path';
 import { safeBranchKey, inferBranchFromWorktreePath } from './worktree-plan-path.mjs';
 
 /**
- * 필수 9 섹션 — 사용자 열거 항목과 1:1 충실 매핑.
- *   작업내용 / 왜 / 무엇을(어떤 작업) / 어떻게 / 영향범위 / 트레이드오프 / 잔여작업 /
- *   폴더구조 / 리뷰요청 항목.
+ * 필수 11 섹션 — worktree 終了時の「承認依頼レビュー」テンプレートと 1:1 に対応.
+ *   承認依頼 / 状態サマリー / コミット情報 / PR Draft / 修正ファイル / 変更内容 /
+ *   なぜ修正したか / トレードオフ / リスク・Rollback / 残タスク / セッション改善.
  * 각 섹션: key + 표준 heading + aliases (EN/JP — 프로젝트 bilingual 컨벤션).
  * aliases 는 heading 텍스트에 대해 case-insensitive 로 매칭한다 (ASCII 는 word-boundary,
  * CJK 는 substring — sectionRegex 참조).
  */
 export const REQUIRED_SECTIONS = [
-  { key: 'summary', title: 'Summary', aliases: ['summary', '概要', '作業内容', 'what was done'] },
-  { key: 'why', title: 'Why', aliases: ['why', 'なぜ', '理由', '背景', 'motivation', 'rationale'] },
-  { key: 'what', title: 'Changed Files', aliases: ['changed files', 'what', '変更ファイル', '変更内容', 'どんな作業'] },
-  { key: 'how', title: 'How', aliases: ['how', '作業方法', 'どのように', 'approach', 'アプローチ', '手順'] },
-  { key: 'impact', title: 'Impact', aliases: ['impact', '影響範囲', '影響'] },
-  { key: 'tradeoffs', title: 'Trade-offs', aliases: ['trade-offs', 'tradeoffs', 'トレードオフ', 'decisions', '判断', '代替'] },
-  { key: 'remaining', title: 'Remaining Work', aliases: ['remaining', '残作業', 'follow-up', 'followup', 'todo', 'risks', 'リスク', 'ロールバック', 'rollback'] },
-  { key: 'structure', title: 'File Structure', aliases: ['file structure', 'フォルダー構造', 'ディレクトリ構造', '作業フォルダー', 'directory structure', 'folder structure'] },
-  { key: 'review_requests', title: 'Review Requests', aliases: ['review requests', 'review request', 'レビュー依頼', 'レビューを求める', '確認依頼', '確認してほしい', 'request review'] },
+  { key: 'approval_request', title: '承認依頼', aliases: ['approval request', '承認依頼', 'レビュー内容', '承認してください'] },
+  { key: 'state_summary', title: '状態サマリー', aliases: ['state summary', '状態サマリー', 'status summary', 'worktree status'] },
+  { key: 'commits', title: 'Worktree のコミット情報', aliases: ['commits', 'commit information', 'コミット情報', 'git log'] },
+  { key: 'pr_draft', title: 'PR Draft', aliases: ['pr draft', 'draft pr', 'PR Draft', 'PR URL', 'merge status'] },
+  { key: 'changed_files_tree', title: '修正 / 追加したファイル', aliases: ['changed files tree', '修正 / 追加したファイル', '修正したファイル', '追加したファイル', '変更ファイル'] },
+  { key: 'change_table', title: '変更内容', aliases: ['change table', '変更内容', 'changed files', '種別', '変更理由'] },
+  { key: 'rationale', title: 'なぜ修正したか', aliases: ['rationale', 'why', 'なぜ修正したか', '背景', '解決した問題', '採用した方針'] },
+  { key: 'tradeoffs', title: 'トレードオフ', aliases: ['trade-offs', 'tradeoffs', 'トレードオフ', '代替案', '犠牲にした点'] },
+  { key: 'risks_rollback', title: 'リスク / Rollback', aliases: ['risks', 'rollback', 'リスク', 'ロールバック', '未検証事項'] },
+  { key: 'session_remaining', title: 'セッション内の残タスク', aliases: ['remaining session tasks', '残タスク', 'セッション内の残タスク', '次に必要な作業'] },
+  { key: 'session_issues', title: 'セッション内の問題点や改善点', aliases: ['session issues', '改善点', '問題点', '次回の注意', 'セッション内の問題点'] },
 ];
 
 /** REVIEW.md 본문에 박는 HEAD 앵커. helper 가 stamp, hook 이 현재 HEAD 와 대조 (staleness). */
@@ -49,6 +52,10 @@ export const HEAD_MARKER_RE = /<!--\s*bag-review:\s*head\s*=\s*([0-9a-fA-F]{7,40
 
 /** 본문 채움 판정 시 placeholder(미작성 stub) 로 보는 라인. */
 const PLACEHOLDER_RE = /^(?:todo|tbd|t\.b\.d\.?|n\/?a|fill(?:\s*in)?|\.\.\.|[-—–•*]|<.*>)$/i;
+const EMPTY_FIELD_RE = /^[-*]\s+[^:：]+[:：]\s*$/;
+const TABLE_RULE_RE = /^[\s┃━|+\-:]+$/;
+const TABLE_HEADER_RE = /^\|\s*Path\s*\|/i;
+const TABLE_TEMPLATE_ROW_RE = /^\|\s*\|\s*NEW\/EDIT\/DELETE\s*\|\s*\|\s*\|\s*$/i;
 
 /**
  * worktree 안에서의 REVIEW.md 상대 경로 (worktree 루트 기준).
@@ -114,7 +121,14 @@ export function isFilled(body) {
   const stripped = String(body || '').replace(/<!--[\s\S]*?-->/g, '').trim();
   if (!stripped) return false;
   const contentLines = stripped.split('\n').map((l) => l.trim()).filter(Boolean);
-  return contentLines.some((l) => !PLACEHOLDER_RE.test(l));
+  return contentLines.some(
+    (l) =>
+      !PLACEHOLDER_RE.test(l) &&
+      !EMPTY_FIELD_RE.test(l) &&
+      !TABLE_RULE_RE.test(l) &&
+      !TABLE_HEADER_RE.test(l) &&
+      !TABLE_TEMPLATE_ROW_RE.test(l),
+  );
 }
 
 /**
@@ -137,8 +151,9 @@ export function validateReport(content, opts = {}) {
   const missing = [];
   for (const req of REQUIRED_SECTIONS) {
     const re = sectionRegex(req);
-    const matched = sections.find((s) => re.test(s.heading));
-    if (!matched || !isFilled(matched.body)) missing.push(req.key);
+    const matches = sections.filter((s) => re.test(s.heading));
+    const matched = matches.find((s) => isFilled(s.body));
+    if (!matched) missing.push(req.key);
   }
 
   const m = text.match(HEAD_MARKER_RE);
@@ -155,7 +170,7 @@ export function validateReport(content, opts = {}) {
 
 /**
  * REVIEW.md scaffold 템플릿 생성. helper CLI(`--scaffold`)와 hook 안내 메시지가 공유.
- * 9 섹션 헤더 + HEAD 앵커 + 작성 가이드 주석. AI 가 주석을 본문으로 치환.
+ * 11 섹션 헤더 + HEAD 앵커 + 작성 가이드 주석. AI 가 주석/빈 필드를 본문으로 치환.
  *
  * @param {{ branch?: string|null, headSha?: string|null }} [opts]
  */
@@ -165,39 +180,83 @@ export function renderTemplate(opts = {}) {
     ? `<!-- bag-review: head=${opts.headSha} -->`
     : '<!-- bag-review: head=__run mark-worktree-reviewed to stamp__ -->';
   return [
-    `# Worktree Review — ${branch}`,
+    `# Worktree 承認依頼レビュー — ${branch}`,
     '',
-    '> 人間がレビューするための作業レポート。各セクションの <!-- ガイド --> を実内容で置換。',
+    '> 人間が merge / cleanup 承認を判断するためのレビュー。各セクションの <!-- ガイド --> と空フィールドを実内容で置換。',
     `> stamp 行は \`node .claude/scripts/mark-worktree-reviewed.mjs ${branch || '<branch>'}\` が現在 HEAD で更新する。`,
     '',
     stamp,
     '',
-    '## Summary / 概要 (作業内容)',
-    '<!-- 何を変更したか + なぜ。3-5行で要点 -->',
+    '## 1. 承認依頼',
+    '以下の worktree 作業は完了状態です。',
+    '内容を確認し、merge / cleanup に進めてよいか承認してください。',
+    '選択してください:',
+    '- 承認して進める',
+    '- 修正が必要',
+    '- 停止する',
     '',
-    '## Why / なぜ (理由・背景)',
-    '<!-- 動機: ユーザー要求 / バグ症状 / 既存ギャップ → 解決方向 -->',
+    '## 2. 状態サマリー',
+    '- Worktree path:',
+    '- Branch:',
+    '- Base branch:',
+    '- PLAN.md:',
+    '- PLAN.md checklist:',
+    '- Worktree status:',
+    '- Quality Gate:',
+    '- Test / verify:',
+    '- Draft PR:',
     '',
-    '## Changed Files / 変更ファイル (どんな作業)',
-    '<!-- path | NEW/EDIT/DELETE | LOC | 役割 / 変更理由 -->',
+    '## 3. Worktree のコミット情報',
+    '```text',
+    '<git log --oneline origin/main..HEAD>',
+    '```',
+    '- Commit count:',
+    '- Commit range:',
+    '- Latest commit:',
     '',
-    '## How / 作業方法 (どのように)',
-    '<!-- アプローチ・手順・実行した検証コマンドと結果 -->',
+    '## 4. PR Draft',
+    '- PR URL:',
+    '- PR status: Draft / Open',
+    '- Merge status:',
+    '- CI status:',
     '',
-    '## Impact / 影響範囲',
-    '<!-- 影響するシステム領域: コード / ルール / hook / CI / ドキュメント / ユーザー workflow / 面除条件 -->',
+    '## 5. 修正 / 追加したファイル',
+    '```text',
+    '<変更ファイルのツリー構造>',
+    '```',
     '',
-    '## Trade-offs / トレードオフ (判断と代替案)',
-    '<!-- 選択した設計、却下した代替とその理由。「なし」なら根拠を書く -->',
+    '## 6. 変更内容',
+    '| Path | 種別 | 役割 | 変更理由 |',
+    '| --- | --- | --- | --- |',
+    '|  | NEW/EDIT/DELETE |  |  |',
     '',
-    '## Remaining Work / 残作業 (Follow-up・Risks・Rollback)',
-    '<!-- 未対応 / deferred / リスク・懸念 / ロールバック手段 -->',
+    '## 7. なぜ修正したか',
+    '- 背景:',
+    '- 解決した問題:',
+    '- 採用した方針:',
+    '- ユーザー要求との対応:',
     '',
-    '## File Structure / フォルダー構造',
-    '<!-- 変更ファイルのディレクトリツリーと責務境界。新規/移動/削除の位置根拠 -->',
+    '## 8. トレードオフ',
+    '- 採用案:',
+    '- 代替案:',
+    '- 採用理由:',
+    '- 犠牲にした点:',
+    '- 将来見直す条件:',
     '',
-    '## Review Requests / レビュー依頼 (確認してほしい項目)',
-    '<!-- 人間に判断・確認してほしい具体ポイントを箇条書き -->',
+    '## 9. リスク / Rollback',
+    '- 影響範囲:',
+    '- 既知リスク:',
+    '- 未検証事項:',
+    '- Rollback 方法:',
+    '',
+    '## 10. セッション内の残タスク',
+    '- なし / あり:',
+    '- 次に必要な作業:',
+    '',
+    '## 11. セッション内の問題点や改善点',
+    '- 問題点:',
+    '- 改善案:',
+    '- 次回の注意:',
     '',
   ].join('\n');
 }
