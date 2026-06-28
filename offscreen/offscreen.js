@@ -6,6 +6,7 @@
 //  - 2000px ガード（computeOutputSize）+ DPR 整合（factor = dpr × outputScale）は compositor.js に集約。
 
 import { computeOutputSize, composeFeedback } from '../lib/visual-feedback/compositor.js';
+import { encodeInline } from './inline-encode.js';
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.target !== 'offscreen') return; // 自分宛て以外は無視（SW/sidepanel 宛てと混線させない）
@@ -48,6 +49,26 @@ async function composite({ screenshotDataUrl, data }) {
 
   const outBlob = await canvas.convertToBlob({ type: 'image/png' });
   const dataUrl = await blobToDataUrl(outBlob);
+
+  // MCP inline 専用のコンパクト変種（WebP/JPEG, ~12KB 予算）。フル解像度 PNG（上の dataUrl）は
+  // file_path/shot_url/DL 用にそのまま温存し、これは Claude Code のトークン上限対策として併走させる。
+  // 失敗しても致命的でない（daemon はフル PNG にフォールバックし、超過なら image を omit する）。
+  let inline = null;
+  try {
+    const enc = await encodeInline(canvas, { outWidth, outHeight });
+    if (enc?.blob) {
+      inline = {
+        dataUrl: await blobToDataUrl(enc.blob),
+        mime: enc.mime,
+        byteLength: enc.byteLength,
+        width: enc.width,
+        height: enc.height,
+      };
+    }
+  } catch {
+    inline = null;
+  }
+
   return {
     dataUrl,
     width: outWidth,
@@ -60,6 +81,12 @@ async function composite({ screenshotDataUrl, data }) {
     drawn: summary.drawn,
     total: summary.total,
     byteLength: outBlob.size,
+    // inline（コンパクト変種）。無ければ全て null（古い engine / エンコード失敗）。
+    inlineDataUrl: inline?.dataUrl || null,
+    inlineMime: inline?.mime || null,
+    inlineByteLength: inline?.byteLength || null,
+    inlineWidth: inline?.width || null,
+    inlineHeight: inline?.height || null,
   };
 }
 

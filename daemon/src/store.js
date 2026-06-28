@@ -121,6 +121,10 @@ export function normalizeStorageMode(value) {
 function createMemoryEntry({ inboxDir, payload, now, taken }) {
   const shotBuffer = decodeBase64(payload?.image?.shot);
   if (!shotBuffer || !shotBuffer.length) throw new Error('image.shot (base64 PNG) が必要です。');
+  // MCP inline 専用のコンパクト変種を RAM 保持する（memory は既定モード。これが無いと
+  // materialize 前の image 要求でフル PNG にフォールバック→omit され、既定で inline が出なくなる）。
+  const inlineBuffer = decodeBase64(payload?.image?.inline);
+  const hasInline = Boolean(inlineBuffer && inlineBuffer.length);
 
   const capturedAt = payload?.capturedAt || payload?.annotation?.capturedAt || now || new Date().toISOString();
   const url = payload?.url || payload?.annotation?.url || '';
@@ -140,6 +144,8 @@ function createMemoryEntry({ inboxDir, payload, now, taken }) {
     materialized: false,
     payload,
     shotBuffer,
+    inlineBuffer: hasInline ? inlineBuffer : null,
+    inlineMime: hasInline ? payload?.image?.inlineMime || null : null,
     annotation: payload?.annotation || null,
     memo: payload?.memo || '',
     url: payload?.annotation?.url || payload?.url || '',
