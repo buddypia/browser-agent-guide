@@ -107,7 +107,7 @@ test('hybrid store: context はメモリから返し、image 要求時だけ inb
 
     await withMcpClient(mcpUrl, async (client) => {
       const contextRes = await client.callTool({
-        name: 'get_latest_visual_feedback_context',
+        name: 'get_latest_feedback_context',
         arguments: { urlContains: 'hybrid.example' },
       });
       assert.ok(!contextRes.content.some((c) => c.type === 'image'), 'context は image なし');
@@ -119,13 +119,13 @@ test('hybrid store: context はメモリから返し、image 要求時だけ inb
       assert.equal(existsSync(join(ack.dir, 'shot.png')), false, 'context 取得でも disk に保存しない');
 
       const scopedByTab = await client.callTool({
-        name: 'get_latest_visual_feedback_context',
+        name: 'get_latest_feedback_context',
         arguments: { tabId: 44 },
       });
       assert.equal(scopedByTab.structuredContent.id, ack.id, 'memory entry も tabId で絞れる');
 
       const imageRes = await client.callTool({
-        name: 'get_latest_visual_feedback',
+        name: 'get_latest_feedback_image',
         arguments: {
           urlContains: 'hybrid.example',
           contextId: ack.id,
@@ -175,7 +175,7 @@ test('hybrid store: 異なる host の memory push 2件で bare context が disa
     });
     await withMcpClient(mcpUrl, async (client) => {
       // メモリ保持エントリでも peekDistinctRecent が capturedAt を読み、曖昧検知が働く。
-      const res = await client.callTool({ name: 'get_latest_visual_feedback_context', arguments: {} });
+      const res = await client.callTool({ name: 'get_latest_feedback_context', arguments: {} });
       assert.ok(!res.content.some((c) => c.type === 'image'), '曖昧時は image を返さない');
       assert.equal(res.structuredContent.id, undefined, 'foreign id を載せない');
       assert.equal(res.structuredContent.disambiguation.distinctCount, 2, 'memory entry の capturedAt で 2 案件を検知');
@@ -207,7 +207,7 @@ test('hybrid store: image.inline(webp) は inline を image に使い、material
     });
     await withMcpClient(mcpUrl, async (client) => {
       const imageRes = await client.callTool({
-        name: 'get_latest_visual_feedback',
+        name: 'get_latest_feedback_image',
         arguments: { urlContains: 'inline.example', contextId: ack.id, imageReason: 'verify compact inline webp is served and full-res persists' },
       });
       const img = imageRes.content.find((c) => c.type === 'image');
@@ -289,7 +289,7 @@ test('memory store (既定): inbox を作らず、image 要求時のみ OS tmp �
 
     await withMcpClient(mcpUrl, async (client) => {
       const contextRes = await client.callTool({
-        name: 'get_latest_visual_feedback_context',
+        name: 'get_latest_feedback_context',
         arguments: { urlContains: 'memory.example' },
       });
       assert.ok(!contextRes.content.some((c) => c.type === 'image'), 'context は image なし');
@@ -297,7 +297,7 @@ test('memory store (既定): inbox を作らず、image 要求時のみ OS tmp �
       assert.equal(listEntries(inboxDir, 10).length, 0, 'context 取得でも inbox を作らない');
 
       const imageRes = await client.callTool({
-        name: 'get_latest_visual_feedback',
+        name: 'get_latest_feedback_image',
         arguments: {
           urlContains: 'memory.example',
           contextId: ack.id,
