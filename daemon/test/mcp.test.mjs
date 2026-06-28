@@ -72,20 +72,32 @@ async function withClient(fn) {
   }
 }
 
-test('tools/list が 5 ツールを公開する', async () => {
+test('tools/list が新名5 + 旧名エイリアス5 を公開する', async () => {
   await withClient(async (client) => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
+      // 新名（primary）
+      'get_feedback_context',
+      'get_feedback_image',
+      'get_latest_feedback_context',
+      'get_latest_feedback_image',
+      'list_feedback',
+      // 旧名（deprecated エイリアス・同一ハンドラ）
       'get_latest_visual_feedback',
       'get_latest_visual_feedback_context',
       'get_visual_feedback',
       'get_visual_feedback_context',
       'list_visual_feedback',
-    ]);
-    const latestImage = tools.find((t) => t.name === 'get_latest_visual_feedback');
-    assert.ok(latestImage.inputSchema.required.includes('contextId'), 'image tool は contextId が必須');
-    assert.ok(latestImage.inputSchema.required.includes('imageReason'), 'image tool は imageReason が必須');
+    ].sort());
+    for (const name of ['get_latest_feedback_image', 'get_latest_visual_feedback']) {
+      const latestImage = tools.find((t) => t.name === name);
+      assert.ok(latestImage.inputSchema.required.includes('contextId'), `${name} は contextId が必須`);
+      assert.ok(latestImage.inputSchema.required.includes('imageReason'), `${name} は imageReason が必須`);
+    }
+    // 旧名は deprecated 注記を description に持つ
+    const deprecated = tools.find((t) => t.name === 'get_latest_visual_feedback');
+    assert.ok(/\[deprecated\]/.test(deprecated.description || ''), '旧名は [deprecated] 注記を持つ');
   });
 });
 
@@ -141,7 +153,7 @@ test('get_latest_visual_feedback_context が image 無しで @agent と selector
     const res = await client.callTool({ name: 'get_latest_visual_feedback_context', arguments: {} });
     assert.ok(!res.content.some((c) => c.type === 'image'), 'context-only なので image を返さない');
     const txt = res.content.find((c) => c.type === 'text');
-    assert.ok(txt.text.includes('visual_feedback_context: image omitted'));
+    assert.ok(txt.text.includes('feedback_context: image omitted'));
     assert.ok(txt.text.includes('agent="@agent:docs/api-list"'));
     assert.ok(txt.text.includes('selector="main h2"'));
     assert.ok(txt.text.includes('chrome_tab: tabId=321 windowId=9 index=2 active=true'));
@@ -490,6 +502,84 @@ test('get_visual_feedback: inline 無しで full-res PNG が予算超過なら i
       const txt = res.content.find((c) => c.type === 'text').text;
       assert.ok(txt.includes('inline image omitted'), 'omit の注記を出す');
       assert.ok(txt.includes('file_path: ') || txt.includes('shot_url: '), 'フル解像度の取得先を案内する');
+    }
+  );
+});
+
+// ── schema v1: メモを残した HTML 要素（outerHTML + a11y）を画像なしで渡す ──────────────────
+test('get_latest_feedback_context: 対象要素の outerHTML と a11y を image なしで返す', async () => {
+  const OUTER = '<button class="primary" aria-disabled="true">送信</button>';
+  await withTmpDiskClient(
+    (inboxDir) => {
+      const w = writeEntry(inboxDir, {
+        capturedAt: '2026-06-28T10:00:00.000Z',
+        url: 'https://html.example/checkout',
+        title: 'Checkout',
+        image: { shot: PNG_B64_TINY },
+        annotation: {
+          schema: 'bag.visual-feedback/v1',
+          url: 'https://html.example/checkout',
+          title: 'Checkout',
+          capturedAt: '2026-06-28T10:00:00.000Z',
+          items: [
+            {
+              n: 1,
+              note: 'この送信ボタンを直したい',
+              selector: 'button.primary',
+              anchorLabel: '送信',
+              html: { outerHTML: OUTER, bytes: OUTER.length, truncated: false },
+              a11y: { role: 'button', name: '送信', states: ['disabled=true', 'disabled'] },
+            },
+          ],
+        },
+      });
+      return { id: w.id };
+    },
+    async (client, { id }) => {
+      const res = await client.callTool({ name: 'get_latest_feedback_context', arguments: { urlContains: 'html.example' } });
+      // 画像なしの軽量経路
+      assert.ok(!res.content.some((c) => c.type === 'image'), 'context-only なので image は返さない');
+      const txt = res.content.find((c) => c.type === 'text').text;
+      assert.ok(txt.includes('feedback_context: image omitted'));
+      assert.ok(txt.includes(OUTER), 'テキストに outerHTML を載せる');
+      assert.ok(txt.includes('a11y: role=button'), 'テキストに a11y を載せる');
+      // structuredContent でも構造化して渡す（image を持たないので Codex パリティに抵触しない）
+      const item = res.structuredContent.annotations[0];
+      assert.equal(item.html.outerHTML, OUTER);
+      assert.equal(item.html.truncated, false);
+      assert.equal(item.a11y.role, 'button');
+      assert.equal(item.a11y.name, '送信');
+      assert.deepEqual(item.a11y.states, ['disabled=true', 'disabled']);
+      assert.equal(id, res.structuredContent.id, 'context は対象 entry の id を返す');
+    },
+    { nowMs: Date.parse('2026-06-28T10:05:00.000Z') }
+  );
+});
+
+// 旧 v0（html/a11y 無し）の entry でも壊れず null 正規化される（後方互換）。
+test('get_feedback_context: v0 entry は html=null / a11y=null（後方互換）', async () => {
+  await withTmpDiskClient(
+    (inboxDir) => {
+      const w = writeEntry(inboxDir, {
+        capturedAt: '2026-06-28T10:00:00.000Z',
+        url: 'https://legacy.example/p',
+        title: 'Legacy',
+        image: { shot: PNG_B64_TINY },
+        annotation: {
+          schema: 'bag.visual-feedback/v0',
+          url: 'https://legacy.example/p',
+          title: 'Legacy',
+          capturedAt: '2026-06-28T10:00:00.000Z',
+          items: [{ n: 1, note: '古い注釈', selector: 'main h2' }],
+        },
+      });
+      return { id: w.id };
+    },
+    async (client, { id }) => {
+      const res = await client.callTool({ name: 'get_feedback_context', arguments: { id } });
+      const item = res.structuredContent.annotations[0];
+      assert.equal(item.html, null, 'v0 entry は html=null');
+      assert.equal(item.a11y, null, 'v0 entry は a11y=null');
     }
   );
 });

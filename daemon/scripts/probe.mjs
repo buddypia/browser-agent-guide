@@ -28,22 +28,22 @@ await client.connect(new StreamableHTTPClientTransport(url));
 console.log('inbox:', inboxDir);
 console.log('filter:', JSON.stringify(filter));
 console.log('image:', wantsImage ? 'enabled by --image' : 'skipped (context-only)');
-const list = await client.callTool({ name: 'list_visual_feedback', arguments: { ...filter } });
-console.log('\n[list_visual_feedback]\n' + list.content.find((c) => c.type === 'text').text);
+const list = await client.callTool({ name: 'list_feedback', arguments: { ...filter } });
+console.log('\n[list_feedback]\n' + list.content.find((c) => c.type === 'text').text);
 
-const context = await client.callTool({ name: 'get_latest_visual_feedback_context', arguments: { ...filter } });
+const context = await client.callTool({ name: 'get_latest_feedback_context', arguments: { ...filter } });
 const contextText = context.content.find((c) => c.type === 'text');
-console.log('\n[get_latest_visual_feedback_context]');
+console.log('\n[get_latest_feedback_context]');
 console.log('  text:\n' + contextText.text.split('\n').map((l) => '    ' + l).join('\n'));
 
 if (wantsImage) {
   const contextId = context.structuredContent?.id;
   if (!contextId) {
-    console.log('\n[get_latest_visual_feedback]');
+    console.log('\n[get_latest_feedback_image]');
     console.log('  skipped: context did not return an id');
   } else {
     const latest = await client.callTool({
-      name: 'get_latest_visual_feedback',
+      name: 'get_latest_feedback_image',
       arguments: {
         ...filter,
         contextId,
@@ -52,7 +52,7 @@ if (wantsImage) {
     });
     const img = latest.content.find((c) => c.type === 'image');
     const txt = latest.content.find((c) => c.type === 'text');
-    console.log('\n[get_latest_visual_feedback]');
+    console.log('\n[get_latest_feedback_image]');
     if (img) {
       const buf = Buffer.from(img.data, 'base64');
       const isPng = buf.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
@@ -61,7 +61,7 @@ if (wantsImage) {
     console.log('  text:\n' + txt.text.split('\n').map((l) => '    ' + l).join('\n'));
   }
 } else {
-  console.log('\n[get_latest_visual_feedback]');
+  console.log('\n[get_latest_feedback_image]');
   console.log('  skipped: pass --image only when context is insufficient and vision must be tested');
 }
 
