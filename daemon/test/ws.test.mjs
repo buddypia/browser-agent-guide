@@ -9,12 +9,17 @@ import { WebSocket } from 'ws';
 import { createHttpServer } from '../src/http.js';
 import { attachWebSocketServer } from '../src/ws.js';
 import { listEntries } from '../src/inbox.js';
-import { writeEntry } from '../src/writer.js';
+import { writeEntry, decodeBase64, inlineFilename } from '../src/writer.js';
 
 // 1x1 PNG
 const PNG_B64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const TOKEN = 'test-secret-token';
+
+function fakeWebp(sizeBytes = 64) {
+  const pad = Buffer.alloc(Math.max(0, sizeBytes - 12), 0x20);
+  return Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP'), pad]);
+}
 
 let httpServer;
 let inboxDir;
@@ -101,4 +106,29 @@ test('writeEntry: slug 衝突時は -2 で別ディレクトリ', () => {
   const b = writeEntry(inboxDir, { capturedAt: '2026-06-18T09:09:09.000Z', image: { shot: PNG_B64 } });
   assert.notEqual(a.id, b.id);
   assert.ok(b.id.endsWith('-2'));
+});
+
+test('writeEntry: image.inline(webp) を shot.inline.webp として永続し files に含む', () => {
+  const w = writeEntry(inboxDir, {
+    capturedAt: '2026-06-18T09:11:00.000Z',
+    image: { shot: PNG_B64, inline: `data:image/webp;base64,${fakeWebp().toString('base64')}`, inlineMime: 'image/webp' },
+  });
+  assert.ok(w.files.includes('shot.inline.webp'), 'inline 変種を files に載せる');
+  assert.ok(existsSync(join(w.dir, 'shot.inline.webp')), 'shot.inline.webp を永続する');
+  // inline 無しは何も書かない（後方互換）。
+  const noInline = writeEntry(inboxDir, { capturedAt: '2026-06-18T09:12:00.000Z', image: { shot: PNG_B64 } });
+  assert.ok(!noInline.files.some((f) => f.startsWith('shot.inline')), 'inline 無しは inline ファイルを作らない');
+});
+
+test('decodeBase64: png/webp/jpeg data URL と生 base64 を扱う / inlineFilename マッピング', () => {
+  const raw = Buffer.from([1, 2, 3]);
+  const b64 = raw.toString('base64');
+  assert.deepEqual([...decodeBase64(b64)], [1, 2, 3], '生 base64');
+  assert.deepEqual([...decodeBase64(`data:image/png;base64,${b64}`)], [1, 2, 3], 'png data URL');
+  assert.deepEqual([...decodeBase64(`data:image/webp;base64,${b64}`)], [1, 2, 3], 'webp data URL');
+  assert.deepEqual([...decodeBase64(`data:image/jpeg;base64,${b64}`)], [1, 2, 3], 'jpeg data URL');
+  assert.equal(decodeBase64(null), null);
+  assert.equal(inlineFilename('image/webp'), 'shot.inline.webp');
+  assert.equal(inlineFilename('image/jpeg'), 'shot.inline.jpg');
+  assert.equal(inlineFilename('image/png'), null, '未対応 mime は null（書かない）');
 });
