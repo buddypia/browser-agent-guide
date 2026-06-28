@@ -1,62 +1,68 @@
-# REVIEW: page-feedback — メモを残した HTML 要素の取得 + MCP リネーム
+# REVIEW: bag-workflow スキルの新ツール名追従 + 登録 alias 寄せ
 
 ## 概要
-お描き／メモのキャプチャに、**注釈を残した対象要素の `outerHTML` と軽量 a11y** を載せ、
-**画像トークンなし**で「メモを残した HTML 要素」を CLI へ渡せるようにした。あわせて MCP の
-サーバ名・ツール名を modality 中立な名前へ改名（旧名は deprecated エイリアスとして温存）。
+PR #59（daemon MCP ツール改名 + HTML/a11y キャプチャ）の**残作業**として、`bag-workflow` スキルを
+新ツール名へ追従させ、推奨 CLI 登録 alias を `bag_visual_feedback` → `bag_page_feedback` へ寄せた。
+**docs / skill のみの変更**で、拡張・daemon のソースコードは一切触っていない。
 
 ## なぜ
-- これまで CLI へ渡るのは selector / anchorLabel 止まりで、**対象要素の HTML そのものは取れなかった**。
-  「この要素を直して」をソース特定するには結局スクショ(vision)が要り、トークンが重かった。
-- ツール名 `*_visual_feedback*` は「画像なしでメモ＋HTML だけ取得する」ケースでも "visual" を冠して
-  紛らわしい（ユーザ指摘）。`*_feedback_context`（テキスト/HTML）/ `*_feedback_image`（画像）に分離した。
+- PR #59 でツール名を `*_visual_feedback*` → `*_feedback_context` / `*_feedback_image` に改名し旧名は
+  deprecated エイリアスで温存したが、スキル（SKILL.md / references / preflight.sh）は旧名のままで、
+  「`.claude` 変更はガバナンススイート実行を伴う」ため明示的に別PRへ繰り延べていた。
+- 同 PR で「推奨登録 alias を `bag_page_feedback` へ寄せる」移行手順は daemon/README に記載済み。
+  実例とスキル記述を新 alias に揃えると新規ユーザーがそのまま新名で運用できる。
+- ユーザ依頼: 上記2点（skill 新名追従 / alias 寄せ）を実施。
 
 ## 何を
-1. **キャプチャ（schema v1）**: 注釈要素の `outerHTML`（≤8KB、超過時 `truncated:true`）＋ a11y
-   (role/name/level/state) を `annotation.json` の各 item に追加。
-2. **daemon context ツール**: `get_latest_feedback_context` / `get_feedback_context` が html/a11y を
-   text と `structuredContent` に載せて返す（**画像なし**）。image ツールは無変更（Codex パリティ維持）。
-3. **リネーム**: server `bag-visual-feedback`→`bag-page-feedback`、ツール 5 種を新名へ。旧名 5 種は
-   `registerWithAlias` で同一ハンドラの deprecated エイリアスとして残す（`tools/list` は 5+5）。
+1. **skill 新名追従**: SKILL.md・references/{daemon-mcp,fallbacks}.md・scripts/preflight.sh の
+   ツール名を 5 種すべて新名へ（image 2 種は `_image` サフィックス付与に注意）。
+2. **alias 寄せ**: 全登録例（claude/codex/antigravity/.mcp.json/ツール呼び出し接頭辞）を
+   `bag_page_feedback` に。旧 `bag_visual_feedback` は「再登録不要」で温存。
+3. **移行安全策**: preflight.sh の登録検出 grep を `grep -qiE 'bag_page_feedback|bag_visual_feedback'` に。
+   旧 alias 登録ユーザーが黙って FILE 経路へ落ちるのを防ぐ。
+4. **HTML/a11y（schema v1）の周知**: context ツールが画像なしで `html`/`a11y` を返すことを SKILL.md の
+   読み取り項目・daemon-mcp.md のツール表/スキーマ例に反映（PR #59 の機能をスキルが使えるように）。
+5. **AGENTS.md 整合**: alias gotcha・「未同期」注記・Skills cues・関連 stale 名を新名へ統一。
 
 ## どうやって
-- `content/content-script.js`: `captureOuterHtml` / `captureA11y` を追加し `collectVisualFeedbackData` の
-  item に `html` / `a11y` を付与（ガード領域外なので glossary staleness に非該当）。
-- `background/service-worker.js`: `buildAnnotationJson` で html/a11y を items にコピー、schema を
-  `bag.visual-feedback/v0`→`v1` に bump。
-- `daemon/src/inbox.js`: `buildEntryContext` に html/a11y を追加（`normalizeHtmlCapture`/`normalizeA11yCapture`
-  で v0 は null 正規化）、`buildEntryContextText` に a11y/html 行を出力。
-- `daemon/src/server.js`: `registerWithAlias` 導入、5 ツール改名 + 旧名エイリアス、ガイダンス文言を新名へ。
+- リネームは単純置換ではない（`get_latest_visual_feedback` → `get_latest_feedback_image`、
+  `get_visual_feedback` → `get_feedback_image` は `_image` 付与）。最長一致順で手当てし、
+  bare `get_feedback`/`get_latest_feedback`（サフィックス欠落）が混入しないことを grep で確認。
+- 旧 alias は「移行ノート」「両 alias 検出 grep」以外には残さない方針で限定。
+- daemon-mcp.md の annotation.json 例を v0 → `bag.visual-feedback/v1` に更新し `html`/`a11y` と
+  `dataAgentId` を追記（優先度行の先頭昇格と例の整合）。
 
 ## 影響
-- **後方互換**: 旧ツール名は alias で全て動作（既存 CLI 設定・スキル・テストは無改修）。旧 v0 entry も
-  html/a11y=null で安全。WS payload の `type:'visual_feedback'` は内部プロトコルとして温存。
-- **登録 alias 非変更**: Claude Code/Codex で打つ接頭辞（`bag_visual_feedback:`）は**ユーザ設定の alias**で
-  サーバ名リネームの影響を受けない。docs では `bag_page_feedback` を推奨と明記（移行は任意）。
+- **後方互換**: 旧ツール名は daemon 側の deprecated エイリアスで動作継続。旧 alias `bag_visual_feedback`
+  で登録済みのユーザーは**再登録不要**（preflight も両 alias を検出）。
+- **コード非接触**: 拡張/daemon の挙動・テストに影響なし（差分は md / sh のドキュメントのみ）。
+- 反映には Claude Code セッション再起動（スキル再読込）と、新名を `tools/list` に出すための
+  daemon 再起動が必要（任意・旧名でも動く）。
 
 ## トレードオフ
-- `tools/list` が 10 件（新5＋旧5）になりモデルへのノイズが増える。description で旧名を明確に
-  `[deprecated]` 表記し新名へ誘導。将来エイリアス撤去で 5 件へ戻せる。
-- outerHTML を text にも載せるため context 応答が最大 ~8KB 増える（画像 vision よりは桁違いに軽量）。
+- 旧 alias を docs に残すことで記述がやや増える（移行の安全性・既存ユーザー保護を優先）。
+- 生成図 `docs/mcp-*.html` は本PRでは未同期（旧名 alias で動作するため別作業に繰り延べ）。
 
-## 残作業（このPRでは未対応・すべて alias 経由で動作する）
-- `.claude/skills/bag-workflow/**`（SKILL.md / references / preflight.sh）の新名追従。`.claude` 変更は
-  ガバナンススイート実行が要るため別PR推奨。
-- 生成物 `docs/mcp-*.html`（図）と `*.artifact.spec.json` の新名追従（再生成系）。
-- daemon npm パッケージ名 `bag-visual-feedback-daemon` は今回未変更（ユーザ要望はツール名のため対象外）。
+## 残作業（このPRでは未対応）
+- 生成図 `docs/mcp-*.html` / `*.artifact.spec.json` の新名再同期（再生成系・旧名 alias で動作継続）。
+- daemon npm パッケージ名 `bag-visual-feedback-daemon` は対象外（ツール名/登録 alias の話とは別レイヤ）。
 
-## ファイル構造（変更点）
-- 拡張: `content/content-script.js`, `background/service-worker.js`
-- daemon: `src/inbox.js`, `src/server.js`, `scripts/{probe,e2e-smoke}.mjs`, `test/{mcp,inbox}.test.mjs`
-- docs: `AGENTS.md`, `daemon/README.md`, `docs/visual-feedback-mvp-usage.md`, `glossary/daemon/visual-feedback.md`
+## ファイル構造（変更点・6+1 ファイル）
+- skill: `.claude/skills/bag-workflow/SKILL.md`, `references/daemon-mcp.md`, `references/fallbacks.md`,
+  `scripts/preflight.sh`
+- docs: `daemon/README.md`, `AGENTS.md`
+- review: `REVIEW.md`（本ファイル）
 
 ## レビュー依頼
-- 推奨登録 alias を `bag_page_feedback` へ寄せる方針で良いか（現状は docs 推奨のみ・強制しない）。
-- 旧ツール名エイリアスの撤去時期（次メジャー等）をどうするか。
+- 推奨登録 alias を `bag_page_feedback` に寄せる方針で良いか（旧 alias は強制再登録なしで温存）。
+- daemon パッケージ名 `bag-visual-feedback-daemon` を将来揃えるか（今回は対象外）。
 
 ## 検証
-- daemon: `npm test` 103 pass（html/a11y の新規2件含む）、`node scripts/e2e-smoke.mjs` 実バイナリで新名通過。
-- root: `check:js` / `check:markers` / `check:glossary` / `glossary:staleness` / `test:glossary` / `test:vf` 緑。
-- root `npm run check` のブラウザ系: `spa-recipe.spec.mjs` が環境起因でフレーク（失敗テスト集合が実行ごとに変化、
-  エラーは "Target page/context closed" 等の teardown timeout）。本変更はレシピ/SPA/アンカリング経路に
-  非接触で因果なし（他UIスペックは全て pass）。
+- `bash -n scripts/preflight.sh` OK ＋ grep 交替の機能確認（新旧 alias 検出 / 無関係行は非マッチ）。
+- ガバナンススイート `node --test .claude/scripts/lib/__tests__/*.test.mjs` 53/53 pass、
+  `node .claude/scripts/check-hook-refs.mjs` OK。
+- `npm run check:markers`（14 マーカー）/ `check:glossary`（警告0）/ `glossary:staleness`（変更コード0）緑。
+- 敵対的検証ワークフロー（rename-mapping / alias-migration / consistency / scope-guard）全 4 レンズ PASS
+  （唯一の nit＝例に `dataAgentId` 欠落 を修正済み）。
+- 重い Playwright/browser テスト（`test` / `test:vf` / `test:ui`）は拡張/daemon ソース無変更のため対象外
+  （意図的スキップ。#59 で確認済みの spa-recipe フレークは本PRと無関係）。
