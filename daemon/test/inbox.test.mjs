@@ -13,10 +13,30 @@ import {
   buildEntryContextText,
   buildEntryText,
   readAnnotation,
+  readEntryInline,
   matchesFilter,
   queryEntries,
   peekDistinctRecent,
+  INLINE_MAX_BYTES,
 } from '../src/inbox.js';
+import { writeEntry } from '../src/writer.js';
+
+// 偽 WebP（RIFF....WEBP ヘッダ + パディング）。daemon は中身を検証せず base64 化するだけなので
+// ルーティング/mime/サイズの検証にはこれで十分。
+function fakeWebp(sizeBytes = 64) {
+  const pad = Buffer.alloc(Math.max(0, sizeBytes - 12), 0x20);
+  return Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP'), pad]);
+}
+// 偽 JPEG（SOI=FFD8FF + パディング）。WebP→JPEG フォールバック経路の検証用。
+function fakeJpeg(sizeBytes = 64) {
+  const body = Buffer.alloc(Math.max(0, sizeBytes - 3), 0x20);
+  return Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), body]);
+}
+const WEBP_MAGIC_RIFF = [0x52, 0x49, 0x46, 0x46]; // 'RIFF'
+const JPEG_MAGIC = [0xff, 0xd8, 0xff]; // SOI
+const PNG_MAGIC = [137, 80, 78, 71, 13, 10, 26, 10];
+const PNG_B64_TINY =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const INBOX = resolve(here, 'fixtures/inbox');
@@ -222,4 +242,122 @@ test('buildEntryText: 指示一覧（番号/メモ/intent/selector）を含む',
   assert.ok(text.includes('dataAsin="B012345678"'));
   assert.ok(text.includes('candidate: source=nearest-link'));
   assert.ok(text.includes('vision'), 'vision で見るよう指示');
+});
+
+// ── MCP inline コンパクト変種（Claude Code 出力トークン上限対策） ───────────────────────
+test('readEntryInline: memory は inlineBuffer、disk は shot.inline.webp を probe、無ければ null', () => {
+  // memory: RAM の inlineBuffer を返す。
+  const mem = { id: 'm', inlineBuffer: fakeWebp(), inlineMime: 'image/webp' };
+  assert.deepEqual([...readEntryInline(mem).buffer.subarray(0, 4)], WEBP_MAGIC_RIFF);
+  assert.equal(readEntryInline(mem).mime, 'image/webp');
+  // disk: dir 直下の shot.inline.webp を読む。
+  const tmp = mkdtempSync(join(tmpdir(), 'bag-inline-'));
+  try {
+    writeFileSync(join(tmp, 'shot.inline.webp'), fakeWebp(40));
+    const hit = readEntryInline({ id: 'd', dir: tmp });
+    assert.equal(hit.mime, 'image/webp');
+    assert.deepEqual([...hit.buffer.subarray(0, 4)], WEBP_MAGIC_RIFF);
+    // 無い dir は null。
+    assert.equal(readEntryInline({ id: 'e', dir: join(tmp, 'nope') }), null);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('buildEntryContent: inline(webp) があれば inline を image に使い、file_path はフル解像度 PNG のまま', () => {
+  const inboxDir = mkdtempSync(join(tmpdir(), 'bag-inline-disk-'));
+  try {
+    const written = writeEntry(inboxDir, {
+      capturedAt: '2026-06-18T01:02:03.004Z',
+      url: 'https://example.com/x',
+      image: {
+        shot: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        inline: `data:image/webp;base64,${fakeWebp(80).toString('base64')}`,
+        inlineMime: 'image/webp',
+      },
+      annotation: { url: 'https://example.com/x', items: [] },
+    });
+    assert.ok(written.files.includes('shot.inline.webp'), 'inline 変種が disk に永続される');
+    const entry = findEntry(inboxDir, written.id);
+    const content = buildEntryContent(entry);
+    const img = content.find((c) => c.type === 'image');
+    const txt = content.find((c) => c.type === 'text').text;
+    assert.equal(img.mimeType, 'image/webp', 'inline は webp として返る（PNG ではない）');
+    assert.deepEqual([...Buffer.from(img.data, 'base64').subarray(0, 4)], WEBP_MAGIC_RIFF);
+    // file_path は引き続きフル解像度 shot.png（Codex view_image / 人間 DL 用）。
+    assert.ok(txt.includes(`file_path: ${join(entry.dir, 'shot.png')}`), 'file_path はフル解像度 shot.png のまま');
+  } finally {
+    rmSync(inboxDir, { recursive: true, force: true });
+  }
+});
+
+test('buildEntryContent: inline が無く full-res PNG が予算超過なら image を omit（テキストで案内）', () => {
+  // 20KB の shotBuffer（INLINE_MAX_BYTES=14KB 超）。inline 無し → 予算超過で image を載せない。
+  const entry = {
+    id: 'big__mem',
+    dir: join(tmpdir(), 'bag-nope-big'),
+    shot: join(tmpdir(), 'bag-nope-big', 'shot.png'),
+    shotBuffer: Buffer.alloc(20 * 1024, 0x7f),
+    storage: 'memory',
+    materialized: false,
+    annotation: { url: 'https://x', items: [{ n: 1, note: 'big', selector: '#t' }] },
+  };
+  const content = buildEntryContent(entry, { shotUrlFor: (id, kind) => `http://h/${kind}/${id}.png` });
+  assert.ok(!content.some((c) => c.type === 'image'), '予算超過のフル PNG は inline に載せない');
+  const txt = content.find((c) => c.type === 'text').text;
+  assert.ok(txt.includes('inline image omitted'), 'omit の注記を出す');
+  assert.ok(txt.includes('view_image(file_path)'), 'Codex 向けに view_image を案内');
+  assert.ok(txt.includes('shot_url: '), 'フル解像度の取得先 shot_url を併走する');
+});
+
+test('buildEntryContent: 小さい full-res PNG（inline 無し）は従来どおり image/png で載る', () => {
+  // 既存 fixture（70 byte PNG, inline 無し）は予算内なので image/png で返り、後方互換。
+  const [entry] = listEntries(INBOX, 1);
+  const content = buildEntryContent(entry);
+  const img = content.find((c) => c.type === 'image');
+  assert.equal(img.mimeType, 'image/png');
+  assert.deepEqual([...Buffer.from(img.data, 'base64').subarray(0, 8)], PNG_MAGIC);
+});
+
+test('buildEntryContent: INLINE_MAX_BYTES 境界（ちょうどは載せ、+1 は omit）', () => {
+  const shotUrlFor = (id, kind) => `http://h/${kind}/${id}.png`;
+  const make = (n) => ({
+    id: `bnd${n}`,
+    dir: join(tmpdir(), 'bag-nope-bound'),
+    shot: join(tmpdir(), 'bag-nope-bound', 'shot.png'),
+    shotBuffer: Buffer.alloc(n, 0x10),
+    storage: 'memory',
+    materialized: false,
+    annotation: { url: 'https://x', items: [] },
+  });
+  const atLimit = buildEntryContent(make(INLINE_MAX_BYTES), { shotUrlFor });
+  assert.ok(atLimit.some((c) => c.type === 'image'), `${INLINE_MAX_BYTES} バイトちょうどは載せる（<=）`);
+  const over = buildEntryContent(make(INLINE_MAX_BYTES + 1), { shotUrlFor });
+  assert.ok(!over.some((c) => c.type === 'image'), `${INLINE_MAX_BYTES + 1} バイトは omit する`);
+});
+
+test('inline(jpeg): WebP→JPEG フォールバックも image/jpeg で返り、disk は shot.inline.jpg を probe', () => {
+  // memory: inlineMime=jpeg を返す。
+  const mem = { id: 'mj', inlineBuffer: fakeJpeg(), inlineMime: 'image/jpeg' };
+  const memHit = readEntryInline(mem);
+  assert.equal(memHit.mime, 'image/jpeg');
+  assert.deepEqual([...memHit.buffer.subarray(0, 3)], JPEG_MAGIC);
+  // disk: shot.inline.webp が無く shot.inline.jpg だけある時、jpg を probe して image/jpeg で返す。
+  const inboxDir = mkdtempSync(join(tmpdir(), 'bag-inline-jpg-'));
+  try {
+    const written = writeEntry(inboxDir, {
+      capturedAt: '2026-06-18T01:02:03.004Z',
+      url: 'https://example.com/j',
+      image: { shot: PNG_B64_TINY, inline: `data:image/jpeg;base64,${fakeJpeg(80).toString('base64')}`, inlineMime: 'image/jpeg' },
+      annotation: { url: 'https://example.com/j', items: [] },
+    });
+    assert.ok(written.files.includes('shot.inline.jpg'), 'jpeg は shot.inline.jpg として永続');
+    assert.ok(!written.files.includes('shot.inline.webp'), 'webp は作らない');
+    const entry = findEntry(inboxDir, written.id);
+    const img = buildEntryContent(entry).find((c) => c.type === 'image');
+    assert.equal(img.mimeType, 'image/jpeg', 'disk の shot.inline.jpg を image/jpeg で返す');
+    assert.deepEqual([...Buffer.from(img.data, 'base64').subarray(0, 3)], JPEG_MAGIC);
+  } finally {
+    rmSync(inboxDir, { recursive: true, force: true });
+  }
 });

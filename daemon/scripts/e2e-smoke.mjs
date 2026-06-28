@@ -17,6 +17,12 @@ const PNG_B64 =
 const TOKEN = 'e2e-token';
 const PORT = 8791;
 const inbox = mkdtempSync(join(tmpdir(), 'vf-e2e-'));
+// 偽 WebP（RIFF....WEBP）。MCP inline 専用コンパクト変種の経路を検証する。
+const INLINE_WEBP_B64 = (() => {
+  const pad = Buffer.alloc(64, 0x20);
+  return Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP'), pad]).toString('base64');
+})();
+const INLINE_MAX_BYTES = 14 * 1024; // inbox.js と同じ omit 閾値（回帰検知用）。
 
 // retention 検証用: 起動前に「古い別案件」を1件仕込む（起動時 sweep で done/ へ退避されるはず）。
 const STALE_ID = '20260101-000000__stale-example-com__stale__deadbee';
@@ -78,7 +84,7 @@ try {
     capturedAt: '2026-06-18T02:03:04.005Z',
     url: 'https://example.com/e2e',
     title: 'E2E',
-    image: { shot: PNG_B64, raw: PNG_B64 },
+    image: { shot: PNG_B64, raw: PNG_B64, inline: `data:image/webp;base64,${INLINE_WEBP_B64}`, inlineMime: 'image/webp' },
     annotation: { url: 'https://example.com/e2e', title: 'E2E', items: [{ n: 1, note: 'E2E メモ' }] },
     memo: '# memo\n',
   });
@@ -104,8 +110,12 @@ try {
   const txt = res.content.find((c) => c.type === 'text');
   if (!img) fail('MCP が image を返さない');
   if (!txt.text.includes(ack.id)) fail('get_latest が push したエントリを返さない');
+  // inline コンパクト変種を渡したので webp で返り、サイズは omit 閾値より十分小さいはず（回帰検知）。
+  if (img.mimeType !== 'image/webp') fail(`inline を渡したのに image mime が webp でない: ${img.mimeType}`);
+  const inlineBytes = Buffer.from(img.data, 'base64').length;
+  if (inlineBytes > INLINE_MAX_BYTES) fail(`inline image が予算超過: ${inlineBytes} > ${INLINE_MAX_BYTES}`);
   console.log('OK MCP context-first → context と image の両方が path に', ack.id, 'を含む');
-  console.log('OK MCP get_latest → image', Buffer.from(img.data, 'base64').length, 'bytes');
+  console.log('OK MCP get_latest → inline', img.mimeType, inlineBytes, 'bytes (<', INLINE_MAX_BYTES, ')');
 
   // 3) retention 検証: 起動時 sweep が stale を done/ へ退避 → 一覧から消え、id 指定では done/ から復元できる
   const client2 = new Client({ name: 'e2e-retention', version: '0' });

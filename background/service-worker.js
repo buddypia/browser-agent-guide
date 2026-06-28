@@ -912,7 +912,13 @@ async function captureVisualFeedback({ tabId, autoSync = false }) {
           dpr: data.dpr,
           viewport: data.viewport,
           downloadsDir: (daemon.saveDir || '').trim() || knownDownloadsDir || undefined,
-          image: { shot: composite.dataUrl, raw: screenshotDataUrl },
+          // inline = MCP 専用のコンパクト変種（WebP/JPEG, ~12KB）。Claude Code の出力トークン
+          // 上限対策で daemon の {type:'image'} に使う。shot/raw はフル解像度 PNG のまま温存。
+          image: {
+            shot: composite.dataUrl,
+            raw: screenshotDataUrl,
+            ...(composite.inlineDataUrl ? { inline: composite.inlineDataUrl, inlineMime: composite.inlineMime } : {}),
+          },
           annotation,
           memo,
         },
@@ -1146,6 +1152,16 @@ function buildAnnotationJson({ data, composite, capturedAt, tab }) {
       height: composite.height,
       downscaled: composite.downscaled,
       outputScale: composite.outputScale,
+      // MCP inline 専用コンパクト変種のメタ（skim 用。daemon は実ファイル/RAM を直接見るので非 load-bearing）。
+      ...(composite.inlineDataUrl
+        ? {
+            inline: true,
+            inlineMime: composite.inlineMime,
+            inlineWidth: composite.inlineWidth,
+            inlineHeight: composite.inlineHeight,
+            inlineBytes: composite.inlineByteLength,
+          }
+        : {}),
     },
     items: (data.items || []).map((it, i) => ({
       n: i + 1,

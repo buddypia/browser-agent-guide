@@ -171,6 +171,22 @@ test('archived id は image を取得できる（I4: done/ 退避後も by-id im
     assert.deepEqual([...head], [137, 80, 78, 71], '有効な PNG バイトを done/ から返す');
   }));
 
+test('archived id は inline(webp) 変種があればそれを返す（done/ 退避後も inline を維持）', () =>
+  withInbox((inbox) => {
+    const id = '20260101-000000__example-com__page__inl0001';
+    const dir = makeEntry(inbox, id, { ageMs: 20 * DAY, annotation: { url: 'https://example.com/page', title: 'page' } });
+    // shot.inline.webp を隣に置く（RIFF....WEBP の偽 WebP）。
+    const webp = Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP'), Buffer.alloc(32, 0x20)]);
+    writeFileSync(join(dir, 'shot.inline.webp'), webp);
+    const r = pruneInbox(inbox, policy({ maxAgeMs: 14 * DAY }));
+    assert.equal(r.archived, 1);
+    assert.ok(existsSync(join(inbox, 'done', id, 'shot.inline.webp')), 'inline 変種も done/ へ一緒に退避');
+    const entry = findEntry(inbox, id);
+    const img = buildEntryContent(entry).find((c) => c.type === 'image');
+    assert.equal(img.mimeType, 'image/webp', 'archived でも inline(webp) を優先して返す');
+    assert.deepEqual([...Buffer.from(img.data, 'base64').subarray(0, 4)], [0x52, 0x49, 0x46, 0x46], 'RIFF');
+  }));
+
 test('grace floor: mtime=0（stat 失敗）は MAX-AGE で archive せず触らない（N2）', () =>
   withInbox((inbox) => {
     const id = '20260101-000000__example-com__page__nomt001';

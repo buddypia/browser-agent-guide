@@ -297,9 +297,16 @@ url = "http://127.0.0.1:8765/mcp"
    - **(検証済)** Claude Code は MCP image をネイティブに vision 解釈する（handoff §2.2）。Codex は
      rmcp クライアント有効時に読むが、ビルドによっては inline image を vision 化せず、`file_path` +
      組み込み `view_image` が確実な経路（上記「Codex CLI」節の前提を満たすこと）。
-   - Claude Code は MCP 応答に既定 ~25,000 トークンの上限があり（生の base64 文字数で測る・claude-code#9152）、
-     大きな注釈 PNG は inline 経路で拒否されうる。`MAX_MCP_OUTPUT_TOKENS` を上げる（例: `50000`）と回避でき、
-     拒否されてもデーモンは常に `file_path`/`shot_url` を併走させるのでフル解像度画像へは到達できる。
+   - **(inline 画像のトークン上限対策)** Claude Code は MCP image の base64 を「テキスト」として
+     既定 ~25,000 トークン上限（`MAX_MCP_OUTPUT_TOKENS`）で測り、超過時は image ごと**ハードエラーで落とす**
+     （text と違い disk 退避フォールバックが無い・claude-code#9152/#31208）。そのため `{type:'image'}` には
+     フル解像度 PNG ではなく、拡張の `offscreen/inline-encode.js` が生成した**コンパクト変種（WebP/JPEG, ~12KB）**
+     を載せる。これで Claude Code の inline vision が `MAX_MCP_OUTPUT_TOKENS` を上げずにそのまま通る。
+     - フル解像度 PNG は引き続き `file_path` / `shot_url` / `/shot/<id>.png` / `chrome.downloads` で配信する
+       （Codex の `view_image` と人間 DL 用。2000px の vision キャップは不変）。
+     - コンパクト変種が無い古い entry や、まれにサイズが収まらない場合は image を**省略**し
+       `file_path`/`shot_url` のテキストに委ねる（上限を構造的に超えさせない）。
+     - もっと大きく鮮明な inline が欲しい時だけ `MAX_MCP_OUTPUT_TOKENS` を上げる（例: `50000`）。
 
 ## テスト
 
