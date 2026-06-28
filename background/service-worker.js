@@ -95,7 +95,9 @@ const MEMORY_VERBS = new Set([
   'injectButton',
   'injectPanel',
 ]);
+// @term: recipe  (用語定義: glossary/extension/recipe.md。options.js の SAFE_RECIPE_VERBS と同期必須)
 const RECIPE_VERBS = new Set(['injectHtml', 'injectCss', 'injectScript', 'outlineElement', 'injectButton', 'injectPanel']);
+// @endterm: recipe
 const REMEMBER_SCOPES = new Set(['page', 'domain', 'all']);
 const AUTO_SYNC_DEFAULT_DEBOUNCE_MS = 1800;
 const AUTO_SYNC_MIN_DEBOUNCE_MS = 750;
