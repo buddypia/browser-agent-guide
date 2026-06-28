@@ -31,8 +31,10 @@ async function composite({ screenshotDataUrl, data }) {
 
   const canvas = new OffscreenCanvas(outWidth, outHeight);
   const ctx = canvas.getContext('2d');
+  // @term: visual-feedback  (用語定義: glossary/daemon/visual-feedback.md。背景描画で drawImage を使う唯一の箇所)
   // 背景 = スクリーンショット（device px → output px へ一様縮小）。
   ctx.drawImage(bitmap, 0, 0, outWidth, outHeight);
+  // @endterm: visual-feedback
   if (typeof bitmap.close === 'function') bitmap.close();
 
   // 図形座標は CSS viewport px → device px(×dpr) → output px(×outputScale)。

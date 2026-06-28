@@ -109,12 +109,14 @@ function createMemoryBackedStore({ inboxDir, mode, memoryLimit }) {
   };
 }
 
+// @term: entry-store  (用語定義: glossary/daemon/entry-store.md。memory|hybrid|disk の正規化)
 export function normalizeStorageMode(value) {
   const mode = String(value || 'disk').toLowerCase();
   if (mode === 'memory') return 'memory';
   if (mode === 'hybrid') return 'hybrid';
   return 'disk';
 }
+// @endterm: entry-store
 
 function createMemoryEntry({ inboxDir, payload, now, taken }) {
   const shotBuffer = decodeBase64(payload?.image?.shot);

@@ -1,0 +1,29 @@
+# 用語集(Living Glossary)のサーバ側ゲート。ローカル hook を回避(--no-verify)しても
+# ここで必ず捕捉される = 「コードを直したら関連ドキュメントを更新」の最終強制。
+#
+# 注: 本リポジトリは元来 CI 無し。これは用語集の *軽量* な検証だけを回す独立ワークフローで、
+#     ブラウザ駆動の重いテスト(playwright)は含めない(Node のみ・依存ゼロ)。
+name: glossary
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  glossary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # check-staleness の merge-base 比較に履歴が必要
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: validate (schema / refs / freshness / markers)
+        run: node scripts/glossary/validate.mjs
+      - name: staleness (code change must re-verify bound terms)
+        if: github.event_name == 'pull_request'
+        run: node scripts/glossary/check-staleness.mjs --base origin/${{ github.base_ref }}
+      - name: unit tests
+        run: node --test 'test/glossary/*.test.mjs'

@@ -19,6 +19,8 @@ zip -r "$OUTPUT" . \
   -x "scripts/*" \
   -x "daemon/*" \
   -x "docs/*" \
+  -x "glossary/*" \
+  -x ".github/*" \
   -x "nanobanana-output/*" \
   -x ".tmp/*" \
   -x ".gitignore" \
