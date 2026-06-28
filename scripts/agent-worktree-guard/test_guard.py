@@ -13,12 +13,6 @@ from pathlib import Path
 
 CLI = Path(__file__).with_name("agent-worktree-guard")
 SESSION = "test-session"
-PROMPT = (
-    "すべてのworktreeの作業が完了しました。PR（プルリクエスト）を作成しますか？\n"
-    "(모든 worktree 작업이 완료되었습니다. PR(풀 리퀘스트)을 생성하시겠습니까?)"
-)
-
-
 def run(args: list[str], cwd: Path, *, stdin: str | None = None, check: bool = True, session: str = SESSION):
     result = subprocess.run(
         [str(CLI), "--session-id", session, *args],
@@ -96,8 +90,8 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         self.assertIn("- [x]", status)
 
         audit = run(["audit"], self.repo)
-        self.assertIn(PROMPT, audit.stdout)
-        self.assertIn("Work briefing", audit.stdout)
+        self.assertIn("Worktree 承認依頼レビュー", audit.stdout)
+        self.assertIn("11 セクション", audit.stdout)
         self.assertIn("agent-worktree-guard confirm-pr --confirmed", audit.stdout)
 
         pr_create_payload = json.dumps(
@@ -154,6 +148,7 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         subprocess.run(["git", "worktree", "add", str(outside), "-b", "feature/outside"], cwd=self.repo, check=True)
         cleanup = run(["cleanup", "--confirmed"], self.repo)
         self.assertIn("cleaned 1 worktree", cleanup.stdout)
+        self.assertIn("# PR 承認後の完了報告", cleanup.stdout)
         self.assertFalse(wt.exists())
         self.assertTrue(outside.exists())
         subprocess.run(["git", "worktree", "remove", str(outside), "--force"], cwd=self.repo, check=True)
@@ -192,6 +187,7 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         run(["mark-merged", str(wt)], self.repo)
         cleanup = run(["cleanup", "--confirmed"], self.repo)
         self.assertIn("cleaned 1 worktree", cleanup.stdout)
+        self.assertIn("# PR 承認後の完了報告", cleanup.stdout)
         self.assertFalse(wt.exists())
         self.assertTrue(outside.exists())
         subprocess.run(["git", "worktree", "remove", str(outside), "--force"], cwd=self.repo, check=True)
@@ -260,6 +256,7 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         cleanup = run(["cleanup", "--confirmed"], self.repo)
         self.assertIn("cleaned 1 worktree", cleanup.stdout)
         self.assertIn("branches deleted: 1", cleanup.stdout)
+        self.assertIn("# PR 承認後の完了報告", cleanup.stdout)
         self.assertFalse(wt.exists())
         self.assertFalse(self._branch_exists("feature/branchgone"))
 
@@ -283,6 +280,7 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         cleanup = run(["cleanup", "--confirmed"], self.repo)
         self.assertIn("cleaned 1 worktree", cleanup.stdout)
         self.assertIn("stashes dropped: 1", cleanup.stdout)
+        self.assertIn("# PR 承認後の完了報告", cleanup.stdout)
         self.assertFalse(wt.exists())
 
         after = self._git_out(["stash", "list"], self.repo)
@@ -305,14 +303,14 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         review_dir = wt / ".tmp" / "worktree-feature__reviewed"
         review_dir.mkdir(parents=True, exist_ok=True)
         (review_dir / "REVIEW.md").write_text(
-            "# Worktree Review — feature/reviewed\n\n"
+            "# Worktree 承認依頼レビュー — feature/reviewed\n\n"
             "## Summary / 概要 (作業内容)\nクリーンアップ強化の要点。\n\n"
             "## Trade-offs / トレードオフ\nstash 全消しではなく branch 一致のみ。\n",
             encoding="utf-8",
         )
 
         audit = run(["audit"], self.repo)
-        self.assertIn("human review (REVIEW.md)", audit.stdout)
+        self.assertIn("REVIEW.md:", audit.stdout)
         self.assertIn("概要", audit.stdout)
         self.assertIn("クリーンアップ強化の要点", audit.stdout)
         self.assertIn("トレードオフ", audit.stdout)
@@ -322,7 +320,7 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         self._make_committed_worktree("noreview")
 
         audit = run(["audit"], self.repo)
-        self.assertIn("REVIEW.md): 未作成", audit.stdout)
+        self.assertIn("REVIEW.md: 未作成", audit.stdout)
         self.assertIn("mark-worktree-reviewed.mjs", audit.stdout)
 
 
