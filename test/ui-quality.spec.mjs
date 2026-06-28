@@ -120,6 +120,18 @@ async function installChromeMock(page, seed = {}) {
       }
     }
 
+    let clipboardText = '';
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        async writeText(text) {
+          clipboardText = String(text);
+          window.__bagCopiedText = clipboardText;
+        },
+      },
+    });
+    window.__bagCopiedText = clipboardText;
+
     window.chrome = {
       runtime: {
         lastError: null,
@@ -194,7 +206,9 @@ test.describe('UI quality gates', () => {
 
     await expect(page.getByRole('heading', { name: 'Start by typing an instruction' })).toBeVisible();
     await expect(page.getByLabel('Target tab')).toContainText('Example App');
-    await expect(page.getByLabel('Target tab')).toContainText('Tab 1 / Window 2 / Pos 1');
+    await expect(page.getByRole('button', { name: 'Copy tab ID 1' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Copy tab ID 1' })).toContainText('1');
+    await expect(page.getByLabel('Target tab')).toContainText('Window 2 / Pos 1');
     await expect(page.getByLabel('Language')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Add note' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Copy for AI' })).toBeVisible();
@@ -209,6 +223,16 @@ test.describe('UI quality gates', () => {
     await expect(page.getByRole('button', { name: 'Open prompt history' })).toHaveAttribute('aria-expanded', 'true');
 
     await expectNoAxeViolations(page);
+  });
+
+  test('side panel copies the current tab ID from the target chip', async ({ page }) => {
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+
+    await page.getByRole('button', { name: 'Copy tab ID 1' }).click();
+
+    await expect(page.locator('#status-banner')).toContainText('Copied tab ID 1.');
+    await expect(page.locator('#btn-copy-tab-id')).toHaveClass(/copied/);
+    await expect.poll(() => page.evaluate(() => window.__bagCopiedText)).toBe('1');
   });
 
   test('side panel changes language from the top control', async ({ page }) => {

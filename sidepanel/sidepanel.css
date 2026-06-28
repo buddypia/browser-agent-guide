@@ -104,19 +104,19 @@ textarea:focus-visible {
 
 .target-tab {
   display: grid;
-  gap: 3px;
+  gap: 6px;
   min-width: 0;
-  padding: 7px 8px;
+  padding: 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel-2);
 }
 
-.target-tab-main {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+.target-tab-head {
+  display: flex;
   align-items: center;
-  gap: 7px;
+  justify-content: space-between;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -126,6 +126,76 @@ textarea:focus-visible {
   font-weight: 800;
   line-height: 1.2;
   text-transform: uppercase;
+}
+
+.target-tab-id {
+  display: inline-grid;
+  grid-template-columns: auto minmax(2.4em, auto) 18px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 4px 8px;
+  border-color: rgba(244, 210, 138, 0.52);
+  background: #2b2415;
+  color: #f8e1aa;
+  line-height: 1;
+}
+
+.target-tab-id:hover:not(:disabled) {
+  border-color: rgba(244, 210, 138, 0.82);
+  background: #352b19;
+}
+
+.target-tab-id:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.target-tab-id.copied {
+  border-color: rgba(57, 185, 128, 0.84);
+  background: rgba(57, 185, 128, 0.15);
+  color: #c9f7dd;
+}
+
+.target-tab-id-label {
+  color: currentColor;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  opacity: 0.82;
+}
+
+.target-tab-id-value {
+  overflow: hidden;
+  max-width: 8ch;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 18px;
+  font-weight: 850;
+  line-height: 1;
+  text-align: right;
+  text-overflow: ellipsis;
+}
+
+.target-tab-id-icon {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.target-tab-id .copied-icon,
+.target-tab-id.copied .copy-icon {
+  display: none;
+}
+
+.target-tab-id.copied .copied-icon {
+  display: block;
 }
 
 .target-tab-title,
