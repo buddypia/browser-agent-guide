@@ -25,9 +25,17 @@ function writeAtomic(dir, filename, buffer) {
 
 export function decodeBase64(data) {
   if (!data) return null;
-  // data URL でも生 base64 でも受ける。
-  const b64 = String(data).replace(/^data:image\/png;base64,/, '');
+  // data URL（png/webp/jpeg いずれの image/* も）でも生 base64 でも受ける。
+  const b64 = String(data).replace(/^data:image\/[a-z+]+;base64,/, '');
   return Buffer.from(b64, 'base64');
+}
+
+// MCP inline 用コンパクト変種のディスク上ファイル名を mimeType から決める（1 か所に集約）。
+// inbox.js の readEntryInline の probe 順とこのマッピングが対になっている。未知 mime は null（書かない）。
+export function inlineFilename(mime) {
+  if (mime === 'image/webp') return 'shot.inline.webp';
+  if (mime === 'image/jpeg') return 'shot.inline.jpg';
+  return null;
 }
 
 /**
@@ -54,6 +62,14 @@ export function writeEntry(inboxDir, payload, { now, id } = {}) {
   try {
     writeAtomic(dir, 'shot.png', shot);
     files.push('shot.png');
+    // MCP inline 専用のコンパクト変種（WebP/JPEG）。disk/hybrid で daemon 再起動後も
+    // Claude Code に小さい inline を返せるよう shot.png の隣に永続する（フル解像度は shot.png のまま）。
+    const inline = decodeBase64(payload?.image?.inline);
+    const inlineName = inlineFilename(payload?.image?.inlineMime);
+    if (inline && inline.length && inlineName) {
+      writeAtomic(dir, inlineName, inline);
+      files.push(inlineName);
+    }
     const raw = decodeBase64(payload?.image?.raw);
     if (raw && raw.length) {
       writeAtomic(dir, 'raw.png', raw);

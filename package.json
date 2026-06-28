@@ -28,7 +28,7 @@
   ],
   "scripts": {
     "check": "npm run check:js && npm run check:markers && npm test && npm run test:slug && npm run test:recipe && npm run test:prompt && npm run test:workflow-lib && npm run test:vf && npm run test:ui",
-    "check:js": "for f in content/content-script.js sidepanel/sidepanel.js sidepanel/i18n.js background/service-worker.js lib/ai-client.js lib/prompt.js lib/storage.js lib/site-matcher.js lib/slug.js lib/recipe-merge.js lib/workflow.js lib/visual-feedback/compositor.js offscreen/offscreen.js options/options.js scripts/check-agent-markers.mjs; do node --check \"$f\" || exit 1; done && echo 'syntax OK'",
+    "check:js": "for f in content/content-script.js sidepanel/sidepanel.js sidepanel/i18n.js background/service-worker.js lib/ai-client.js lib/prompt.js lib/storage.js lib/site-matcher.js lib/slug.js lib/recipe-merge.js lib/workflow.js lib/visual-feedback/compositor.js offscreen/offscreen.js offscreen/inline-encode.js options/options.js scripts/check-agent-markers.mjs; do node --check \"$f\" || exit 1; done && echo 'syntax OK'",
     "check:markers": "node scripts/check-agent-markers.mjs",
     "test": "node test/anchor.playwright-cli.mjs",
     "test:slug": "node test/slug.test.mjs",

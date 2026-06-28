@@ -16,7 +16,16 @@ import { listEntries } from '../src/inbox.js';
 
 const PNG_B64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+const PNG_MAGIC = [137, 80, 78, 71, 13, 10, 26, 10];
+const WEBP_MAGIC_RIFF = [0x52, 0x49, 0x46, 0x46]; // 'RIFF'
 const TOKEN = 'hybrid-store-token';
+
+// 偽 WebP（RIFF....WEBP）。daemon は中身を検証しないので mime/サイズ/ルーティング検証にはこれで十分。
+function fakeWebpDataUrl(sizeBytes = 80) {
+  const pad = Buffer.alloc(Math.max(0, sizeBytes - 12), 0x20);
+  const buf = Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP'), pad]);
+  return `data:image/webp;base64,${buf.toString('base64')}`;
+}
 
 function sendOnce(url, message) {
   return new Promise((resolve, reject) => {
@@ -174,6 +183,76 @@ test('hybrid store: 異なる host の memory push 2件で bare context が disa
   } finally {
     wss.close();
     await new Promise((r) => httpServer.close(r));
+    rmSync(inboxDir, { recursive: true, force: true });
+  }
+});
+
+test('hybrid store: image.inline(webp) は inline を image に使い、materialize で shot.inline.webp を永続し、/shot はフル解像度 PNG', async () => {
+  const inboxDir = mkdtempSync(join(tmpdir(), 'vf-hybrid-inline-'));
+  const entryStore = createVisualFeedbackStore({ inboxDir, storageMode: 'hybrid' });
+  const httpServer = createHttpServer({ inboxDir, entryStore, token: TOKEN, nowMs: Date.parse('2026-06-18T01:10:00.000Z') });
+  const wss = attachWebSocketServer(httpServer, { inboxDir, entryStore, token: TOKEN });
+  await new Promise((r) => httpServer.listen(0, '127.0.0.1', r));
+  const { port } = httpServer.address();
+  const wsUrl = `ws://127.0.0.1:${port}/ws`;
+  const mcpUrl = `http://127.0.0.1:${port}/mcp`;
+  try {
+    const ack = await sendOnce(`${wsUrl}?token=${TOKEN}`, {
+      type: 'visual_feedback',
+      capturedAt: '2026-06-18T01:02:03.004Z',
+      url: 'https://inline.example/page',
+      title: 'Inline Capture',
+      image: { shot: PNG_B64, raw: PNG_B64, inline: fakeWebpDataUrl(), inlineMime: 'image/webp' },
+      annotation: { url: 'https://inline.example/page', title: 'Inline Capture', capturedAt: '2026-06-18T01:02:03.004Z', items: [] },
+    });
+    await withMcpClient(mcpUrl, async (client) => {
+      const imageRes = await client.callTool({
+        name: 'get_latest_visual_feedback',
+        arguments: { urlContains: 'inline.example', contextId: ack.id, imageReason: 'verify compact inline webp is served and full-res persists' },
+      });
+      const img = imageRes.content.find((c) => c.type === 'image');
+      assert.ok(img, 'image を返す');
+      assert.equal(img.mimeType, 'image/webp', 'コンパクト inline は webp として返る（フル PNG ではない）');
+      assert.deepEqual([...Buffer.from(img.data, 'base64').subarray(0, 4)], WEBP_MAGIC_RIFF);
+      // Codex#10334 パリティ: inline 分岐でも structuredContent を載せない。
+      assert.equal(imageRes.structuredContent, undefined, 'inline 分岐でも structuredContent を載せない');
+      // materialize で inline 変種が disk に永続する（再起動後も Claude Code に小さい inline を返せる）。
+      assert.ok(existsSync(join(ack.dir, 'shot.inline.webp')), 'materialize で shot.inline.webp を永続');
+      assert.ok(existsSync(join(ack.dir, 'shot.png')), 'フル解像度 shot.png も永続');
+    });
+    // /shot/<id>.png は inline 変種があってもフル解像度 PNG を返す（Codex view_image / 人間 DL 用）。
+    const shot = await fetch(`http://127.0.0.1:${port}/shot/${ack.id}.png?token=${TOKEN}`);
+    assert.equal(shot.status, 200);
+    assert.equal(shot.headers.get('content-type'), 'image/png');
+    assert.deepEqual([...Buffer.from(await shot.arrayBuffer()).subarray(0, 8)], PNG_MAGIC);
+  } finally {
+    wss.close();
+    await new Promise((r) => httpServer.close(r));
+    rmSync(inboxDir, { recursive: true, force: true });
+  }
+});
+
+test('disk store 再起動相当: 永続した shot.inline.webp を新規 store が読み、inline を返す（A の cross-restart 担保）', async () => {
+  const inboxDir = mkdtempSync(join(tmpdir(), 'vf-disk-inline-restart-'));
+  try {
+    // disk store で eager 保存（shot.png + shot.inline.webp）。
+    const writer = createVisualFeedbackStore({ inboxDir, storageMode: 'disk' });
+    const ack = writer.save({
+      capturedAt: '2026-06-18T02:02:03.004Z',
+      url: 'https://restart.example/p',
+      title: 'Restart',
+      image: { shot: PNG_B64, inline: fakeWebpDataUrl(), inlineMime: 'image/webp' },
+      annotation: { url: 'https://restart.example/p', title: 'Restart', capturedAt: '2026-06-18T02:02:03.004Z', items: [] },
+    });
+    assert.ok(ack.files.includes('shot.inline.webp'), 'disk は inline 変種を即時永続');
+    // 別プロセス相当: RAM を共有しない新しい store がディスクから読む。
+    const fresh = createVisualFeedbackStore({ inboxDir, storageMode: 'disk' });
+    const entry = fresh.findEntry(ack.id);
+    const { buildEntryContent } = await import('../src/inbox.js');
+    const img = buildEntryContent(entry).find((c) => c.type === 'image');
+    assert.equal(img.mimeType, 'image/webp', '再起動後もディスクの inline 変種を返す');
+    assert.deepEqual([...Buffer.from(img.data, 'base64').subarray(0, 4)], WEBP_MAGIC_RIFF);
+  } finally {
     rmSync(inboxDir, { recursive: true, force: true });
   }
 });

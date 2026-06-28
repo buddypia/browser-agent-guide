@@ -19,6 +19,16 @@ export const SHOT = 'shot.png';
 export const RAW = 'raw.png';
 export const ANNOTATION = 'annotation.json';
 export const MEMO = 'memo.md';
+// MCP inline 専用コンパクト変種のディスク上ファイル名（writer.js inlineFilename と対）。webp を優先 probe。
+export const INLINE_WEBP = 'shot.inline.webp';
+export const INLINE_JPG = 'shot.inline.jpg';
+
+// MCP {type:'image'} に inline で載せてよいバイナリ上限（base64 化前）。これを超えるなら image を
+// omit し file_path/shot_url のテキストに委ねる（Claude Code の出力トークン上限を構造的に超えさせない）。
+// 導出: tokens ≈ bytes × 1.37（base64 4/3 膨張 × ~1.0 tok/char 保守値）。14KB ≈ 19.1k image tok +
+// ~3k wrapping ≈ 22.1k = 25,000 上限の ~88%。offscreen 側の生成予算（12KB）より少し緩く取り、
+// 「予算に収まらず最小を返した」ケースもここで安全側に倒す。30KB は上限超過になるため使わない。
+export const INLINE_MAX_BYTES = 14 * 1024;
 
 // Windows の「Downloads」既知フォルダー GUID（移動済み時はレジストリにこの名前で絶対パスが入る）。
 const DOWNLOADS_GUID = '{374DE290-123F-4565-9164-39C4925E467B}';
@@ -267,16 +277,60 @@ export function readAnnotation(dir) {
 }
 
 // MCP tool 用の content[] を組み立てる。image を見られない CLI でも text の file_path で
-// vision できるよう、必ず image と file_path の両方を返す（handoff §3.2 = fallback 内蔵）。
+// vision できるよう、file_path/shot_url は常に併走させる（handoff §3.2 = fallback 内蔵）。
+//
+// inline 画像の選択（Codex#10334 不変条件は維持＝structuredContent を一切載せない）:
+//   1) コンパクト inline 変種（WebP/JPEG, ~12KB）があり INLINE_MAX_BYTES 以下ならそれを {type:'image'} に使う
+//      → Claude Code の出力トークン上限に収まる。
+//   2) 無い（古い entry / 古い拡張）時はフル解像度 PNG にフォールバック。
+//   3) 採用バイトが INLINE_MAX_BYTES を超える（フル PNG しか無い等）なら image を **載せない**
+//      → 上限を構造的に超えさせない。テキストの file_path/shot_url で Read(file_path)/view_image に委ねる。
+//   いずれの分岐も content[] のみを返す（structuredContent は決して付けない）。
 export function buildEntryContent(entry, { includeImage = true, shotUrlFor } = {}) {
   const annotation = readEntryAnnotation(entry);
   const content = [];
+  let imageOmitted = false;
   if (includeImage) {
-    const data = readEntryShotBase64(entry);
-    content.push({ type: 'image', data, mimeType: 'image/png' });
+    const picked = pickInlineImageBytes(entry);
+    if (picked && picked.buffer.length <= INLINE_MAX_BYTES) {
+      content.push({ type: 'image', data: picked.buffer.toString('base64'), mimeType: picked.mime });
+    } else {
+      imageOmitted = true; // 予算超過 or バイト無し → image を omit（file_path/shot_url で代替）。
+    }
   }
-  content.push({ type: 'text', text: buildEntryText(entry, annotation, { shotUrlFor }) });
+  content.push({ type: 'text', text: buildEntryText(entry, annotation, { shotUrlFor, imageOmitted }) });
   return content;
+}
+
+// MCP inline に使うバイト列を選ぶ。コンパクト inline 変種を優先し、無ければフル解像度 PNG。
+// 破損/読み取り失敗時はフル PNG にフォールバック（image 要求を失わない）。{buffer, mime} | null。
+function pickInlineImageBytes(entry) {
+  let inline = null;
+  try {
+    inline = readEntryInline(entry);
+  } catch {
+    inline = null;
+  }
+  if (inline?.buffer?.length) return inline;
+  const buf = readEntryImageBuffer(entry, 'shot');
+  if (buf && buf.length) return { buffer: buf, mime: 'image/png' };
+  return null;
+}
+
+// コンパクト inline 変種のバイト列+mime を返す。メモリ entry は RAM の inlineBuffer、
+// ディスク entry は dir 直下の shot.inline.webp → shot.inline.jpg を probe する。無ければ null。
+export function readEntryInline(entry) {
+  if (!entry) return null;
+  if (entry.inlineBuffer && entry.inlineBuffer.length) {
+    return { buffer: entry.inlineBuffer, mime: entry.inlineMime || 'image/webp' };
+  }
+  if (entry.dir) {
+    const webp = join(entry.dir, INLINE_WEBP);
+    if (existsSync(webp)) return { buffer: readFileSync(webp), mime: 'image/webp' };
+    const jpg = join(entry.dir, INLINE_JPG);
+    if (existsSync(jpg)) return { buffer: readFileSync(jpg), mime: 'image/jpeg' };
+  }
+  return null;
 }
 
 // 画像を送らず、annotation.json 由来の手がかりだけを返す軽量 context。
@@ -447,7 +501,9 @@ function entryFiles(entry, materialized) {
 }
 
 // image と並走させるテキスト。先頭に絶対パス、続いて指示一覧（selector/intent）。
-export function buildEntryText(entry, annotation, { shotUrlFor } = {}) {
+// imageOmitted=true の時は inline 画像が（トークン上限対策で）付かないので、file_path/shot_url の
+// フル解像度 PNG を Read(file_path)/view_image で開くよう案内し、末尾の指示文も切り替える。
+export function buildEntryText(entry, annotation, { shotUrlFor, imageOmitted = false } = {}) {
   const lines = [];
   // file_path は実ファイルがある時だけ出す。memory-first の image 応答で disk materialize に失敗した時は
   // 存在しないパスを広告せず、shot_url(?token=) を fallback として案内する（image バイトは別途メモリから返る）。
@@ -455,6 +511,13 @@ export function buildEntryText(entry, annotation, { shotUrlFor } = {}) {
   if (shotPath) lines.push(`file_path: ${shotPath}`);
   // file_path を解決できない（inbox がブラウザ DL 先とズレた / 未materialize）時の代替取得先。取得には ?token= を付与する。
   if (shotUrlFor) lines.push(`shot_url: ${shotUrlFor(entry.id, 'shot')}  (append ?token=<daemon token>)`);
+  if (imageOmitted) {
+    lines.push(
+      'note: inline image omitted（フル解像度 PNG が MCP 出力トークン上限を超えるため）。' +
+        'Claude Code は file_path を Read、Codex は view_image(file_path) でフル解像度を開いてください' +
+        '（file_path が無ければ shot_url に ?token= を付けて取得）。'
+    );
+  }
   if (!shotPath) {
     lines.push('note: file_path は未materialize（disk 未書き込み）。上の inline image、無ければ shot_url に ?token= を付けて取得してください。');
   }
@@ -490,11 +553,18 @@ export function buildEntryText(entry, annotation, { shotUrlFor } = {}) {
     }
   }
   lines.push('');
-  lines.push(
-    '上の image を vision で解釈してください（テキスト座標ではなく絵そのものを見る）。' +
-      'image を読めない場合は file_path の PNG（無ければ shot_url に ?token= を付けて取得）を開いてください。' +
-      '各注釈は画像中の丸数字①②…と対応します。'
-  );
+  if (imageOmitted) {
+    lines.push(
+      'inline image は付いていません（上の note 参照）。file_path / shot_url のフル解像度 PNG を開いて、' +
+        '各注釈（画像中の丸数字①②…）を絵として確認してください。'
+    );
+  } else {
+    lines.push(
+      '上の image を vision で解釈してください（テキスト座標ではなく絵そのものを見る）。' +
+        'image を読めない場合は file_path の PNG（無ければ shot_url に ?token= を付けて取得）を開いてください。' +
+        '各注釈は画像中の丸数字①②…と対応します。'
+    );
+  }
   return lines.join('\n');
 }
 
