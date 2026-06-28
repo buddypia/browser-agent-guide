@@ -1140,7 +1140,8 @@ function buildTabMetadata(tab) {
 
 function buildAnnotationJson({ data, composite, capturedAt, tab }) {
   return {
-    schema: 'bag.visual-feedback/v0',
+    // v1: 注釈要素の outerHTML / a11y を items に追加（画像なしで HTML 要素を CLI へ渡すため）。v0 も読める。
+    schema: 'bag.visual-feedback/v1',
     url: data.url,
     title: data.title,
     capturedAt,
@@ -1180,6 +1181,8 @@ function buildAnnotationJson({ data, composite, capturedAt, tab }) {
       href: it.href,
       tag: it.tag,
       role: it.role,
+      html: it.html || null,
+      a11y: it.a11y || null,
       targetCandidates: it.targetCandidates,
       resolved: it.resolved,
       inViewport: it.inViewport,

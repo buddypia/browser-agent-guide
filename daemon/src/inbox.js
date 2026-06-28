@@ -369,6 +369,9 @@ export function buildEntryContext(entry, { shotUrlFor } = {}) {
       href: it.href || '',
       tag: it.tag || '',
       role: it.role || '',
+      // 画像なしで「メモを残した HTML 要素」を渡す経路（schema v1+）。古い v0 entry は null。
+      html: normalizeHtmlCapture(it.html),
+      a11y: normalizeA11yCapture(it.a11y),
       targetCandidates: Array.isArray(it.targetCandidates) ? it.targetCandidates.map(normalizeTargetCandidate) : [],
       resolved: Boolean(it.resolved),
       inViewport: it.inViewport !== false,
@@ -387,7 +390,7 @@ export function buildEntryContext(entry, { shotUrlFor } = {}) {
 
 export function buildEntryContextText(context) {
   const lines = [];
-  lines.push('visual_feedback_context: image omitted');
+  lines.push('feedback_context: image omitted');
   lines.push(`id: ${context.id}`);
   lines.push(`entry_dir: ${context.entryDir}`);
   lines.push(`storage: ${context.storage}${context.materialized ? ' (materialized)' : ' (memory; image request will materialize file_path)'}`);
@@ -427,6 +430,20 @@ export function buildEntryContextText(context) {
       ].filter(Boolean);
       lines.push(`  ${n}. ${memo}${intent ? ` / intent: ${intent}` : ''}`);
       if (parts.length) lines.push(`     ${parts.join(' ')}`);
+      if (it.a11y) {
+        const aParts = [
+          it.a11y.role && `role=${it.a11y.role}`,
+          it.a11y.name && `name="${it.a11y.name}"`,
+          it.a11y.level && `level=${it.a11y.level}`,
+          it.a11y.states?.length && `states=[${it.a11y.states.join(',')}]`,
+        ].filter(Boolean);
+        if (aParts.length) lines.push(`     a11y: ${aParts.join(' ')}`);
+      }
+      if (it.html?.outerHTML) {
+        const sizeNote = it.html.truncated ? `truncated, ${it.html.bytes}B total` : `${it.html.bytes}B`;
+        lines.push(`     html (${sizeNote}):`);
+        for (const hl of it.html.outerHTML.split('\n')) lines.push(`       ${hl}`);
+      }
       if (it.targetCandidates?.length) {
         for (const c of it.targetCandidates.slice(0, 4)) {
           const candidateParts = [
@@ -446,7 +463,7 @@ export function buildEntryContextText(context) {
     'まず dataAgentId(@agent:) を最優先し、属性名込み rg でソースを探してください。' +
       '次に selector / testid / anchorLabel / targetCandidates を使います。' +
       'それでも曖昧、または見た目の判断が必要な時だけ contextId と imageReason を渡して ' +
-      'get_visual_feedback / get_latest_visual_feedback で image を取得してください。'
+      'get_feedback_image / get_latest_feedback_image で image を取得してください。'
   );
   return lines.join('\n');
 }
@@ -566,6 +583,30 @@ export function buildEntryText(entry, annotation, { shotUrlFor, imageOmitted = f
     );
   }
   return lines.join('\n');
+}
+
+// schema v1 の html キャプチャを正規化。outerHTML が無ければ null（v0 entry / 未解決要素）。
+function normalizeHtmlCapture(html) {
+  if (!html || typeof html !== 'object') return null;
+  const outerHTML = typeof html.outerHTML === 'string' ? html.outerHTML : '';
+  if (!outerHTML) return null;
+  return {
+    outerHTML,
+    bytes: Number.isFinite(html.bytes) ? html.bytes : outerHTML.length,
+    truncated: Boolean(html.truncated),
+  };
+}
+
+// schema v1 の a11y 記述子を正規化。role/name が両方空なら null。
+function normalizeA11yCapture(a11y) {
+  if (!a11y || typeof a11y !== 'object') return null;
+  const role = typeof a11y.role === 'string' ? a11y.role : '';
+  const name = typeof a11y.name === 'string' ? a11y.name : '';
+  if (!role && !name) return null;
+  const out = { role, name };
+  if (a11y.level) out.level = String(a11y.level);
+  if (Array.isArray(a11y.states) && a11y.states.length) out.states = a11y.states.map(String);
+  return out;
 }
 
 function normalizeTargetCandidate(candidate = {}) {

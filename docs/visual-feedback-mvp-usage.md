@@ -55,13 +55,18 @@
 ## Phase 1（消費側 MCP）— 手で渡さず CLI に自動取得させる
 
 `../daemon/` に **常駐デーモン**を実装済み。これを起動して CLI に MCP 登録すると、
-`shot.png` のパスを手で貼らずとも、CLI が `get_latest_visual_feedback_context` で
+`shot.png` のパスを手で貼らずとも、CLI が `get_latest_feedback_context` で
 最新のお描き注釈メタを **画像なし**で先に取得する。見た目の判断が必要な時だけ
 context の `id` を `contextId` に渡し、`imageReason` に理由を書いて
-`get_latest_visual_feedback` で **image+パス**を取得する（既定 inbox は MVP の保存先 `~/Downloads/ai-inbox`）。
+`get_latest_feedback_image` で **image+パス**を取得する（既定 inbox は MVP の保存先 `~/Downloads/ai-inbox`）。
 同じ URL を複数タブで開いている場合は、拡張に表示された `tabId` を
-`get_latest_visual_feedback_context({ tabId })` / `get_latest_visual_feedback({ tabId, contextId, imageReason })`
+`get_latest_feedback_context({ tabId })` / `get_latest_feedback_image({ tabId, contextId, imageReason })`
 へ渡して絞り込める。context には `tab: { tabId, windowId, index, active }` も含まれる。
+
+`get_*_feedback_context` は、メモを残した**対象要素の `outerHTML`（≤8KB）と a11y（role/name/level/state）**も
+返す（schema v1）。「画面のこの要素を直して」を **画像なし**でソース特定するならこれで完結し、
+見た目の判断が要る時だけ `get_*_feedback_image` を使う。なお `*_visual_feedback*` の旧名は当面
+deprecated エイリアスとして残る（同じ動作）。
 
 ```bash
 cd daemon && npm install && npm start   # http://127.0.0.1:8765/mcp

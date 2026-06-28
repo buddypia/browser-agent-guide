@@ -1,83 +1,62 @@
-# REVIEW — Living Glossary: 「コードを直したら関連ドキュメントを更新」を強制する SSOT メカニズム
+# REVIEW: page-feedback — メモを残した HTML 要素の取得 + MCP リネーム
 
 ## 概要
-自然言語のタスク指示で AI が誤解して別作業をしないよう、ドメイン用語の SSOT(`glossary/<ctx>/<id>.md`)を
-新設した。各用語は frontmatter で「定義 / owner / status / 参照(仕様 source_refs・実装 code_refs・
-API api_refs・DB db_refs) / last_verified / confidence」を機械可読に持つ。さらに **コードを直したら
-関連ドキュメントが必ず更新される** ことを、コード中の `@term:` ガード範囲と git diff の重なりで
-機械的に強制する staleness ゲートを実装した。multi-llm-debate(Gemini×Claude×GPT)の合意
-「生成優先・手動最小・観測可能性重視・重要箇所のみ強制」を設計原則にしている。
+お描き／メモのキャプチャに、**注釈を残した対象要素の `outerHTML` と軽量 a11y** を載せ、
+**画像トークンなし**で「メモを残した HTML 要素」を CLI へ渡せるようにした。あわせて MCP の
+サーバ名・ツール名を modality 中立な名前へ改名（旧名は deprecated エイリアスとして温存）。
 
 ## なぜ
-自然言語は無制約で多義的なので、AI は用語を取り違えて別作業をする。本リポジトリは既に
-「LLM に自由な DOM 操作を与えず、閉じた verb registry(制約付き語彙)で操作させる」思想で出来ており、
-同じ思想を開発ワークフローへ適用した。最大の課題「機能開発のたびに参照元と用語集が陳腐化する」を、
-人手の規律ではなく **機械ゲート** で解く必要があった。
+- これまで CLI へ渡るのは selector / anchorLabel 止まりで、**対象要素の HTML そのものは取れなかった**。
+  「この要素を直して」をソース特定するには結局スクショ(vision)が要り、トークンが重かった。
+- ツール名 `*_visual_feedback*` は「画像なしでメモ＋HTML だけ取得する」ケースでも "visual" を冠して
+  紛らわしい（ユーザ指摘）。`*_feedback_context`（テキスト/HTML）/ `*_feedback_image`（画像）に分離した。
 
 ## 何を
-- `glossary/` 新設: スキーマ(`_schema.md`)+ 実コードに紐づくシード用語 5 件
-  (extension: verb-registry / recipe / affordance、daemon: entry-store / visual-feedback)。
-- `scripts/glossary/`: 依存ゼロのツール群
-  - `lib/frontmatter.mjs`(STRICT な YAML サブセットパーサ)/ `lib/entries.mjs` / `lib/markers.mjs` /
-    `lib/git.mjs` / `lib/code.mjs`
-  - `validate.mjs`(スキーマ/参照存在/鮮度/孤立マーカー検証)
-  - `check-staleness.mjs`(**核**: 変更ガード範囲↔用語 last_verified の未更新を検出)
-  - `build-traceability.mjs`(用語⇄コードの RTM 生成、生成物)/ `touch.mjs`(last_verified 更新)
-  - `install-git-hook.sh`(pre-commit 導入)
-- 実コード 7 箇所に `// @term: <id>` … `// @endterm` ガードを付与(content-script.js ×2,
-  ai-client.js, recipe-merge.js, service-worker.js, store.js, compositor.js, offscreen.js)。
-- テスト `test/glossary/*.test.mjs`(24 件、staleness の fail/success を一時 git repo で実証)。
-- `.github/workflows/glossary.yml`(サーバ側の最終ゲート)。
-- `package.json`(check:glossary / test:glossary / glossary:* を追加、check チェーンと check:js に組込)、
-  `package-extension.sh`(glossary/・.github/ を zip 除外)、`.gitignore`(生成物 TRACEABILITY.md)、
-  `AGENTS.md` / `docs/glossary-mechanism.md`(運用 runbook)。
+1. **キャプチャ（schema v1）**: 注釈要素の `outerHTML`（≤8KB、超過時 `truncated:true`）＋ a11y
+   (role/name/level/state) を `annotation.json` の各 item に追加。
+2. **daemon context ツール**: `get_latest_feedback_context` / `get_feedback_context` が html/a11y を
+   text と `structuredContent` に載せて返す（**画像なし**）。image ツールは無変更（Codex パリティ維持）。
+3. **リネーム**: server `bag-visual-feedback`→`bag-page-feedback`、ツール 5 種を新名へ。旧名 5 種は
+   `registerWithAlias` で同一ハンドラの deprecated エイリアスとして残す（`tools/list` は 5+5）。
 
 ## どうやって
-staleness の判定は **file 単位ではなくマーカーのガード範囲単位**。`@term:` 行から次の
-`@term:`/`@endterm`/EOF までをガード範囲とし、git diff の変更行範囲(`--unified=0` の `@@` ヘッダ解析)が
-重なった用語だけ、その last_verified が同じ差分で前進していることを要求する。これにより大きい
-ファイルでも無関係な変更で誤検出せず(=ゲートが `--no-verify` で形骸化しない)、かつ load-bearing な
-変更は確実に捕捉する。モードは `--working`(ローカル)/ `--staged`(pre-commit)/ `--base REF`(CI/PR)。
+- `content/content-script.js`: `captureOuterHtml` / `captureA11y` を追加し `collectVisualFeedbackData` の
+  item に `html` / `a11y` を付与（ガード領域外なので glossary staleness に非該当）。
+- `background/service-worker.js`: `buildAnnotationJson` で html/a11y を items にコピー、schema を
+  `bag.visual-feedback/v0`→`v1` に bump。
+- `daemon/src/inbox.js`: `buildEntryContext` に html/a11y を追加（`normalizeHtmlCapture`/`normalizeA11yCapture`
+  で v0 は null 正規化）、`buildEntryContextText` に a11y/html 行を出力。
+- `daemon/src/server.js`: `registerWithAlias` 導入、5 ツール改名 + 旧名エイリアス、ガイダンス文言を新名へ。
 
 ## 影響
-- `npm run check` に check:glossary + test:glossary が入る(いずれも Node のみ・依存ゼロ・高速)。
-- CI は元来「無し」だったが、用語集 *だけ* を回す独立ワークフローを追加(playwright は含めない)。
-- 既存の拡張/daemon 挙動には影響なし(追加したのは全てコメントマーカーと新規ファイル)。
-  compositor.js の banned-token スキャン(test:vf)も通過。
+- **後方互換**: 旧ツール名は alias で全て動作（既存 CLI 設定・スキル・テストは無改修）。旧 v0 entry も
+  html/a11y=null で安全。WS payload の `type:'visual_feedback'` は内部プロトコルとして温存。
+- **登録 alias 非変更**: Claude Code/Codex で打つ接頭辞（`bag_visual_feedback:`）は**ユーザ設定の alias**で
+  サーバ名リネームの影響を受けない。docs では `bag_page_feedback` を推奨と明記（移行は任意）。
 
 ## トレードオフ
-- 強制は「マーカーで囲った領域」だけに効く。網羅性は `@term:` の付与に依存する(opt-in bootstrap、
-  既存の `@agent:` マーカー文化と同じ)。最初から全コードは囲わない。
-- frontmatter パーサは依存を増やさないため自前。未知構文は黙って誤解釈せず必ず throw する設計で安全側に倒した。
-- RTM(TRACEABILITY.md)は二重ドリフトを避けるためコミットせず生成物にした(オンデマンド再生成)。
-- 意味的な正しさは CI で判定しない(人手/owner レビューの責務)。これは意図的な非ゴール。
+- `tools/list` が 10 件（新5＋旧5）になりモデルへのノイズが増える。description で旧名を明確に
+  `[deprecated]` 表記し新名へ誘導。将来エイリアス撤去で 5 件へ戻せる。
+- outerHTML を text にも載せるため context 応答が最大 ~8KB 増える（画像 vision よりは桁違いに軽量）。
 
-## 残作業
-- なし(コア機構は完成・テスト済み)。横展開(用語の追加)は段階的に。
-- ローカル強制を使うなら各自 `bash scripts/glossary/install-git-hook.sh` を一度実行。
-- PR 前に `git fetch origin main` → `git diff --name-status origin/main...HEAD` で上流差分を確認。
+## 残作業（このPRでは未対応・すべて alias 経由で動作する）
+- `.claude/skills/bag-workflow/**`（SKILL.md / references / preflight.sh）の新名追従。`.claude` 変更は
+  ガバナンススイート実行が要るため別PR推奨。
+- 生成物 `docs/mcp-*.html`（図）と `*.artifact.spec.json` の新名追従（再生成系）。
+- daemon npm パッケージ名 `bag-visual-feedback-daemon` は今回未変更（ユーザ要望はツール名のため対象外）。
 
-## ファイル構造
-```
-glossary/_schema.md, README.md, extension/*.md, daemon/*.md   # ドメイン SSOT
-scripts/glossary/{validate,check-staleness,build-traceability,touch}.mjs, lib/*.mjs, install-git-hook.sh
-test/glossary/{frontmatter,markers,staleness,validate}.test.mjs
-.github/workflows/glossary.yml
-docs/glossary-mechanism.md                                    # 運用 runbook
-content/content-script.js, lib/ai-client.js, lib/recipe-merge.js,
-background/service-worker.js, daemon/src/store.js,
-lib/visual-feedback/compositor.js, offscreen/offscreen.js     # @term: マーカー付与のみ
-package.json, package-extension.sh, .gitignore, AGENTS.md
-```
+## ファイル構造（変更点）
+- 拡張: `content/content-script.js`, `background/service-worker.js`
+- daemon: `src/inbox.js`, `src/server.js`, `scripts/{probe,e2e-smoke}.mjs`, `test/{mcp,inbox}.test.mjs`
+- docs: `AGENTS.md`, `daemon/README.md`, `docs/visual-feedback-mvp-usage.md`, `glossary/daemon/visual-feedback.md`
 
 ## レビュー依頼
-- ガード範囲(`@term:`〜`@endterm`)の粒度: verb-registry を AI_VERBS 全体に掛けるのは妥当か(広すぎ/狭すぎ)。
-- staleness の既定モード(`--base origin/main`)と CI の `--base origin/<base_ref>` の組合せが妥当か。
-- frontmatter を自前パーサにした判断(依存ゼロ優先 vs js-yaml)への異論はないか。
+- 推奨登録 alias を `bag_page_feedback` へ寄せる方針で良いか（現状は docs 推奨のみ・強制しない）。
+- 旧ツール名エイリアスの撤去時期（次メジャー等）をどうするか。
 
 ## 検証
-- `npm run check:js && npm run check:markers && npm run check:glossary && npm run test:glossary` → OK
-- `npm run test:vf`(14)/ `test:recipe`(9)/ `test:prompt`(6)/ `test:workflow-lib`(17)/ `test:slug`(7) → 全 OK
-- `cd daemon && npm test` → 87 OK
-- `node --test 'test/glossary/*.test.mjs'` → 24 OK(staleness の fail/success 実証含む)
-- 注: `npm test`(playwright-cli)/ `test:ui`(playwright)はブラウザ要のため別途。
+- daemon: `npm test` 103 pass（html/a11y の新規2件含む）、`node scripts/e2e-smoke.mjs` 実バイナリで新名通過。
+- root: `check:js` / `check:markers` / `check:glossary` / `glossary:staleness` / `test:glossary` / `test:vf` 緑。
+- root `npm run check` のブラウザ系: `spa-recipe.spec.mjs` が環境起因でフレーク（失敗テスト集合が実行ごとに変化、
+  エラーは "Target page/context closed" 等の teardown timeout）。本変更はレシピ/SPA/アンカリング経路に
+  非接触で因果なし（他UIスペックは全て pass）。

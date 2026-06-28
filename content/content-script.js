@@ -3953,6 +3953,41 @@
     return { minX, minY, maxX, maxY };
   }
 
+  // 注釈要素の outerHTML を上限つきで取得する。画像を使わず「メモを残した HTML 要素そのもの」を
+  // CLI へ渡すための経路（画像なしの context ツールに載る）。巨大要素のトークン肥大を防ぐため
+  // 最大長で切り、超過時は truncated:true を立てて全体バイト数も残す。
+  const HTML_CAPTURE_MAX = 8000;
+  function captureOuterHtml(el) {
+    if (!el || el.nodeType !== 1) return null;
+    let html = '';
+    try {
+      html = el.outerHTML || '';
+    } catch {
+      return null; // outerHTML が読めない要素（稀）は html 無しで続行
+    }
+    if (!html) return null;
+    const bytes = html.length;
+    const truncated = bytes > HTML_CAPTURE_MAX;
+    return { outerHTML: truncated ? html.slice(0, HTML_CAPTURE_MAX) : html, bytes, truncated };
+  }
+
+  // 軽量な a11y 記述子（role / name / level / state）。画像なしで要素の意味を CLI に渡す。
+  function captureA11y(el) {
+    if (!el || el.nodeType !== 1) return null;
+    const tag = el.tagName.toLowerCase();
+    const a11y = { role: roleOf(el), name: truncate(labelOf(el), 120) };
+    const level = el.getAttribute('aria-level') || (/^h[1-6]$/.test(tag) ? tag.slice(1) : '');
+    if (level) a11y.level = String(level);
+    const states = [];
+    for (const s of ['aria-disabled', 'aria-checked', 'aria-expanded', 'aria-selected', 'aria-pressed', 'aria-current', 'aria-hidden']) {
+      const v = el.getAttribute(s);
+      if (v != null) states.push(`${s.slice(5)}=${v}`);
+    }
+    if (el.disabled) states.push('disabled');
+    if (states.length) a11y.states = states;
+    return a11y;
+  }
+
   // お描き注釈を vision ブリッジ用のデータに変換する。
   function collectVisualFeedbackData() {
     const vw = window.innerWidth;
@@ -3997,6 +4032,8 @@
         href,
         tag: target?.tagName?.toLowerCase?.() || anchor.tag || '',
         role: target ? roleOf(target) : anchor.role || '',
+        html: target ? captureOuterHtml(target) : null,
+        a11y: target ? captureA11y(target) : null,
         targetCandidates,
         resolved,
         inViewport,

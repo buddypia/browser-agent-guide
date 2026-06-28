@@ -97,7 +97,7 @@ test('buildEntryContext: image 無しの軽量文脈に @agent と selector を�
   assert.equal(context.agentLookup.priority[0], 'dataAgentId');
   assert.equal(context.agentLookup.imageGate.contextId, NEWER);
   const text = buildEntryContextText(context);
-  assert.ok(text.includes('visual_feedback_context: image omitted'));
+  assert.ok(text.includes('feedback_context: image omitted'));
   assert.ok(text.includes('chrome_tab: tabId=321 windowId=9 index=2 active=true'));
   assert.ok(text.includes('agent_lookup:'));
   assert.ok(text.includes("source_search: rg -n 'data-agent-id=\"@agent:'"));

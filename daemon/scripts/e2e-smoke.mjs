@@ -94,9 +94,9 @@ try {
   // 2) CLI役: MCP context-first → 必要時 image get_latest
   const client = new Client({ name: 'e2e', version: '0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`)));
-  const ctx = await client.callTool({ name: 'get_latest_visual_feedback_context', arguments: { urlContains: 'e2e' } });
+  const ctx = await client.callTool({ name: 'get_latest_feedback_context', arguments: { urlContains: 'e2e' } });
   const res = await client.callTool({
-    name: 'get_latest_visual_feedback',
+    name: 'get_latest_feedback_image',
     arguments: {
       urlContains: 'e2e',
       contextId: ctx.structuredContent?.id,
@@ -120,9 +120,9 @@ try {
   // 3) retention 検証: 起動時 sweep が stale を done/ へ退避 → 一覧から消え、id 指定では done/ から復元できる
   const client2 = new Client({ name: 'e2e-retention', version: '0' });
   await client2.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`)));
-  const listRes = await client2.callTool({ name: 'list_visual_feedback', arguments: {} });
+  const listRes = await client2.callTool({ name: 'list_feedback', arguments: {} });
   const listTxt = listRes.content.find((c) => c.type === 'text')?.text || '';
-  const staleCtx = await client2.callTool({ name: 'get_visual_feedback_context', arguments: { id: STALE_ID } });
+  const staleCtx = await client2.callTool({ name: 'get_feedback_context', arguments: { id: STALE_ID } });
   await client2.close();
   if (listTxt.includes(STALE_ID)) fail('retention: stale が一覧に残っている（done/ へ退避されていない）');
   if (staleCtx.structuredContent?.id !== STALE_ID) fail('retention: 退避した stale を id で復元できない（findEntry done/ graft）');
@@ -143,9 +143,9 @@ try {
   await wait(300); // onSaved sweep 完了待ち
   const client3 = new Client({ name: 'e2e-onsaved', version: '0' });
   await client3.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`)));
-  const list2 = await client3.callTool({ name: 'list_visual_feedback', arguments: {} });
+  const list2 = await client3.callTool({ name: 'list_feedback', arguments: {} });
   const list2Txt = list2.content.find((c) => c.type === 'text')?.text || '';
-  const oldCtx = await client3.callTool({ name: 'get_visual_feedback_context', arguments: { id: ack.id } });
+  const oldCtx = await client3.callTool({ name: 'get_feedback_context', arguments: { id: ack.id } });
   await client3.close();
   if (list2Txt.includes(ack.id)) fail('onSaved sweep: 旧世代が一覧に残っている（family cap で退避されていない）');
   if (!list2Txt.includes(ack2.id)) fail('onSaved sweep: 新世代が一覧に無い');

@@ -1,9 +1,12 @@
 // MCP サーバー定義。inbox を 5 つのツールで公開する。
-//   - list_visual_feedback                 : 一覧（id を取得）
-//   - get_latest_visual_feedback_context  : 最新を text/structured context で取得（画像なし）
-//   - get_visual_feedback_context         : id 指定で text/structured context を取得（画像なし）
-//   - get_latest_visual_feedback          : context 確認後のみ image+パスで取得（必要時の vision）
-//   - get_visual_feedback                 : context 確認後のみ id 指定で image+パスを取得
+//   - list_feedback                : 一覧（id を取得）
+//   - get_latest_feedback_context  : 最新を text/structured context で取得（画像なし・HTML/a11y 含む）
+//   - get_feedback_context         : id 指定で text/structured context を取得（画像なし・HTML/a11y 含む）
+//   - get_latest_feedback_image    : context 確認後のみ image+パスで取得（必要時の vision）
+//   - get_feedback_image           : context 確認後のみ id 指定で image+パスを取得
+// 命名: 旧 get_*_visual_feedback* は「画像なしで HTML 要素だけ渡すケース」でも "visual" を冠して
+// 誤解を招いたため、modality 中立な feedback_context（テキスト/HTML）と feedback_image（画像）へ改名。
+// 旧名は当面 deprecated エイリアスとして残す（registerWithAlias）。
 // image ツールは、image を見られない CLI 向けに file_path テキストを必ず併走させる（§3.2）。
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -27,12 +30,27 @@ const IMAGE_GATE_SCHEMA = {
   contextId: z
     .string()
     .min(1)
-    .describe('get_latest_visual_feedback_context / get_visual_feedback_context で先に確認した entry id。'),
+    .describe('get_latest_feedback_context / get_feedback_context で先に確認した entry id。'),
   imageReason: z
     .string()
     .min(1)
     .describe('@agent: / selector / testid / anchorLabel だけでは不十分で、vision が必要な具体的理由。'),
 };
+
+// ツールを新名で登録しつつ、旧名（visual_feedback 系）を deprecated エイリアスとして同じハンドラに
+// ぶら下げる。既存の CLI 設定・スキル・テストが旧名のまま動き続けるための移行措置（同一 handler を共有）。
+function registerWithAlias(server, name, deprecatedName, config, handler) {
+  server.registerTool(name, config, handler);
+  server.registerTool(
+    deprecatedName,
+    {
+      ...config,
+      title: `${config.title}（旧名・非推奨）`,
+      description: `[deprecated] ${name} に改名しました（同じ動作）。新しいコードでは ${name} を使ってください。\n${config.description}`,
+    },
+    handler
+  );
+}
 
 // shotUrlFor(id, kind) は、ディスクパス非依存の loopback HTTP 取得先（/shot|/raw/<id>.png?token=…）を
 // 返すオプション関数。渡された時だけ context/image テキストに shot_url/raw_url を併走させる。
@@ -40,23 +58,26 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
   const entryStore = asEntryStore(entrySource);
   const currentNowMs = typeof nowMs === 'function' ? nowMs : () => (Number.isFinite(nowMs) ? nowMs : Date.now());
   const server = new McpServer(
-    { name: 'bag-visual-feedback', version: '0.1.0' },
+    { name: 'bag-page-feedback', version: '0.1.0' },
     {
       instructions:
-        'ブラウザのお描き注釈スクリーンショットと構造化メタを受け取るための inbox。' +
-        'ユーザーが「画面のこの部分をこう直して」と図で示したら、まず get_latest_visual_feedback_context を呼び、' +
-        '@agent: / selector / testid / anchorLabel を最優先で対象特定する。@agent: がある時は ' +
-        'data-agent-id="@agent:" を属性名込みでソース検索し、画像を呼ばない。曖昧または見た目の判断が必要な時だけ ' +
-        'contextId と imageReason を渡して get_latest_visual_feedback / get_visual_feedback を呼び、返ってきた image を絵として解釈する。',
+        'ブラウザのお描き注釈／メモと、対象 HTML 要素・構造化メタを受け取るための inbox。' +
+        'ユーザーが「画面のこの部分をこう直して」と図やメモで示したら、まず get_latest_feedback_context を呼び、' +
+        '@agent: / selector / testid / anchorLabel と outerHTML / a11y を最優先で対象特定する（画像トークン不要）。' +
+        '@agent: がある時は data-agent-id="@agent:" を属性名込みでソース検索し、画像を呼ばない。' +
+        '曖昧または見た目の判断が必要な時だけ contextId と imageReason を渡して ' +
+        'get_latest_feedback_image / get_feedback_image を呼び、返ってきた image を絵として解釈する。',
     }
   );
 
-  server.registerTool(
+  registerWithAlias(
+    server,
+    'list_feedback',
     'list_visual_feedback',
     {
-      title: '視覚フィードバック一覧',
+      title: 'フィードバック一覧',
       description:
-        'ブラウザのお描き注釈スクショ inbox を新しい順に一覧する（id・取得元 url/title/tab 付き）。' +
+        'ブラウザのお描き注釈／メモ inbox を新しい順に一覧する（id・取得元 url/title/tab 付き）。' +
         '複数プロジェクトが混在する時は urlContains / titleContains、同一URLの複数タブは tabId / windowId で絞れる。',
       inputSchema: { limit: z.number().int().min(1).max(50).optional(), ...FILTER_SCHEMA },
     },
@@ -74,13 +95,16 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
     }
   );
 
-  server.registerTool(
+  registerWithAlias(
+    server,
+    'get_latest_feedback_context',
     'get_latest_visual_feedback_context',
     {
-      title: '最新の視覚フィードバック文脈を取得',
+      title: '最新フィードバックの文脈（HTML/メタ）を取得',
       description:
-        '最新のお描きメタデータを image なしで返す。@agent: / selector / testid / anchorLabel を先に読み、' +
-        '画像 vision を使わず対象特定できるか判断するための軽量ツール。' +
+        '最新のお描き注釈／メモのメタデータと、対象要素の outerHTML / a11y を image なしで返す。' +
+        '@agent: / selector / testid / anchorLabel / html を先に読み、画像 vision を使わず対象特定できるか判断する軽量ツール。' +
+        '「メモを残した HTML 要素だけ欲しい（画像不要）」ケースはこのツールで完結する。' +
         '複数プロジェクトが混在する時は urlContains / titleContains、同一URLの複数タブは tabId / windowId で絞れる。',
       inputSchema: { ...FILTER_SCHEMA },
     },
@@ -120,13 +144,15 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
     }
   );
 
-  server.registerTool(
+  registerWithAlias(
+    server,
+    'get_latest_feedback_image',
     'get_latest_visual_feedback',
     {
-      title: '必要時のみ: 最新の視覚フィードバック画像を取得',
+      title: '必要時のみ: 最新フィードバックの画像を取得',
       description:
-        '高コストな image(PNG) + ファイルパス取得。先に get_latest_visual_feedback_context を読み、' +
-        '@agent: / selector / testid / anchorLabel で特定できない時だけ呼ぶ。' +
+        '高コストな image(PNG) + ファイルパス取得。先に get_latest_feedback_context を読み、' +
+        '@agent: / selector / testid / anchorLabel / html で特定できない時だけ呼ぶ。' +
         'context で確認した id を contextId に渡し、imageReason に vision が必要な理由を書く。' +
         '複数プロジェクトが混在する時は urlContains / titleContains、同一URLの複数タブは tabId / windowId で絞れる' +
         '（例: 作業中ページの URL 断片を渡す）。',
@@ -176,12 +202,15 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
     }
   );
 
-  server.registerTool(
+  registerWithAlias(
+    server,
+    'get_feedback_context',
     'get_visual_feedback_context',
     {
-      title: 'IDで視覚フィードバック文脈を取得',
+      title: 'IDでフィードバックの文脈（HTML/メタ）を取得',
       description:
-        'id を指定してお描きメタデータを image なしで返す。@agent: / selector / testid / anchorLabel を先に読むための軽量ツール。',
+        'id を指定してお描き注釈／メモのメタデータと対象要素の outerHTML / a11y を image なしで返す。' +
+        '@agent: / selector / testid / anchorLabel / html を先に読むための軽量ツール。',
       inputSchema: { id: z.string().min(1) },
     },
     async ({ id }) => {
@@ -195,13 +224,15 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
     }
   );
 
-  server.registerTool(
+  registerWithAlias(
+    server,
+    'get_feedback_image',
     'get_visual_feedback',
     {
-      title: '必要時のみ: IDで視覚フィードバック画像を取得',
+      title: '必要時のみ: IDでフィードバックの画像を取得',
       description:
-        '高コストな image(PNG) + ファイルパス取得。先に get_visual_feedback_context で同じ id の ' +
-        '@agent: / selector / testid / anchorLabel を確認し、それでも vision が必要な時だけ呼ぶ。',
+        '高コストな image(PNG) + ファイルパス取得。先に get_feedback_context で同じ id の ' +
+        '@agent: / selector / testid / anchorLabel / html を確認し、それでも vision が必要な時だけ呼ぶ。',
       inputSchema: { id: z.string().min(1), ...IMAGE_GATE_SCHEMA },
     },
     async ({ id, contextId, imageReason }) => {
@@ -253,18 +284,18 @@ function entryTab(entry) {
 function imageGateMessage(entry, { contextId, imageReason } = {}) {
   if (contextId !== entry.id) {
     return (
-      'visual_feedback_image: image omitted by context-first guard\n' +
+      'feedback_image: image omitted by context-first guard\n' +
       `current_id: ${entry.id}\n` +
       `provided_contextId: ${contextId || '(missing)'}\n` +
-      '先に get_latest_visual_feedback_context または get_visual_feedback_context で context を読み、' +
-      'その id を contextId に渡してください。@agent: / selector / testid / anchorLabel で特定できる場合は image を取得しないでください。'
+      '先に get_latest_feedback_context または get_feedback_context で context を読み、' +
+      'その id を contextId に渡してください。@agent: / selector / testid / anchorLabel / html で特定できる場合は image を取得しないでください。'
     );
   }
   if (!String(imageReason || '').trim()) {
     return (
-      'visual_feedback_image: image omitted by context-first guard\n' +
+      'feedback_image: image omitted by context-first guard\n' +
       `current_id: ${entry.id}\n` +
-      'imageReason が空です。@agent: / selector / testid / anchorLabel だけでは不十分で vision が必要な理由を書いてください。'
+      'imageReason が空です。@agent: / selector / testid / anchorLabel / html だけでは不十分で vision が必要な理由を書いてください。'
     );
   }
   return '';
@@ -272,7 +303,7 @@ function imageGateMessage(entry, { contextId, imageReason } = {}) {
 
 // 引数なし latest が曖昧な時の案内文。別案件を誤って掴ませないため image は返さず候補を列挙する。
 const AMBIGUOUS_HINT =
-  'urlContains に作業中ページの URL 断片（例: ホスト名）を渡して絞るか、list_visual_feedback で一覧を確認してください。' +
+  'urlContains に作業中ページの URL 断片（例: ホスト名）を渡して絞るか、list_feedback で一覧を確認してください。' +
   'image が要る時は、候補の context を読んだ上でその id を contextId に渡してください。';
 
 // 曖昧時の警告本文。text(content[]) と structuredContent.disambiguation.message の両方で共有する。
@@ -315,8 +346,8 @@ function ambiguousLatestResult(peek) {
 const STALE_MESSAGE =
   'latest が古すぎます: 最新候補が freshness window を超えているため、誤った過去画面を掴まないよう context/image は返しません。';
 const STALE_HINT =
-  'ブラウザ拡張でいまの画面を再キャプチャしてください。過去データが必要な場合だけ list_visual_feedback で id を確認し、' +
-  'get_visual_feedback_context / get_visual_feedback を id 指定で使ってください。';
+  'ブラウザ拡張でいまの画面を再キャプチャしてください。過去データが必要な場合だけ list_feedback で id を確認し、' +
+  'get_feedback_context / get_feedback_image を id 指定で使ってください。';
 
 function staleLatestResult(entry, { latestWindowMs, nowMs, urlContains, titleContains, tabId, windowId } = {}) {
   if (!isStaleLatest(entry, { latestWindowMs, nowMs })) return null;
@@ -394,7 +425,7 @@ function filterEmptyMessage({ urlContains, titleContains, tabId, windowId } = {}
     .filter(Boolean)
     .join(' かつ ');
   if (cond) {
-    return `${cond} を含む視覚フィードバックは見つかりません。条件を外すか、list_visual_feedback で一覧を確認してください。`;
+    return `${cond} を含むフィードバックは見つかりません。条件を外すか、list_feedback で一覧を確認してください。`;
   }
-  return 'inbox は空です。ブラウザ拡張の「お描きを画像でAIへ」で保存してください。';
+  return 'inbox は空です。ブラウザ拡張の「お描き／メモをAIへ」で保存してください。';
 }
