@@ -52,8 +52,10 @@
     return i18nLoadPromise;
   }
 
+  // @term: affordance  (用語定義: glossary/extension/affordance.md)
   const ATTR = {
     id: 'data-bag-id',
+    // @endterm: affordance
     role: 'data-bag-role',
     intent: 'data-bag-intent',
     intentSrc: 'data-bag-intent-src',
@@ -408,6 +410,7 @@
     }, 3200);
   }
 
+  // @term: verb-registry  (用語定義: glossary/extension/verb-registry.md。この領域を変えたら last_verified を更新)
   // ---- 動詞レジストリ(関数名はすべて動詞) ----
   // 各動詞: { description, args:{名前:説明}, run:async(args)=>戻り値 }
   const AI_VERBS = {
@@ -773,6 +776,7 @@
       run: async () => ({ noop: true }),
     },
   };
+  // @endterm: verb-registry
 
   // ---- 動詞実装の補助 ----
   function fillValue(el, value) {
