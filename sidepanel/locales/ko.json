@@ -211,7 +211,7 @@
   "sw.err.execFailed": "JavaScript를 실행하지 못했습니다: {message}",
   "sw.err.execError": "JavaScript 실행 오류: {message}",
   "sw.err.contentInjectFailed": "이 페이지에는 콘텐츠 스크립트를 주입할 수 없습니다({message}).",
-  "sw.err.captureNoDrawing": "그림이 없습니다. \"그리기\"로 도형을 그리고 메모를 작성한 뒤 보내세요.",
+  "sw.err.captureNoDrawing": "보낼 주석이 없습니다. \"그리기\"로 도형을 그리거나 \"메모 추가\"로 요소에 메모를 남긴 뒤 보내세요.",
   "sw.err.captureTabNotActive": "대상 탭이 더 이상 활성 상태가 아닙니다. 해당 탭으로 돌아간 뒤 다시 보내세요.",
   "sw.err.screenshotFailed": "스크린샷을 가져오지 못했습니다.",
   "sw.err.compositeFailed": "이미지 합성에 실패했습니다.",

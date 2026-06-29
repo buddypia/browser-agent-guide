@@ -1215,7 +1215,7 @@
     notifyPageRemembered('annotation');
     await recordWorkflowStep(saved);
     renderAnnotations();
-    if (saved.kind === 'drawing') notifyVisualFeedbackChanged('upsert');
+    if (saved.kind === 'drawing' || saved.kind === 'note') notifyVisualFeedbackChanged('upsert');
     return annoSummary(saved);
   }
 
@@ -1289,12 +1289,15 @@
     await persistAnnotations();
     await unrecordWorkflowStep(id);
     renderAnnotations();
-    if (removed?.kind === 'drawing') notifyVisualFeedbackChanged('delete');
+    if (removed?.kind === 'drawing' || removed?.kind === 'note') notifyVisualFeedbackChanged('delete');
     return { removed: id };
   }
 
   function notifyVisualFeedbackChanged(reason) {
-    const sendCount = annotations.filter((a) => a.kind === 'drawing' && memoForAI(a)).length;
+    // 送信対象 = お描き＋本文ありメモ（collectVisualFeedbackData の収集条件と一致させる）。
+    const sendCount = annotations.filter(
+      (a) => (a.kind === 'drawing' || (a.kind === 'note' && String(a.note || '').trim())) && memoForAI(a)
+    ).length;
     try {
       chrome.runtime.sendMessage(
         { type: 'VISUAL_FEEDBACK_CHANGED', url: location.href, title: document.title, reason, sendCount },
@@ -3994,8 +3997,13 @@
     const vh = window.innerHeight;
     const items = [];
     for (const a of annotations) {
-      if (a.kind !== 'drawing') continue; // MVP はお描きのみ
-      if (!memoForAI(a)) continue; // 「AIに渡す」OFF は除外
+      // お描き(drawing)＋メモ(note)を AI/daemon へ送る。marker/button は対象外。
+      if (a.kind !== 'drawing' && a.kind !== 'note') continue;
+      if (!memoForAI(a)) continue; // 「AIに渡す」OFF は除外（note は forAI 未設定=ON）
+      const isDrawing = a.kind === 'drawing';
+      // メモは本文が空なら送らない（空メモが inbox/sendCount を汚さない）。
+      // 文字列化は sendCount / sidepanel と同一式（String(...).trim()）に揃える。
+      if (!isDrawing && !String(a.note || '').trim()) continue;
       const target = a.anchor ? resolveAnchor(a.anchor) : null;
       const resolved = Boolean(target);
       let shapesPx = [];
@@ -4005,8 +4013,13 @@
         const rect = target.getBoundingClientRect();
         const W = rect.width || 1;
         const H = rect.height || 1;
-        shapesPx = (a.shapes || []).map((s) => fracShapeToPx(s, rect.left, rect.top, W, H));
-        bboxPx = bboxOfPxShapes(shapesPx);
+        if (isDrawing) {
+          shapesPx = (a.shapes || []).map((s) => fracShapeToPx(s, rect.left, rect.top, W, H));
+          bboxPx = bboxOfPxShapes(shapesPx);
+        } else {
+          // メモは図形を持たない。対象要素の矩形を bbox として、その隣にメモ吹き出し＋番号バッジを描く。
+          bboxPx = { minX: rect.left, minY: rect.top, maxX: rect.left + W, maxY: rect.top + H };
+        }
         // ビューポートと bbox が少しでも重なれば描画対象。
         inViewport = bboxPx.maxX > 0 && bboxPx.minX < vw && bboxPx.maxY > 0 && bboxPx.minY < vh;
       }
@@ -4023,7 +4036,8 @@
         color: firstColor,
         note: a.note || '',
         intent: a.intent || '',
-        shapeText: describeShapes(a.shapes),
+        // メモは図形を持たないので shapeText は空（describeShapes([]) の「お描きで印を付けた」を本文に混ぜない）。
+        shapeText: isDrawing ? describeShapes(a.shapes) : '',
         anchorLabel,
         selector: anchor.selector || '',
         dataAgentId: target?.getAttribute?.('data-agent-id') || anchor.dataAgentId || '',

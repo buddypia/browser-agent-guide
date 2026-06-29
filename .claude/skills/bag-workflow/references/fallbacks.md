@@ -42,11 +42,17 @@ FILE 経路で読むもの (preflight の `latest=` フォルダ):
 
 ---
 
-## お描きが見つからない (capture=no / source_branch=NONE)
+## お描き／メモが見つからない (capture=no / source_branch=NONE)
 
-> お描きがまだありません。拡張機能の「お描き / Draw」で直したい所を丸や矢印で囲み、
-> 番号付きでメモ (例「ここを大きく」) を書いて送信してから、もう一度 `/bag-workflow` を実行してください。
-> No drawing yet. Use the extension's お描き/Draw to circle the target, add a numbered memo, submit, then re-run.
+> お描き／メモがまだ届いていません。拡張機能の「お描き / Draw」で直したい所を丸や矢印で囲む、
+> または「メモを残す / Add note」で要素にメモを書いてから、**サイドパネルの「画像でAIへ送る」を押して送信**し、
+> もう一度 `/bag-workflow` を実行してください。
+> Nothing received yet. Draw with お描き/Draw, or leave a memo with "Add note", then press
+> "Send to AI" (画像でAIへ送る) in the side panel, then re-run.
+
+> **「メモを残す」だけでは届かない**: メモはページに保存されるだけで、上の送信(または Options で
+> daemon + autoSync を ON。既定 OFF)まで daemon には届かない。「見つからない」の最頻原因はこの未送信。
+> A memo left on the page is NOT sent until you press "Send to AI" (or enable daemon+autoSync, both default OFF).
 
 `urlContains` (ページアドレスの一部、例 `example.com`) を渡したのに 0 件なら、フィルタを外すか `list_feedback` で一覧を見せて選ばせる。
 

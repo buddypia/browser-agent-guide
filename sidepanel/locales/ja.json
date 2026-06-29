@@ -211,7 +211,7 @@
   "sw.err.execFailed": "JavaScriptを実行できませんでした: {message}",
   "sw.err.execError": "JavaScript実行エラー: {message}",
   "sw.err.contentInjectFailed": "このページにはコンテンツスクリプトを注入できません({message})。",
-  "sw.err.captureNoDrawing": "描画メモがありません。「描いて伝える」で図形を描いてメモを書いてから送ってください。",
+  "sw.err.captureNoDrawing": "送る注釈がありません。「描いて伝える」で図形を描くか、「メモを残す」で要素にメモを残してから送ってください。",
   "sw.err.captureTabNotActive": "対象タブがアクティブではありません。そのタブに戻ってからもう一度送ってください。",
   "sw.err.screenshotFailed": "スクリーンショットを取得できませんでした。",
   "sw.err.compositeFailed": "画像合成に失敗しました。",
