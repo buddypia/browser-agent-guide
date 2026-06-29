@@ -198,6 +198,22 @@ def append_event(ledger: dict[str, Any], event: str, details: dict[str, Any]) ->
     ledger["events"] = ledger["events"][-200:]
 
 
+def _cleanup_event_payload(item: dict[str, Any], *, force: bool, cross_session: bool = False) -> dict[str, Any]:
+    """cleanup の append_event payload を3経路(by-path / 引数なし / 横断)で共有する。
+    PR #64 で remote_branch_deleted を足した際、引数なし経路だけ取りこぼした(3経路の手書き dict 重複が
+    原因)ので、payload を1箇所に集約してフィールド追加時のドリフトを構造的に防ぐ。"""
+    payload: dict[str, Any] = {
+        "path": item["path"],
+        "force": bool(force),
+        "branch_deleted": bool(item.get("branch_deleted")),
+        "remote_branch_deleted": item.get("remote_branch_deleted"),
+        "stashes_dropped": len(item.get("stashes_dropped") or []),
+    }
+    if cross_session:
+        payload["cross_session"] = True
+    return payload
+
+
 def ensure_gitignore(root: Path) -> None:
     path = root / ".gitignore"
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -809,11 +825,18 @@ def delete_local_branch(root: Path, branch: str | None) -> bool:
 
 def remote_exists(root: Path, remote: str) -> bool:
     """`remote` が設定済みかを返す。origin が無いローカル/テストリポでは remote 削除をそもそも試みない
-    ための前段ガード(余計な push/ls-remote と紛らわしい失敗ログを避ける)。"""
+    ための前段ガード(余計な push と紛らわしい失敗ログを避ける)。`git remote` はローカル設定の参照のみで
+    ネットワークアクセスしない。"""
     result = git(["remote"], root, check=False)
     if result.returncode != 0:
         return False
     return remote in (result.stdout or "").split()
+
+
+# `git push --delete <absent>` の正確な文言のみを already-absent と見なす。広く `does not exist` を
+# 拾うと別エラー(認証・接続等)を already-absent に誤分類し「verify on GitHub」警告を握り潰すため、
+# 文言が将来変わった場合は安全側(=failed, 警告を出す)に倒す。
+_REMOTE_ABSENT_RE = re.compile(r"remote ref does not exist", re.IGNORECASE)
 
 
 def delete_remote_branch(root: Path, branch: str | None, *, remote: str = "origin") -> str:
@@ -823,24 +846,25 @@ def delete_remote_branch(root: Path, branch: str | None, *, remote: str = "origi
       "skipped"        — branch 無し / main・master / remote 未設定
       "failed"         — ネットワーク/認証/タイムアウト等で削除できず(要 GitHub 確認)
     ネットワーク失敗は致命にしない — worktree / local branch 除去という主目的は既に完了している。
-    まず ls-remote で存在確認し、既に消えている通常ケース(gh --delete-branch)では push を投げない。"""
+    `git push --delete` を1往復だけ実行し、その結果で分類する。以前は ls-remote で事前確認していたが
+    (1) GitHub の SSH レイテンシ(接続だけで数秒)で ls-remote の短い timeout に当たると push へ到達せず
+    failed になる、(2) ls-remote の tail-match が別 ref を取り違えうる、という脆さがあったため廃止した。
+    既に消えている branch は push の stderr(`remote ref does not exist`)で already-absent と判定する
+    (push --delete は ls-remote と違い常に厳密一致なので別 ref を誤爆しない)。timeout は SSH の実
+    レイテンシに余裕を持たせて 60s。"""
     if not branch or branch in {"main", "master"}:
         return "skipped"
     if not remote_exists(root, remote):
         return "skipped"
     try:
-        ls = git(["ls-remote", "--heads", remote, branch], root, check=False, timeout=10)
+        push = git(["push", remote, "--delete", branch], root, check=False, timeout=60)
     except subprocess.TimeoutExpired:
         return "failed"
-    if ls.returncode != 0:
-        return "failed"
-    if not (ls.stdout or "").strip():
+    if push.returncode == 0:
+        return "deleted"
+    if _REMOTE_ABSENT_RE.search(f"{push.stderr or ''}\n{push.stdout or ''}"):
         return "already-absent"
-    try:
-        push = git(["push", remote, "--delete", branch], root, check=False, timeout=20)
-    except subprocess.TimeoutExpired:
-        return "failed"
-    return "deleted" if push.returncode == 0 else "failed"
+    return "failed"
 
 
 _STASH_BRANCH_RE = re.compile(r"^[^:]*:\s*(?:WIP on|On)\s+([^:]+):")
@@ -1115,17 +1139,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                     f"Pending: {item.get('branch') or item.get('path')}"
                 )
             _remove_worktree_item(item, root, sid, force=args.force)
-            append_event(
-                ledger,
-                "cleanup",
-                {
-                    "path": item["path"],
-                    "force": bool(args.force),
-                    "branch_deleted": bool(item.get("branch_deleted")),
-                    "remote_branch_deleted": item.get("remote_branch_deleted"),
-                    "stashes_dropped": len(item.get("stashes_dropped") or []),
-                },
-            )
+            append_event(ledger, "cleanup", _cleanup_event_payload(item, force=args.force))
             save_ledger(root, ledger)
             removed.append(item["path"])
             cleaned_items.append(item)
@@ -1153,16 +1167,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         )
     for item in selected:
         _remove_worktree_item(item, root, session_id, force=args.force)
-        append_event(
-            ledger,
-            "cleanup",
-            {
-                "path": item["path"],
-                "force": bool(args.force),
-                "branch_deleted": bool(item.get("branch_deleted")),
-                "stashes_dropped": len(item.get("stashes_dropped") or []),
-            },
-        )
+        append_event(ledger, "cleanup", _cleanup_event_payload(item, force=args.force))
         removed.append(item["path"])
         cleaned_items.append(item)
     if removed:
@@ -1176,18 +1181,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         touched: set[str] = set()
         for sid, item in matches:
             _remove_worktree_item(item, root, sid, force=args.force)
-            append_event(
-                ledgers[sid],
-                "cleanup",
-                {
-                    "path": item["path"],
-                    "force": bool(args.force),
-                    "cross_session": True,
-                    "branch_deleted": bool(item.get("branch_deleted")),
-                    "remote_branch_deleted": item.get("remote_branch_deleted"),
-                    "stashes_dropped": len(item.get("stashes_dropped") or []),
-                },
-            )
+            append_event(ledgers[sid], "cleanup", _cleanup_event_payload(item, force=args.force, cross_session=True))
             removed.append(item["path"])
             cleaned_items.append(item)
             touched.add(sid)
