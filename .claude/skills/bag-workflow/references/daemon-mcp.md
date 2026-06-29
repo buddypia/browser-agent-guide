@@ -1,20 +1,20 @@
 # daemon / MCP — お描きの取得経路
 
-お描き (visual feedback) を Claude に届ける常駐 daemon (内部名 `bag-page-feedback`、旧 `bag-visual-feedback`) と、その MCP ツールの使い方。
+お描き (visual feedback) を Claude に届ける常駐 daemon (内部名 `bag-page-feedback`) と、その MCP ツールの使い方。
 ライブの一次情報: `daemon/src/server.js`, `daemon/src/inbox.js`, `daemon/README.md`。
 
 ## MCP ツール (5つ) — 完全修飾名で呼ぶ
 
 エンドポイント `http://127.0.0.1:8765/mcp`。接頭辞 (`bag_page_feedback:` 等) は**登録時に付けた alias**で、サーバ内部名とは別物。
-このスキルの例では `bag_page_feedback:` を使うが、**旧 `bag_visual_feedback:` で登録済みでもそのまま動く** (同じデーモン・同じ tools)。
+このスキルの例・登録手順は `bag_page_feedback:` を使う。旧 `bag_visual_feedback:` で登録していた場合は付け替える (下「登録」節)。
 context ツールは **画像なし**で `@agent:` / selector / testid / anchorLabel に加え、**メモを残した要素の `html` (outerHTML) と `a11y`** も返す。
 HTML を直したいだけならここで完結することが多い。`@agent:` / selector / html で対象を特定できる時は vision を使わない。
 image ツールは **注釈付きPNG を vision content として返し、かつ絶対 `file_path` テキストを必ず併走**させるが、
 context で確認した `contextId` と、vision が必要な理由 `imageReason` がないと image を返さない。
 
-> **ツール名の改名 (旧 → 新)**: `*_visual_feedback*` は「メモ＋HTML だけ欲しい (画像なし)」ケースでも "visual" を冠して
-> 紛らわしかったため、modality 中立な `*_feedback_context` (テキスト/HTML/a11y) と `*_feedback_image` (画像) へ改名した。
-> **旧名は deprecated エイリアスとして当面残る** (同じ動作) ので、旧名で書かれた手順も動く。
+> **ツール名 (旧 → 新の経緯)**: かつての `*_visual_feedback*` は「メモ＋HTML だけ欲しい (画像なし)」ケースでも "visual" を
+> 冠して紛らわしかったため、modality 中立な `*_feedback_context` (テキスト/HTML/a11y) と `*_feedback_image` (画像) へ改名した。
+> **旧名 (deprecated エイリアス) は撤去済み** — 現在は新名 5 ツールのみ公開。旧名で書かれた古い手順は動かないので新名を使う。
 
 | ツール | 入力 | 返り値 | 用途 |
 |---|---|---|---|
@@ -55,7 +55,7 @@ claude mcp list   # bag_page_feedback が出れば登録済み
 ```
 > Codex CLI は `codex mcp add bag_page_feedback --url http://127.0.0.1:8765/mcp`、
 > または `~/.codex/config.toml` の `url`。Antigravity は `serverUrl` キー。いずれも同じ `…/mcp` を指す。
-> **既に旧 alias `bag_visual_feedback` で登録済みなら再登録は不要** (そのまま動く)。名前を揃えたい時だけ
+> **旧 alias `bag_visual_feedback` で登録していた場合は付け替える** (旧 deprecated ツール名は撤去済み):
 > `claude mcp remove bag_visual_feedback && claude mcp add --transport http bag_page_feedback http://127.0.0.1:8765/mcp`。
 
 ## daemon を起動する

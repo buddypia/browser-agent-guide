@@ -130,7 +130,7 @@ test('image tool: materialize 失敗時も image を返し、disk へ書かず�
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(mcpUrl)));
     const res = await client.callTool({
-      name: 'get_visual_feedback',
+      name: 'get_feedback_image',
       arguments: {
         id: ack.id,
         contextId: ack.id,
@@ -176,7 +176,7 @@ test('image tool: inline(webp) があれば materialize 失敗でも webp を返
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(mcpUrl)));
     const res = await client.callTool({
-      name: 'get_visual_feedback',
+      name: 'get_feedback_image',
       arguments: { id: ack.id, contextId: ack.id, imageReason: 'verify inline webp survives materialize failure (memory-first)' },
     });
     assert.ok(!res.isError);

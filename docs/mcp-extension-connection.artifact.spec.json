@@ -278,7 +278,7 @@
           "n": 6,
           "title": "AI CLIがまずcontextだけ読む",
           "event": "MCP tool",
-          "fn": "get_latest_visual_feedback_context",
+          "fn": "get_latest_feedback_context",
           "desc": "@agent: / selector / testid / anchorLabel / url / title / idを画像なしで返す。ここで対象特定できるならvisionは不要。",
           "level": "critical",
           "branches": [
@@ -290,7 +290,7 @@
           "n": 7,
           "title": "必要時だけimage + file_pathを取得する",
           "event": "MCP image tool",
-          "fn": "get_latest_visual_feedback / get_visual_feedback",
+          "fn": "get_latest_feedback_image / get_feedback_image",
           "desc": "contextIdが現在entryと一致し、imageReasonがある時だけ画像を返す。画像を読めないCLIでもfile_pathで開ける。",
           "level": "neutral",
           "branches": [
@@ -396,31 +396,31 @@
       "columns": ["Tool", "主な用途", "返すもの", "使うタイミング"],
       "rows": [
         [
-          "list_visual_feedback",
+          "list_feedback",
           "inboxを新しい順に一覧する",
           "id、url、title、mtimeのテキスト一覧",
           { "badge": "info", "text": "候補確認" }
         ],
         [
-          "get_latest_visual_feedback_context",
+          "get_latest_feedback_context",
           "条件に合う最新キャプチャのcontextを読む",
           "@agent:、selector、testid、anchorLabel、url/titleなど。画像なし。",
           { "badge": "success", "text": "まず最初" }
         ],
         [
-          "get_visual_feedback_context",
+          "get_feedback_context",
           "id指定で特定キャプチャのcontextを読む",
           "指定idの構造化context。画像なし。",
           { "badge": "info", "text": "一覧後" }
         ],
         [
-          "get_latest_visual_feedback",
+          "get_latest_feedback_image",
           "最新キャプチャの画像を必要時だけ取得する",
           "image(PNG) + file_path。contextIdとimageReasonが必須。",
           { "badge": "warning", "text": "vision必要時" }
         ],
         [
-          "get_visual_feedback",
+          "get_feedback_image",
           "id指定キャプチャの画像を必要時だけ取得する",
           "image(PNG) + file_path。contextIdとimageReasonが必須。",
           { "badge": "warning", "text": "vision必要時" }
@@ -455,7 +455,7 @@
         },
         {
           "k": "Codex MCP登録",
-          "v": "codex mcp add bag_visual_feedback --url http://127.0.0.1:8765/mcp",
+          "v": "codex mcp add bag_page_feedback --url http://127.0.0.1:8765/mcp",
           "note": "Claude Codeはurlキー、AntigravityはserverUrlキーを使う。"
         },
         {

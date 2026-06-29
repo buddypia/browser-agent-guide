@@ -30,13 +30,13 @@
   - `get_latest_feedback_image` — context 確認後のみ最新を image+パスで返す（必要時の vision）
   - `get_feedback_image` — context 確認後のみ id 指定で image+パスを返す
 
-  > **命名（旧 → 新）**: 旧 `*_visual_feedback*` は「メモ＋HTML 要素だけ欲しい（画像なし）」ケースでも "visual" を冠して
-  > 紛らわしかったため、modality 中立な `*_feedback_context`（テキスト/HTML/a11y）と `*_feedback_image`（画像）へ改名した。
-  > サーバ内部名も `bag-visual-feedback` → `bag-page-feedback`。**旧ツール名は deprecated エイリアスとして当面残す**（同じ動作）
-  > ので、既存の登録・スキルは無改修で動く。新規コードは新名を使う。
+  > **命名（旧 → 新の経緯）**: かつての `*_visual_feedback*` は「メモ＋HTML 要素だけ欲しい（画像なし）」ケースでも "visual" を
+  > 冠して紛らわしかったため、modality 中立な `*_feedback_context`（テキスト/HTML/a11y）と `*_feedback_image`（画像）へ改名し、
+  > サーバ内部名も `bag-visual-feedback` → `bag-page-feedback` にした。**旧ツール名（deprecated エイリアス）は撤去済み**で、
+  > 現在は新名 5 ツールのみを公開する（旧名で書かれた古い手順は動かない）。
   > なお Claude Code/Codex 等で打つ接頭辞（本 README の例は `bag_page_feedback:`）は**ユーザが登録時に決めた alias**で、
-  > サーバ名のリネームでは変わらない。**既に旧 `bag_visual_feedback` で登録済みなら再登録は不要**（そのまま動く）。
-  > 名前を揃えたい時だけ `claude mcp remove bag_visual_feedback && claude mcp add --transport http bag_page_feedback http://127.0.0.1:8765/mcp`。
+  > サーバ名とは別物。旧 alias `bag_visual_feedback` で登録していた場合は付け替える:
+  > `claude mcp remove bag_visual_feedback && claude mcp add --transport http bag_page_feedback http://127.0.0.1:8765/mcp`。
 
 - **対象要素の HTML 取得（schema v1）**: お描き/メモを残した要素の `outerHTML`（≤8KB、超過時 `truncated:true`）と
   軽量 a11y（role/name/level/state）を `annotation.json` の各 item に保存し、context ツールが text と `structuredContent`
@@ -232,7 +232,7 @@ claude mcp add --transport http bag_page_feedback http://127.0.0.1:8765/mcp
 }
 ```
 
-> alias 名は任意。**旧 `bag_visual_feedback` で登録済みなら再登録は不要**（同じデーモンを指す）。
+> alias 名は任意。旧 `bag_visual_feedback` で登録していた場合は `claude mcp remove bag_visual_feedback` してから上記で付け替える。
 
 ### Codex CLI
 

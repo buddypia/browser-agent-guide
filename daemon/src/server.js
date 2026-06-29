@@ -5,8 +5,8 @@
 //   - get_latest_feedback_image    : context 確認後のみ image+パスで取得（必要時の vision）
 //   - get_feedback_image           : context 確認後のみ id 指定で image+パスを取得
 // 命名: 旧 get_*_visual_feedback* は「画像なしで HTML 要素だけ渡すケース」でも "visual" を冠して
-// 誤解を招いたため、modality 中立な feedback_context（テキスト/HTML）と feedback_image（画像）へ改名。
-// 旧名は当面 deprecated エイリアスとして残す（registerWithAlias）。
+// 誤解を招いたため、modality 中立な feedback_context（テキスト/HTML）と feedback_image（画像）へ改名済み。
+// 旧名の deprecated エイリアスは撤去した（新名 5 ツールのみ公開）。
 // image ツールは、image を見られない CLI 向けに file_path テキストを必ず併走させる（§3.2）。
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -37,21 +37,6 @@ const IMAGE_GATE_SCHEMA = {
     .describe('@agent: / selector / testid / anchorLabel だけでは不十分で、vision が必要な具体的理由。'),
 };
 
-// ツールを新名で登録しつつ、旧名（visual_feedback 系）を deprecated エイリアスとして同じハンドラに
-// ぶら下げる。既存の CLI 設定・スキル・テストが旧名のまま動き続けるための移行措置（同一 handler を共有）。
-function registerWithAlias(server, name, deprecatedName, config, handler) {
-  server.registerTool(name, config, handler);
-  server.registerTool(
-    deprecatedName,
-    {
-      ...config,
-      title: `${config.title}（旧名・非推奨）`,
-      description: `[deprecated] ${name} に改名しました（同じ動作）。新しいコードでは ${name} を使ってください。\n${config.description}`,
-    },
-    handler
-  );
-}
-
 // shotUrlFor(id, kind) は、ディスクパス非依存の loopback HTTP 取得先（/shot|/raw/<id>.png?token=…）を
 // 返すオプション関数。渡された時だけ context/image テキストに shot_url/raw_url を併走させる。
 export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFAULT_LATEST_WINDOW_MS, nowMs } = {}) {
@@ -70,10 +55,8 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
     }
   );
 
-  registerWithAlias(
-    server,
+  server.registerTool(
     'list_feedback',
-    'list_visual_feedback',
     {
       title: 'フィードバック一覧',
       description:
@@ -95,10 +78,8 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
     }
   );
 
-  registerWithAlias(
-    server,
+  server.registerTool(
     'get_latest_feedback_context',
-    'get_latest_visual_feedback_context',
     {
       title: '最新フィードバックの文脈（HTML/メタ）を取得',
       description:
@@ -144,10 +125,8 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
     }
   );
 
-  registerWithAlias(
-    server,
+  server.registerTool(
     'get_latest_feedback_image',
-    'get_latest_visual_feedback',
     {
       title: '必要時のみ: 最新フィードバックの画像を取得',
       description:
@@ -202,10 +181,8 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
     }
   );
 
-  registerWithAlias(
-    server,
+  server.registerTool(
     'get_feedback_context',
-    'get_visual_feedback_context',
     {
       title: 'IDでフィードバックの文脈（HTML/メタ）を取得',
       description:
@@ -224,10 +201,8 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
     }
   );
 
-  registerWithAlias(
-    server,
+  server.registerTool(
     'get_feedback_image',
-    'get_visual_feedback',
     {
       title: '必要時のみ: IDでフィードバックの画像を取得',
       description:
