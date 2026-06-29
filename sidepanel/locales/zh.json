@@ -211,7 +211,7 @@
   "sw.err.execFailed": "无法运行 JavaScript：{message}",
   "sw.err.execError": "JavaScript 运行错误：{message}",
   "sw.err.contentInjectFailed": "无法向此页面注入内容脚本（{message}）。",
-  "sw.err.captureNoDrawing": "尚无涂画。请用“涂画”画出图形并写好备忘后再发送。",
+  "sw.err.captureNoDrawing": "没有可发送的批注。请用“绘制”画出图形，或用“添加批注”在元素上留下批注后再发送。",
   "sw.err.captureTabNotActive": "目标标签页已不再处于活动状态。请切回该标签页后再发送。",
   "sw.err.screenshotFailed": "无法获取截图。",
   "sw.err.compositeFailed": "图像合成失败。",

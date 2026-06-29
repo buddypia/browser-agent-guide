@@ -123,10 +123,29 @@ node /Users/a13973/dev/buddypia/browser-agent-guide/daemon/scripts/probe.mjs ~/D
       "bboxPx": { "minX": 282, "minY": 530, "maxX": 1485, "maxY": 758 },
       "shapesFrac": [ { "type": "rect", "x": -2.14, "y": -0.17, "w": 4.36, "h": 1.36,
                         "color": "#ef4444", "width": 3 } ]  // 0..1 比率座標 (対象矩形基準)
+    },
+    {
+      "n": 2,
+      "id": "anno-2",
+      "color": "#ef4444",
+      "note": "この文言を短く",          // ★ メモを残す(図形なし)。本文は必ず note を読む
+      "intent": "",
+      "shapeText": "",                  // ★ 図形が無いので空。"" は「図形なし」の印
+      "anchorLabel": "送信して続行",
+      "selector": "#submit",
+      "html": { "outerHTML": "<button id=\"submit\">送信して続行</button>", "bytes": 48, "truncated": false },
+      "a11y": { "role": "button", "name": "送信して続行" },
+      "resolved": true,
+      "inViewport": true,
+      "bboxPx": { "minX": 60, "minY": 300, "maxX": 220, "maxY": 348 }, // 対象要素の矩形
+      "shapesFrac": []                  // ★ メモは図形を持たない (空配列)
     }
   ]
 }
 ```
+
+> **「メモを残す」だけの item**: 上の `anno-2` のように `shapesFrac:[]` ＋ `shapeText:""` で丸数字の図形が無い。
+> 本文は `note` を読む (`shapeText` は図形がある証拠ではない)。`html`/`a11y`/`selector`/`anchorLabel` はお描きと同じく載る。
 
 **ソース特定での優先度**: `dataAgentId`(`@agent:`) > `url`(file://) > `anchorLabel`(表示テキスト grep) > `html`(outerHTML の class/id/文言) > `testid`/`selector` の安定部分 > 画像から推測。
 動的生成ページでは `selector` 直 grep は当たりにくい (CSS構造依存) ため、`anchorLabel` の文字列検索が最も実用的。

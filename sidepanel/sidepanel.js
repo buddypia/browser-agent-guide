@@ -998,9 +998,16 @@ function updateMemoCountBadge(list) {
       els.memoCountBadge.removeAttribute('title');
     }
   }
-  // ページ手がかりを画像化するCTA。forAI OFF の描画だけなら capture 側も空なので出さない。
-  if (els.annoFoot) els.annoFoot.hidden = sendCount === 0;
-  if (els.captureCount) els.captureCount.textContent = sendCount > 0 ? String(sendCount) : '';
+  // 画像でAIへ送る対象 = forAI ON のお描き + forAI ON かつ本文ありメモ。
+  // content の collectVisualFeedbackData / sendCount と同じ述語（kind + 本文あり + forAI!==false）に揃え、
+  // メモだけのページでも送信できるようにする（メモは forAI 未設定=ON 扱い）。
+  const noteSendCount = list.filter(
+    (a) => a.kind === 'note' && String(a.note || '').trim() && a.forAI !== false
+  ).length;
+  const totalSend = sendCount + noteSendCount;
+  // ページ手がかりを画像化するCTA。送る対象（お描き or メモ）が無ければ出さない。
+  if (els.annoFoot) els.annoFoot.hidden = totalSend === 0;
+  if (els.captureCount) els.captureCount.textContent = totalSend > 0 ? String(totalSend) : '';
 }
 
 function renderAnnotationList(list) {

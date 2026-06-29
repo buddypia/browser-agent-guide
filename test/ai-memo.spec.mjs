@@ -179,6 +179,94 @@ test.describe('お描き連動のAIメモ', () => {
       .toMatchObject({ type: 'VISUAL_FEEDBACK_CHANGED', reason: 'update', sendCount: 0 });
   });
 
+  // 「メモを残す」(kind:'note') が capture(=daemon)経路に図形なしアイテムとして乗ること。
+  // これが /bag-memo がメモを見つけられる前提。回帰すると bag-memo が常に「見つからない」に戻る。
+  test('メモ(メモを残す)が PREPARE_CAPTURE に図形なしアイテムとして含まれる', async ({ page }) => {
+    await page.evaluate(() => {
+      const scope = location.origin + location.pathname;
+      window.__store.aiAdvisorAnnotations = {
+        [scope]: [
+          {
+            id: 'note-1',
+            kind: 'note',
+            createdAt: new Date().toISOString(),
+            note: '見出しをもっと短く',
+            intent: '',
+            anchor: { selector: '#target', tag: 'button', role: 'button', text: 'CTAボタン' },
+          },
+        ],
+      };
+    });
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'LIST_ANNOTATIONS' }, {}, r)));
+
+    const rect = await page.locator('#target').boundingBox();
+    const vf = await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'PREPARE_CAPTURE' }, {}, r)));
+    expect(vf.items).toHaveLength(1);
+    const item = vf.items[0];
+    expect(item.note).toBe('見出しをもっと短く');
+    expect(item.shapesPx).toEqual([]); // メモは図形を持たない
+    expect(item.shapeText).toBe(''); // describeShapes([]) の「お描きで印を付けた」を本文に混ぜない
+    expect(item.resolved).toBe(true);
+    expect(item.inViewport).toBe(true);
+    // bbox は対象要素の矩形（{0,0,0,0} ではない＝吹き出しが画面左上に化けない）。
+    expect(item.bboxPx).not.toBeNull();
+    expect(item.bboxPx.minX).toBeCloseTo(rect.x, 0);
+    expect(item.bboxPx.minY).toBeCloseTo(rect.y, 0);
+    expect(item.bboxPx.maxX).toBeCloseTo(rect.x + rect.width, 0);
+    expect(item.bboxPx.maxY).toBeCloseTo(rect.y + rect.height, 0);
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'FINISH_CAPTURE' }, {}, r)));
+  });
+
+  // メモ保存は自動同期用の変更通知を飛ばし、本文ありメモを送信件数に数える。
+  // 本文を空にすると送信件数0かつ capture からも外れる（空メモが inbox/件数を汚さない）。
+  test('メモ保存で送信件数つき変更通知が飛び、本文を空にすると0件で capture からも外れる', async ({ page }) => {
+    await page.evaluate(() => {
+      const scope = location.origin + location.pathname;
+      window.__store.aiAdvisorAnnotations = {
+        [scope]: [
+          {
+            id: 'note-1',
+            kind: 'note',
+            createdAt: new Date().toISOString(),
+            note: '最初のメモ',
+            intent: '',
+            anchor: { selector: '#target', tag: 'button', role: 'button', text: 'CTAボタン' },
+          },
+        ],
+      };
+    });
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'LIST_ANNOTATIONS' }, {}, r)));
+
+    const author = page.locator('.bag-author');
+    // メモを編集して保存 → VISUAL_FEEDBACK_CHANGED(sendCount>=1) が飛ぶ。
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'EDIT_ANNOTATION', id: 'note-1' }, {}, r)));
+    await expect(author).toBeVisible();
+    await author.locator('[data-f="note"]').fill('やっぱりこう直す');
+    await author.locator('[data-f="save"]').click();
+    await expect(author).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.__runtimeMessages.filter((m) => m?.type === 'VISUAL_FEEDBACK_CHANGED').at(-1)?.sendCount)
+      )
+      .toBe(1);
+
+    // 本文を空にして保存 → 送信件数0、PREPARE_CAPTURE からも外れる。
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'EDIT_ANNOTATION', id: 'note-1' }, {}, r)));
+    await expect(author).toBeVisible();
+    await author.locator('[data-f="note"]').fill('');
+    await author.locator('[data-f="save"]').click();
+    await expect(author).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.__runtimeMessages.filter((m) => m?.type === 'VISUAL_FEEDBACK_CHANGED').at(-1)?.sendCount)
+      )
+      .toBe(0);
+
+    const vf = await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'PREPARE_CAPTURE' }, {}, r)));
+    expect(vf.items).toHaveLength(0);
+    await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'FINISH_CAPTURE' }, {}, r)));
+  });
+
   test('メモは図形の隣(右既定)に置かれ、引き出し線で結ばれる', async ({ page }) => {
     // 右側に余白を確保するため広いビューポートにする(既定の390pxではメモ240pxが右に収まらない)。
     await page.setViewportSize({ width: 1000, height: 780 });
