@@ -50,11 +50,14 @@ first; `--force` is a separate explicit Git worktree removal flag, not a policy
 bypass. After the worktree is removed it also tidies the work it left behind:
 the now-merged local branch is force-deleted (`git branch -D`, safe because
 cleanup only runs after the PR merge is recorded); the merged remote branch is
-deleted (`git push origin --delete`, best-effort — gated on `origin` being
-configured and `ls-remote` confirming the ref still exists, so a branch already
-removed by `gh pr merge --delete-branch` is a no-op `already-absent`, and an
-offline/auth failure is a non-fatal `failed` that only warns, never aborting the
-local cleanup); and any stash whose entry is based on that branch
+deleted (`git push origin --delete`, best-effort — gated only on `origin` being
+configured, then a single `push --delete` round-trip classified by its result: a
+branch already removed by `gh pr merge --delete-branch` is a no-op
+`already-absent` (read from the push stderr), and an offline/auth/timeout failure
+is a non-fatal `failed` that only warns, never aborting the local cleanup; the
+earlier `ls-remote` pre-check was dropped because GitHub SSH latency made its
+tight timeout spuriously fail the delete, and its tail-match could mis-target a
+sibling ref); and any stash whose entry is based on that branch
 (`WIP on <branch>` / `On <branch>`) is dropped. Stashes on other branches are
 never touched, and every deleted branch / remote branch / dropped stash is
 reported on stderr plus the `cleaned N worktree(s)` summary line
