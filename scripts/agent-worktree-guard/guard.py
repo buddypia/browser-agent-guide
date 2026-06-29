@@ -52,6 +52,7 @@ def run_cmd(
     *,
     check: bool = True,
     stdin: str | None = None,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         args,
@@ -61,6 +62,7 @@ def run_cmd(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
+        timeout=timeout,
     )
     if check and result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
@@ -68,8 +70,8 @@ def run_cmd(
     return result
 
 
-def git(args: list[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return run_cmd(["git", *args], cwd=cwd, check=check)
+def git(args: list[str], cwd: Path, *, check: bool = True, timeout: float | None = None) -> subprocess.CompletedProcess[str]:
+    return run_cmd(["git", *args], cwd=cwd, check=check, timeout=timeout)
 
 
 def git_root(cwd: Path | None = None) -> Path:
@@ -805,6 +807,42 @@ def delete_local_branch(root: Path, branch: str | None) -> bool:
     return git(["branch", "-D", branch], root, check=False).returncode == 0
 
 
+def remote_exists(root: Path, remote: str) -> bool:
+    """`remote` が設定済みかを返す。origin が無いローカル/テストリポでは remote 削除をそもそも試みない
+    ための前段ガード(余計な push/ls-remote と紛らわしい失敗ログを避ける)。"""
+    result = git(["remote"], root, check=False)
+    if result.returncode != 0:
+        return False
+    return remote in (result.stdout or "").split()
+
+
+def delete_remote_branch(root: Path, branch: str | None, *, remote: str = "origin") -> str:
+    """merge 済みリモート branch を削除する(best-effort, ネットワーク操作)。返り値:
+      "deleted"        — `git push <remote> --delete` 成功
+      "already-absent" — remote に当該 ref が無い(`gh pr merge --delete-branch` 等で既に削除済み)
+      "skipped"        — branch 無し / main・master / remote 未設定
+      "failed"         — ネットワーク/認証/タイムアウト等で削除できず(要 GitHub 確認)
+    ネットワーク失敗は致命にしない — worktree / local branch 除去という主目的は既に完了している。
+    まず ls-remote で存在確認し、既に消えている通常ケース(gh --delete-branch)では push を投げない。"""
+    if not branch or branch in {"main", "master"}:
+        return "skipped"
+    if not remote_exists(root, remote):
+        return "skipped"
+    try:
+        ls = git(["ls-remote", "--heads", remote, branch], root, check=False, timeout=10)
+    except subprocess.TimeoutExpired:
+        return "failed"
+    if ls.returncode != 0:
+        return "failed"
+    if not (ls.stdout or "").strip():
+        return "already-absent"
+    try:
+        push = git(["push", remote, "--delete", branch], root, check=False, timeout=20)
+    except subprocess.TimeoutExpired:
+        return "failed"
+    return "deleted" if push.returncode == 0 else "failed"
+
+
 _STASH_BRANCH_RE = re.compile(r"^[^:]*:\s*(?:WIP on|On)\s+([^:]+):")
 
 
@@ -855,13 +893,23 @@ def _remove_worktree_item(item: dict[str, Any], root: Path, session_id: str, *, 
     item["status"] = "cleaned"
     item["cleaned_at"] = utc_now()
     item["updated_at"] = utc_now()
-    # worktree 除去成功後にのみ branch / stash を掃除(原子性は worktree remove までで担保済み)。
+    # worktree 除去成功後にのみ local branch / remote branch / stash を掃除
+    # (原子性は worktree remove までで担保済み。以降は best-effort)。
     branch = item.get("branch")
     branch = branch if isinstance(branch, str) and branch else None
     item["branch_deleted"] = delete_local_branch(root, branch)
+    item["remote_branch_deleted"] = delete_remote_branch(root, branch)
     item["stashes_dropped"] = drop_branch_stashes(root, branch)
     if item["branch_deleted"]:
         eprint(f"[agent-worktree-guard] deleted merged local branch: {branch}")
+    remote_status = item["remote_branch_deleted"]
+    if remote_status == "deleted":
+        eprint(f"[agent-worktree-guard] deleted merged remote branch: origin/{branch}")
+    elif remote_status == "failed":
+        eprint(
+            f"[agent-worktree-guard] could NOT delete remote branch origin/{branch} "
+            "(offline / auth / network?) — verify on GitHub and delete manually if it still exists"
+        )
     for desc in item["stashes_dropped"]:
         eprint(f"[agent-worktree-guard] dropped stash for {branch}: {desc}")
 
@@ -917,10 +965,13 @@ def cleanup_summary_line(count: int, items: list[dict[str, Any]]) -> str:
     """`cleaned N worktree(s)` に branch / stash の掃除件数を付記する。
     `cleaned N worktree` substring は保たれるので既存の assert と互換。"""
     branches = sum(1 for it in items if it.get("branch_deleted"))
+    remotes = sum(1 for it in items if it.get("remote_branch_deleted") == "deleted")
     stashes = sum(len(it.get("stashes_dropped") or []) for it in items)
     extra = []
     if branches:
         extra.append(f"branches deleted: {branches}")
+    if remotes:
+        extra.append(f"remote branches deleted: {remotes}")
     if stashes:
         extra.append(f"stashes dropped: {stashes}")
     suffix = f" ({', '.join(extra)})" if extra else ""
@@ -968,10 +1019,24 @@ def pr_display(item: dict[str, Any]) -> str:
     return "未取得 / not captured"
 
 
+def _remote_status_label(status: Any) -> str:
+    """delete_remote_branch の状態を completion report 用の人間可読ラベルへ写像する。"""
+    return {
+        "deleted": "deleted",
+        "already-absent": "already absent (gh --delete-branch 済み等)",
+        "skipped": "skipped (remote 未設定 / main)",
+        "failed": "未削除 / verify on GitHub",
+    }.get(status, "未確認 / unknown")
+
+
 def render_completion_report(root: Path, items: list[dict[str, Any]]) -> str:
     cleaned_paths = [relative_display(Path(str(item["path"])), root) for item in items]
     branch_cleanup = [
         f"{item.get('branch')}: {'deleted' if item.get('branch_deleted') else 'not deleted / already absent'}"
+        for item in items
+    ]
+    remote_cleanup = [
+        f"{item.get('branch')}: {_remote_status_label(item.get('remote_branch_deleted'))}"
         for item in items
     ]
     stash_count = sum(len(item.get("stashes_dropped") or []) for item in items)
@@ -986,9 +1051,9 @@ def render_completion_report(root: Path, items: list[dict[str, Any]]) -> str:
         "- Merge commit / squash commit: 未取得 / not captured",
         "- CI status: 未取得 / not captured",
         "## 2. Cleanup 状況",
-        f"- Worktree cleanup: cleaned {len(items)} ({', '.join(cleaned_paths)})",
-        f"- Branch cleanup: {', '.join(branch_cleanup)}",
-        "- Remote branch cleanup: 未確認 / not managed by local guard",
+        f"- Local worktree cleanup: removed {len(items)} ({', '.join(cleaned_paths)})",
+        f"- Local branch cleanup: {', '.join(branch_cleanup)}",
+        f"- Remote branch cleanup: {', '.join(remote_cleanup)}",
         "- main への ff 状況: 未実行 / local main not fast-forwarded by cleanup",
         "- stash の復元状況: 対象外 / no restore performed",
         f"- active stash: {active_stash_text}",
@@ -1004,7 +1069,7 @@ def render_completion_report(root: Path, items: list[dict[str, Any]]) -> str:
             "```",
             "## 4. 残った対応",
             "- 残タスク: なし (guard 観測範囲)",
-            "- 手動対応が必要なもの: GitHub 上の CI / remote branch 状態は必要に応じて確認",
+            "- 手動対応が必要なもの: 上記 Remote branch cleanup が「未削除 / verify on GitHub」の場合のみ GitHub で削除確認。CI も必要に応じて確認",
             "- 次回セッションへの引き継ぎ: なし",
             "## 5. 問題 / 改善メモ",
             "- 発生した問題: なし",
@@ -1057,6 +1122,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                     "path": item["path"],
                     "force": bool(args.force),
                     "branch_deleted": bool(item.get("branch_deleted")),
+                    "remote_branch_deleted": item.get("remote_branch_deleted"),
                     "stashes_dropped": len(item.get("stashes_dropped") or []),
                 },
             )
@@ -1118,6 +1184,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                     "force": bool(args.force),
                     "cross_session": True,
                     "branch_deleted": bool(item.get("branch_deleted")),
+                    "remote_branch_deleted": item.get("remote_branch_deleted"),
                     "stashes_dropped": len(item.get("stashes_dropped") or []),
                 },
             )
