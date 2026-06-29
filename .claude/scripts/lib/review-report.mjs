@@ -258,5 +258,17 @@ export function renderTemplate(opts = {}) {
     '- 改善案:',
     '- 次回の注意:',
     '',
+    '---',
+    '',
+    '### 承認後の Cleanup 手順 / Post-approval cleanup',
+    '> 「進行」承認 + ship 完了後にこの順で後始末する（参考・固定手順）。',
+    '1. `gh pr merge --squash` で PR を merge（`--delete-branch` を付ければ remote も即削除）。',
+    '2. `agent-worktree-guard cleanup --confirmed` を実行 — 次を一括で片付ける:',
+    '   - [ ] ローカル worktree 削除（`git worktree remove`）',
+    '   - [ ] ローカルブランチ削除（`git branch -D`、`main`/`master` は除外）',
+    '   - [ ] リモートブランチ削除（`git push origin --delete`、既に消えていれば skip）',
+    '   - [ ] branch-local stash drop（他ブランチの stash は触らない）',
+    '3. 完了報告（`# PR 承認後の完了報告`）の「Cleanup 状況」で local/remote/worktree/stash の結果を確認。',
+    '',
   ].join('\n');
 }
