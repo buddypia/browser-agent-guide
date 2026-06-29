@@ -285,6 +285,35 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         # remote からも消えている。
         self.assertEqual(self._git_out(["ls-remote", "--heads", "origin", "feature/remotegone"], self.repo), "")
 
+    def test_cleanup_remote_branch_already_absent(self) -> None:
+        # origin はあるが当該 branch を push していない(gh --delete-branch 済み相当)。
+        # push --delete の stderr 'remote ref does not exist' から already-absent と判定し failed にしない。
+        remote = self.tmp / "remote.git"
+        subprocess.run(["git", "init", "--bare", str(remote)], check=True, stdout=subprocess.PIPE)
+        subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=self.repo, check=True)
+        run(["init"], self.repo)
+        wt = self._make_merged_worktree("absent")  # feature/absent は origin に push しない
+
+        cleanup = run(["cleanup", "--confirmed"], self.repo)
+        self.assertIn("cleaned 1 worktree", cleanup.stdout)
+        # 'already absent' ラベルが出る = failed/deleted/skipped ではない(push stderr から判定成功)。
+        self.assertIn("Remote branch cleanup: feature/absent: already absent", cleanup.stdout)
+        self.assertNotIn("remote branches deleted:", cleanup.stdout)  # "deleted" のみ計上
+        self.assertFalse(wt.exists())
+
+    def test_cleanup_event_records_remote_branch_deleted(self) -> None:
+        # 引数なし cleanup でも ledger の cleanup event に remote_branch_deleted が記録される
+        # (PR #64 で引数なし経路だけ取りこぼした非対称の回帰ガード。3経路で payload helper を共有)。
+        run(["init"], self.repo)
+        wt = self._make_merged_worktree("evt")
+        run(["cleanup", "--confirmed"], self.repo)  # no --path → 引数なし主経路
+        self.assertFalse(wt.exists())
+        ledger = json.loads((self.repo / ".tmp/worktree-guard-ledger/test-session.json").read_text())
+        cleanup_events = [e for e in ledger.get("events", []) if e.get("event") == "cleanup"]
+        self.assertTrue(cleanup_events, "no cleanup event recorded")
+        self.assertIn("remote_branch_deleted", cleanup_events[-1])
+        self.assertEqual(cleanup_events[-1]["remote_branch_deleted"], "skipped")  # origin 未設定
+
     def test_cleanup_drops_only_matching_branch_stash(self) -> None:
         run(["init"], self.repo)
         default_branch = self._git_out(["rev-parse", "--abbrev-ref", "HEAD"], self.repo)
