@@ -259,6 +259,31 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         self.assertIn("# PR 承認後の完了報告", cleanup.stdout)
         self.assertFalse(wt.exists())
         self.assertFalse(self._branch_exists("feature/branchgone"))
+        # origin 未設定なので remote 削除は skip され、completion report にその旨が出る。
+        self.assertIn("Remote branch cleanup:", cleanup.stdout)
+        self.assertIn("skipped (remote 未設定 / main)", cleanup.stdout)
+        self.assertNotIn("remote branches deleted:", cleanup.stdout)
+
+    def test_cleanup_deletes_merged_remote_branch(self) -> None:
+        # bare remote を origin に設定し worktree branch を push → cleanup が remote からも削除する。
+        remote = self.tmp / "remote.git"
+        subprocess.run(["git", "init", "--bare", str(remote)], check=True, stdout=subprocess.PIPE)
+        subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=self.repo, check=True)
+        run(["init"], self.repo)
+        wt = self._make_merged_worktree("remotegone")
+        subprocess.run(
+            ["git", "push", "origin", "feature/remotegone"],
+            cwd=wt, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.assertIn("feature/remotegone", self._git_out(["ls-remote", "--heads", "origin"], self.repo))
+
+        cleanup = run(["cleanup", "--confirmed"], self.repo)
+        self.assertIn("cleaned 1 worktree", cleanup.stdout)
+        self.assertIn("remote branches deleted: 1", cleanup.stdout)
+        self.assertIn("Remote branch cleanup: feature/remotegone: deleted", cleanup.stdout)
+        self.assertFalse(wt.exists())
+        # remote からも消えている。
+        self.assertEqual(self._git_out(["ls-remote", "--heads", "origin", "feature/remotegone"], self.repo), "")
 
     def test_cleanup_drops_only_matching_branch_stash(self) -> None:
         run(["init"], self.repo)
