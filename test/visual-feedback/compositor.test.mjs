@@ -195,6 +195,43 @@ test('composeFeedback: 画面外 item は図形を描かず左上リストに出
   assert.ok(ctx.__ops.some((o) => o.includes('（画面外）')), '左上リストに画面外マークが出る');
 });
 
+// ---- メモ(kind:'note')= 図形なし item。要素矩形を bbox に、吹き出し＋番号バッジだけを描く ----
+test('composeFeedback: 図形なしメモ(shapesPx:[])は吹き出し＋バッジを描き、図形は描かない', () => {
+  const ctx = recordingCtx();
+  const items = [
+    {
+      color: '#ef4444',
+      note: 'ここのコピーを直す',
+      resolved: true,
+      inViewport: true,
+      shapesPx: [], // メモは図形を持たない
+      bboxPx: { minX: 100, minY: 100, maxX: 240, maxY: 140 }, // 対象要素の矩形
+    },
+  ];
+  const summary = composeFeedback(ctx, { items, factor: 1, outWidth: 1000, outHeight: 1000 });
+  // 図形なしでも 1 件分が「描画済み(in-place)」として数えられる。
+  assert.deepEqual(summary, { drawn: 1, total: 1 });
+  // メモ本文が画像に焼かれる。
+  assert.ok(ctx.__ops.some((o) => o.includes('fillText(ここのコピーを直す')), 'メモ本文が描かれる');
+  // 番号バッジ(角＋吹き出し)= arc 2つ以上。
+  assert.ok(ctx.__ops.filter((o) => o.startsWith('arc(')).length >= 2, '番号バッジが2つ');
+  // 図形ジオメトリは描かれない: strokeRect は吹き出し枠の1本だけ、ellipse/arrow polyline は無い。
+  assert.equal(ctx.__ops.filter((o) => o.startsWith('strokeRect(')).length, 1, '図形の strokeRect は無い(吹き出し枠のみ)');
+  assert.ok(!ctx.__ops.some((o) => o.startsWith('ellipse(')), '図形 ellipse は無い');
+  // NaN/Infinity を一切生まない。
+  assert.ok(!ctx.__ops.some((o) => /NaN|Infinity|undefined/.test(o)), `不正座標が無い / ${ctx.__ops.join(' | ')}`);
+});
+
+test('composeFeedback: 面積ゼロのメモ bbox(min==max)でも drawn:1 で NaN を生まない', () => {
+  const ctx = recordingCtx();
+  const items = [
+    { color: '#ef4444', note: 'x', resolved: true, inViewport: true, shapesPx: [], bboxPx: { minX: 50, minY: 50, maxX: 50, maxY: 50 } },
+  ];
+  const summary = composeFeedback(ctx, { items, factor: 2, outWidth: 800, outHeight: 800 });
+  assert.deepEqual(summary, { drawn: 1, total: 1 });
+  assert.ok(!ctx.__ops.some((o) => /NaN|Infinity|undefined/.test(o)), `不正座標が無い / ${ctx.__ops.join(' | ')}`);
+});
+
 test('legendLine: メモ無しは shapeText → なしの順でフォールバック', () => {
   assert.equal(legendLine(2, { shapeText: '赤色の円で囲んだ', resolved: true, inViewport: true }), '2. 赤色の円で囲んだ');
   assert.equal(legendLine(3, { resolved: false }), '3. (メモなし)（対象未解決）');

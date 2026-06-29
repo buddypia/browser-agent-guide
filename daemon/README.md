@@ -1,8 +1,8 @@
 # Browser Agent Guide 視覚フィードバック デーモン（Phase 1 / 受信側 + 消費側）
 
-ブラウザのお描き注釈スクリーンショットを 1 プロセスで受け取り・公開する常駐デーモン。
+ブラウザのお描き注釈／メモのスクリーンショットを 1 プロセスで受け取り・公開する常駐デーモン。
 
-- **受信（WebSocket / `/ws`）**: 拡張の「お描きを画像でAIへ」が push した PNG+注釈を、
+- **受信（WebSocket / `/ws`）**: 拡張の「画像でAIへ送る」（お描き／メモ）が push した PNG+注釈を、
   トークン認証のうえ受け取る。**既定（`memory`）は inbox を一切作らず**メモリ保持のみ（image/file_path
   要求時だけ OS tmp に一時 materialize し終了時破棄）。`--storage hybrid` はメモリ保持＋image 要求時に
   inbox へ遅延保存、`--storage disk` は受信ごとに inbox へ即時書き出し（原子的書き込み・0600・slug 採番はサーバ側）。
@@ -294,13 +294,13 @@ url = "http://127.0.0.1:8765/mcp"
    - WebSocket URL = `ws://127.0.0.1:8765/ws`
    - トークン = 上でコピーした値
    - 「接続テスト」で `接続OK` を確認
-3. 以降「お描きを画像でAIへ」は WS で push される。既定 `memory` は inbox を作らずメモリ完結、
+3. 以降「画像でAIへ送る」（お描き／メモ）は WS で push される。既定 `memory` は inbox を作らずメモリ完結、
    `hybrid` は image/file_path 要求時まで保持、`disk` は即時 inbox に書き出す
    （WS 失敗時は自動で `chrome.downloads` にフォールバック）。
 
 ## 使い方（検証）
 
-1. ブラウザ拡張でお描き → 「お描きを画像でAIへ」（WS 有効なら push、無効なら `~/Downloads/ai-inbox/<slug>/`）。
+1. ブラウザ拡張でお描き、または「メモを残す」で要素にメモ → 「画像でAIへ送る」（WS 有効なら push、無効なら `~/Downloads/ai-inbox/<slug>/`）。
 2. デーモンを起動（既定 `memory` は inbox を作らず受ける。`disk`/`hybrid` ならその inbox を見る／受ける）。
 3. CLI に MCP を登録して、こう頼む:
    「ブラウザで指示した視覚フィードバックを見て直して」

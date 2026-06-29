@@ -13,6 +13,7 @@ source_refs:
   - { type: doc, path: "docs/visual-feedback-mvp-usage.md" }
   - { type: spec, path: "AGENTS.md", anchor: "daemon-architecture" }
 code_refs:
+  - { path: "content/content-script.js", symbol: "collectVisualFeedbackData" }
   - { path: "lib/visual-feedback/compositor.js", symbol: "drawShape" }
   - { path: "offscreen/offscreen.js", symbol: "drawImage" }
 api_refs:
@@ -26,10 +27,16 @@ confidence: high
 
 ## 定義
 
-ユーザーがブラウザ上に描いた注釈をスクリーンショットへ合成し、AI コーディング CLI へ
+ユーザーがブラウザ上に残した注釈をスクリーンショットへ合成し、AI コーディング CLI へ
 MCP 経由で渡す機能。SW がアクティブ対象タブをキャプチャ → offscreen が `OffscreenCanvas` +
 Canvas 2D で注釈を合成 → daemon が有効なら WS push、無効なら `chrome.downloads` で
 `<download dir>/ai-inbox/<slug>/` へ保存。
+
+`collectVisualFeedbackData`(content-script)が capture 対象を集める。対象は **お描き(`kind:'drawing'`)
+＋ メモを残す(`kind:'note'`、本文ありのみ)** の2種（marker/button は対象外）。メモは図形を持たないので
+対象要素の矩形を bbox にして吹き出し＋番号バッジだけを焼き込む。daemon push と autoSync は既定 OFF
+なので、メモ/お描きは**サイドパネルの「画像でAIへ送る」を押す**（または Options で daemon+autoSync を ON）
+まで inbox には届かない。
 
 `lib/visual-feedback/compositor.js` は **Canvas-2D 専用**(SVG/foreignObject/Image/drawImage 禁止。
 `drawImage` は背景描画のため `offscreen.js` でのみ許可)。banned-token スキャンがビルドを守る。

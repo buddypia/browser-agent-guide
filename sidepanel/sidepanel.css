@@ -494,7 +494,7 @@ textarea:focus-visible {
   padding: 0 8px 8px;
 }
 
-/* お描きの成果物を画像でAIへ渡すCTA。お描きが1件以上ある時だけ表示。 */
+/* ページ手がかり(お描き or 本文ありメモ)を画像でAIへ渡すCTA。送る対象が1件以上ある時だけ表示。 */
 .anno-foot {
   padding: 2px 8px 10px;
 }

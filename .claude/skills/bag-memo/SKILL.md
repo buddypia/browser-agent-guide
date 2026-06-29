@@ -32,6 +32,15 @@ UI要素にバグを見つけて拡張でメモを残したあと、**`/bag-memo
 > 理由は「狙ったタブ**だけ**を取り違えず triage する」契約だから —— どのキャプチャを掴むかをモデルに
 > 推測させない(共有 inbox の他プロジェクト混入を防ぐ)。`/bag-workflow` と同じ「明示起動」モデルです。
 
+> **大前提 — メモは「送信」して初めて inbox に届く / a memo must be SENT first**:
+> 「メモを残す」だけでは注釈はページ(`chrome.storage.local`)に保存されるだけで daemon には届かない。
+> サイドパネルの **「画像でAIへ送る」を押す**(または Options で daemon + autoSync を両方 ON。**どちらも既定 OFF**)
+> まで daemon にはキャプチャが1件も届かない(既定 `memory` モードでは `annotation.json` ファイルすら作られず RAM 保持。
+> disk/hybrid や daemon-OFF フォールバックのみファイル化)。だから **「見つからない」の最頻原因は tabId 違いではなく「未送信のメモ」**。
+> tabId で再スコープする前に、まず「送ったか?」を疑い、未送信なら送信を日本語＋英語で促す。
+> (A memo left on the page is NOT in the inbox until the user presses "画像でAIへ送る"/Send to AI, or enables
+> daemon+autoSync — both default OFF. A "not found" is most often an UNSENT memo, not a wrong tabId.)
+
 ## tabId が背骨 / tabId is the spine（前提条件）
 
 このスキルは **tabId を必須の宛先キー**として扱います。tabId には **2つの役割**があり、混同しないこと:
@@ -85,7 +94,8 @@ UI要素にバグを見つけて拡張でメモを残したあと、**`/bag-memo
 
 ## ステップ 2 — メモを取得する(MCP・画像なし・tabId スコープ)
 
-主経路。接頭辞 `bag_page_feedback:` は登録 alias 例(旧 `bag_visual_feedback:` も同じ daemon でそのまま動く)。
+主経路。接頭辞 `bag_page_feedback:` は登録 alias 例。旧 `bag_visual_feedback` で**登録**していても同じ daemon に
+届くが、**旧ツール名(`*_visual_feedback*`)は撤去済み**(新 5 ツール名のみ。`get_latest_feedback_context` 等を使う)。
 
 ```
 bag_page_feedback:get_latest_feedback_context({ tabId: <N>, windowId: <M if known> })
@@ -109,6 +119,11 @@ bag_page_feedback:get_latest_feedback_context({ tabId: <N>, windowId: <M if know
 `url`/`title` が狙ったページらしいかを確認する。
 (構造化側のフィールドは **`tab.tabId`**。人間向け TEXT 側のラベルは `chrome_tab:` で `(tabId is Chrome-session scoped)` を伴う —— 別物なので混同しない。)
 不一致なら**停止して再スコープ**(`list_feedback({ tabId })` を提示)。違うキャプチャを triage しない。
+
+> **そもそも inbox が空 / 1件も無い分岐(最頻)**: `list_feedback` が空、または要求 tabId のキャプチャが無い時は、
+> tabId 違いを疑う前に **「メモを送信したか?」** を疑う。「メモを残す」だけでは daemon に届かない(上の大前提)。
+> 回復策(日本語＋英語): サイドパネルの **「画像でAIへ送る」を押す**(または Options で daemon + autoSync を ON)
+> → もう一度 `/bag-memo <tabId>`。未送信のままでは tabId を直しても永遠に見つからない。
 
 > **stale(鮮度切れ)分岐**: tabId を渡しても、対象キャプチャが freshness window(既定90分)より古いと、
 > daemon は単一 entry でなく **text-only の「latest が古すぎます / stale」ブロック**(`structuredContent.tab`/

@@ -211,7 +211,7 @@
   "sw.err.execFailed": "Could not run the JavaScript: {message}",
   "sw.err.execError": "JavaScript runtime error: {message}",
   "sw.err.contentInjectFailed": "Cannot inject the content script into this page ({message}).",
-  "sw.err.captureNoDrawing": "No drawing yet. Use \"Draw\" to draw a shape and write a memo, then send.",
+  "sw.err.captureNoDrawing": "Nothing to send yet. Use \"Draw\" to draw a shape, or \"Add note\" to leave a memo on an element, then send.",
   "sw.err.captureTabNotActive": "The target tab is no longer active. Switch back to that tab and send again.",
   "sw.err.screenshotFailed": "Could not take a screenshot.",
   "sw.err.compositeFailed": "Image composition failed.",

@@ -32,7 +32,7 @@ disallowed-tools: Bash(rm *)
 |---|---|---|
 | **お描き / Draw** | **何を**するか (WHAT) | 拡張機能で画面に描いた注釈。丸/四角/矢印/ペン＋AIメモ。番号付き(1→2→3)で手順になる。指示の正本。 |
 | **@agent: / selector** | **どこ**を直すか (WHERE) | コード側の編集箇所。`data-agent-id="@agent:<path>"` が理想。**主要UI(sidepanel/options)には付与済み(計13)だが大半の要素は未付与**。マーカーがあれば優先し、無ければ お描きの selector / 表示テキストからソースを特定する。 |
-| **daemon** | お描きを AI に**届ける** | 常駐プロセス。MCP で お描き画像＋メモを返す。`http://127.0.0.1:8765` |
+| **daemon** | お描き／メモを AI に**届ける** | 常駐プロセス。MCP で お描き／メモ画像＋構造化メタを返す。`http://127.0.0.1:8765`。**届くのは送信後**(サイドパネル「画像でAIへ送る」/ chrome.downloads / autoSync。autoSync は既定 OFF) |
 
 ---
 
@@ -72,7 +72,8 @@ disallowed-tools: Bash(rm *)
 - `n` = 手順番号、`note` = ユーザーの指示文、`intent` = 目的
 - `dataAgentId` = `@agent:` マーカー、`anchorLabel` = 対象の表示テキスト、`selector` = CSSセレクタ、`testid` = data-testid
 - `html` = メモを残した要素の `outerHTML` (≤8KB、超過時 `truncated:true`、schema v1〜)、`a11y` = role/name/level/state。**いずれも context で画像なしに返る**ので「この HTML 要素を直して」は context だけで完結しうる (旧 v0 キャプチャは `null`)
-- `url` (トップレベル) = お描きしたページ。**`file://` で始まる (= Webサイトではなく PC 上の保存 HTML) なら、そのパスがほぼ対象ソースファイルそのもの**
+- `url` (トップレベル) = お描き/メモを残したページ。**`file://` で始まる (= Webサイトではなく PC 上の保存 HTML) なら、そのパスがほぼ対象ソースファイルそのもの**
+- **`items[]` には「メモを残す」だけの項目 (`kind` 概念上の note) も混ざる**: 図形が無いので `shapesFrac:[]`・`shapeText:''`・丸数字なし。本文は必ず **`note`** を読む (`shapeText` は図形がある証拠ではない)。`html`/`a11y`/`selector`/`anchorLabel` はお描きと同様に載る
 
 **画像を取得した場合は必ず vision で見る** (テキスト座標ではなく絵を見る)。各注釈は画像中の丸数字①②…に対応する。
 
