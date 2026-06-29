@@ -65,8 +65,8 @@ context の `id` を `contextId` に渡し、`imageReason` に理由を書いて
 
 `get_*_feedback_context` は、メモを残した**対象要素の `outerHTML`（≤8KB）と a11y（role/name/level/state）**も
 返す（schema v1）。「画面のこの要素を直して」を **画像なし**でソース特定するならこれで完結し、
-見た目の判断が要る時だけ `get_*_feedback_image` を使う。なお `*_visual_feedback*` の旧名は当面
-deprecated エイリアスとして残る（同じ動作）。
+見た目の判断が要る時だけ `get_*_feedback_image` を使う。なお旧名 `*_visual_feedback*` の deprecated
+エイリアスは撤去済みで、現在は新名 5 ツールのみが公開される。
 
 ```bash
 cd daemon && npm install && npm start   # http://127.0.0.1:8765/mcp

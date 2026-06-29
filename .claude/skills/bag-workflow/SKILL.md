@@ -59,7 +59,7 @@ disallowed-tools: Bash(rm *)
 
 お描きは**指示の正本**。番号順 (n=1,2,3…) に「手順」として読む。
 
-**MCP 経路 (主):** MCP ツールを**完全修飾名**で呼ぶ。接頭辞 `bag_page_feedback:` は登録時の alias 例 (旧 `bag_visual_feedback:` も同じデーモンを指し、そのまま使える → `references/daemon-mcp.md`)。`$ARGUMENTS` を `urlContains` に渡して、自分のプロジェクトのお描きだけに絞る (共有 inbox `~/Downloads/ai-inbox` は他プロジェクトの直近キャプチャを返しうる)。
+**MCP 経路 (主):** MCP ツールを**完全修飾名**で呼ぶ。接頭辞 `bag_page_feedback:` は登録時の alias 例 (任意の名前でよい。旧 `bag_visual_feedback:` を使っていたら付け替える → `references/daemon-mcp.md`)。`$ARGUMENTS` を `urlContains` に渡して、自分のプロジェクトのお描きだけに絞る (共有 inbox `~/Downloads/ai-inbox` は他プロジェクトの直近キャプチャを返しうる)。
 
 - まず `bag_page_feedback:get_latest_feedback_context({ urlContains: "<$ARGUMENTS>" })` — 最新のお描きを **画像なしの軽量 context** で取得。`@agent:` (`dataAgentId`) / selector / testid / anchorLabel に加え、**メモを残した要素の `html` (outerHTML) と `a11y` も画像なしで返る**ので、まずこれで対象を特定できるか見る。
 - context だけで十分なら画像は読まない (HTML を直したいだけなら `html` で足りることが多い)。曖昧、または見た目の判断が必要な時だけ `bag_page_feedback:get_latest_feedback_image({ urlContains, contextId: "<context.id>", imageReason: "<なぜvisionが必要か>" })` / `bag_page_feedback:get_feedback_image({ id, contextId: id, imageReason })` で **注釈付きPNG (vision) ＋ 絶対パス file_path** を取得する。

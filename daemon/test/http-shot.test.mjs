@@ -123,7 +123,7 @@ async function get(base, path) {
     await client.connect(transport);
     try {
       // id 指定で決定的に（latest は他テストの書き込みで変わりうる）。
-      const res = await client.callTool({ name: 'get_visual_feedback_context', arguments: { id: diskId } });
+      const res = await client.callTool({ name: 'get_feedback_context', arguments: { id: diskId } });
       const text = res.content.find((c) => c.type === 'text').text;
       const m = text.match(/shot_url: (\S+)/);
       assert.ok(m, 'context テキストに shot_url がある');
