@@ -35,7 +35,7 @@
  * Used by the local pre-ship review guard to record explicit confirmation.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import {
@@ -129,6 +129,23 @@ export function createMarker(path, content = '') {
 }
 
 /**
+ * branch 명으로부터 worktree 절대 경로를 탐색 (slash variant + escape variant).
+ * checkPlanCheckboxes / checkBaseFreshness 공유 SSOT — worktree 부재 시 null.
+ *
+ * @param {string} mainRoot
+ * @param {string} branch
+ * @returns {string|null}
+ */
+export function resolveWorktreePath(mainRoot, branch) {
+  const safeKey = safeBranchKey(branch);
+  const candidates = [
+    join(mainRoot, '.worktrees', branch),
+    join(mainRoot, '.worktrees', safeKey),
+  ];
+  return candidates.find((c) => existsSync(c)) || null;
+}
+
+/**
  * PLAN.md 미완료 체크박스 사전 검사.
  *
  * Why (R-CM-029 Rule 3 Proposal-stage 의무):
@@ -153,13 +170,7 @@ export function checkPlanCheckboxes(mainRoot, branch, force) {
   if (!branch) return { ok: true, skipped: 'staged_mode' };
   if (force) return { ok: true, skipped: 'force_flag' };
 
-  // worktree path 후보: slash variant (.worktrees/feature/foo) + escape variant (.worktrees/feature__foo)
-  const safeKey = safeBranchKey(branch);
-  const candidates = [
-    join(mainRoot, '.worktrees', branch),
-    join(mainRoot, '.worktrees', safeKey),
-  ];
-  const wtPath = candidates.find((c) => existsSync(c));
+  const wtPath = resolveWorktreePath(mainRoot, branch);
   if (!wtPath) return { ok: true, skipped: 'worktree_absent' };
 
   const planPath = resolveWorktreePlanPath(wtPath);
@@ -188,6 +199,81 @@ const UNCHECKED_RE =
 
 export function parseUnchecked(content) {
   return stripIgnoredSections(content).match(UNCHECKED_RE) || [];
+}
+
+/**
+ * git 명령 best-effort 실행. 실패(오프라인/timeout/git 에러) 시 null — 호출부는 항상 fail-open.
+ *
+ * @param {string[]} args
+ * @param {string} cwd
+ * @returns {string|null}
+ */
+function tryGit(args, cwd) {
+  try {
+    return execFileSync('git', args, {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 10000,
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ship-time base-freshness 경고 (tier-3 gate).
+ *
+ * Why (docs/retros/retro-2026-06-30-worktree-base-remote-divergence-recurrence.md):
+ *   worktree 가 origin/main 의 과거 시점에서 분기된 채로 오래 살아있으면, 그 사이
+ *   origin/main 이 이 branch 도 건드린 파일을 바꾸거나 지워도 로컬에서는 보이지 않는다
+ *   (Stop-time staleness guard 는 behind>20/age>7d 로만 잡아 소규모 drift 는 통과시킨다).
+ *   PR #67 에서 이 blind spot 이 실제로 재발 — 2-commit drift 로 `.gitignore`/`guard.py`
+ *   가 stale 한 채 `git add -A` 가 무관한 파일을 쓸어담았다 (사후 2차 commit 으로 복구).
+ *
+ * 정책 (경고 전용 — marker 생성을 막지 않는다):
+ *   - branch=null (staged 모드) / force=true / worktree 부재 → skip
+ *   - `git fetch origin main` 실패 (오프라인 등) → fail-open, skip
+ *   - merge-base 산출 실패 → fail-open, skip
+ *   - branch 자신이 건드린 파일(merge-base..HEAD) 과 origin/main 이 새로 건드린 파일
+ *     (merge-base..origin/main) 이 겹치면 stderr 경고만 출력 (하드 블록 없음 — 겹침은
+ *     충돌 가능성의 휴리스틱일 뿐, 서로 다른 구간을 건드리는 안전한 동시 작업도 다수 존재).
+ *
+ * @param {string} mainRoot
+ * @param {string|null} branch
+ * @param {boolean} force
+ * @returns {{warned: boolean, overlap?: string[]}}
+ */
+export function checkBaseFreshness(mainRoot, branch, force) {
+  if (!branch || force) return { warned: false };
+  const wtPath = resolveWorktreePath(mainRoot, branch);
+  if (!wtPath) return { warned: false };
+
+  if (tryGit(['fetch', 'origin', 'main'], wtPath) === null) return { warned: false };
+
+  const mergeBase = tryGit(['merge-base', 'HEAD', 'origin/main'], wtPath);
+  if (!mergeBase) return { warned: false };
+
+  const branchFiles = tryGit(['diff', '--name-only', mergeBase, 'HEAD'], wtPath);
+  const upstreamStatus = tryGit(['diff', '--name-status', mergeBase, 'origin/main'], wtPath);
+  if (branchFiles === null || upstreamStatus === null) return { warned: false };
+
+  const branchPaths = new Set(branchFiles.split('\n').filter(Boolean));
+  const upstreamPaths = upstreamStatus
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => line.split('\t').pop());
+
+  const overlap = upstreamPaths.filter((p) => branchPaths.has(p));
+  if (overlap.length === 0) return { warned: false };
+
+  process.stderr.write(
+    `[mark-pre-ship-confirmed] base freshness 경고: origin/main 이 이 branch 와 같은 파일을 이미 변경했습니다:\n` +
+      overlap.map((p) => `  - ${p}`).join('\n') +
+      '\n  re-check: git diff --name-status origin/main...HEAD 로 겹침을 재확인하고 scope 를 재점검하세요.\n' +
+      '  (경고일 뿐 marker 생성은 차단하지 않습니다)\n',
+  );
+  return { warned: true, overlap };
 }
 
 /**
@@ -280,6 +366,9 @@ function main(argv) {
     );
     process.exit(1);
   }
+
+  // ship-time base-freshness 경고 — best-effort, marker 생성을 막지 않는다.
+  checkBaseFreshness(mainRoot, branch, force);
 
   const path = markerPath(mainRoot, branch);
   const payload = JSON.stringify({
