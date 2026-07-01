@@ -352,6 +352,14 @@ def write_owner_marker(
 
 def verify_owner_marker(item: dict[str, Any], session_id: str, root: Path) -> dict[str, Any]:
     path = Path(str(item["path"]))
+    if not path.exists():
+        # worktree ディレクトリが既に実体を失っている(先行フローで既に git worktree remove 済み、
+        # または別プロセスによる手動削除など)。marker はそのディレクトリ内にしか存在しえないため、
+        # このチェックの本来の目的(他 session の *生きた* worktree を誤って乗っ取らせない)は
+        # そもそも成立しない。ここで hard-fail すると、実体の無い ledger エントリが
+        # 「marker が読めない→mark-merged できない→pr_merged_at が永遠に付かない→
+        # bare cleanup が未来永劫ブロックされる」という zombie 状態に陥る。
+        return {}
     marker = owner_path(path)
     data = read_json(marker, None)
     if not isinstance(data, dict):
@@ -894,26 +902,36 @@ def drop_branch_stashes(root: Path, branch: str | None) -> list[str]:
 def _remove_worktree_item(item: dict[str, Any], root: Path, session_id: str, *, force: bool) -> None:
     """1 件の worktree を git から除去し、ledger item を cleaned に更新する(save は呼び出し側)。
     git remove に失敗したら owner marker を復元して raise する(原子性)。worktree 除去後に、
-    merge 済みローカル branch と当該 branch を起点とする stash も掃除する(best-effort, 除去成功後)。"""
+    merge 済みローカル branch と当該 branch を起点とする stash も掃除する(best-effort, 除去成功後)。
+
+    worktree ディレクトリが既に実体を失っている場合(先行フローで既に git worktree remove 済みなど)は
+    marker 突合・git worktree remove を丸ごとスキップし、ledger の記帳(status=cleaned)だけを揃える。
+    実体の無い worktree は他 session が乗っ取れる対象ではないので、突合をスキップしても安全 —
+    これをスキップしないと、stale なエントリが「marker が読めず raise → 二度と cleaned にできない」
+    という zombie 状態のまま残り、以降の bare cleanup を永久にブロックしてしまう。"""
     capture_cleanup_snapshot(item)
+    path = Path(str(item["path"]))
     marker_data = verify_owner_marker(item, session_id, root)
-    marker = owner_path(Path(str(item["path"])))
-    try:
-        marker.unlink()
-        marker.parent.rmdir()
-        marker.parent.parent.rmdir()
-    except FileNotFoundError:
-        pass
-    except OSError:
-        pass
-    cmd = ["worktree", "remove", str(item["path"])]
-    if force:
-        cmd.append("--force")
-    try:
-        git(cmd, root)
-    except GuardError:
-        atomic_write_json(marker, marker_data)
-        raise
+    if not path.exists():
+        eprint(f"[agent-worktree-guard] worktree directory already gone, reconciling ledger only: {path}")
+    else:
+        marker = owner_path(path)
+        try:
+            marker.unlink()
+            marker.parent.rmdir()
+            marker.parent.parent.rmdir()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+        cmd = ["worktree", "remove", str(path)]
+        if force:
+            cmd.append("--force")
+        try:
+            git(cmd, root)
+        except GuardError:
+            atomic_write_json(marker, marker_data)
+            raise
     item["status"] = "cleaned"
     item["cleaned_at"] = utc_now()
     item["updated_at"] = utc_now()
