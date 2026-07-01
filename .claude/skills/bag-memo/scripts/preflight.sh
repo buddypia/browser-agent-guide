@@ -38,11 +38,30 @@ EOF
 fi
 [ -n "$latest" ] && capture="yes" || capture="no"
 
-# --- 3) Claude Code に MCP が登録されているか / registered? (新旧 alias 両対応) --
-if command -v claude >/dev/null 2>&1 && claude mcp list 2>/dev/null | grep -qiE 'bag_page_feedback|bag_visual_feedback'; then
-  mcp="registered"
-else
-  mcp="absent"
+# --- 3) Claude Code / Codex に MCP が登録されているか / registered? ----------
+# 注: これは「claude/codex の設定に登録され、このコマンドを叩いた瞬間に疎通できたか」の
+#     チェックであり、いま進行中の会話セッション自身がそのツールを呼べるかどうかとは別物。
+#     Claude Code は MCP サーバーへの接続をセッション起動時に確立し、起動時点で接続に失敗すると
+#     そのセッションでは(daemon が後から起動しても)自動回復しない。だから mcp=registered でも
+#     ToolSearch でツールが見つからないことがある → SKILL.md 側で呼び出し前に必ず確認する。
+mcp="absent"
+mcp_conn="n/a"
+if command -v claude >/dev/null 2>&1; then
+  mcp_line="$(claude mcp list 2>/dev/null | grep -i 'bag_page_feedback' | head -1)"
+  if [ -n "$mcp_line" ]; then
+    mcp="registered"
+    if printf '%s' "$mcp_line" | grep -qi 'connected'; then
+      mcp_conn="connected"
+    else
+      mcp_conn="not-connected"
+    fi
+  fi
+fi
+if [ "$mcp" = "absent" ] && command -v codex >/dev/null 2>&1; then
+  if codex mcp list 2>/dev/null | grep -qi 'bag_page_feedback'; then
+    mcp="registered"
+    mcp_conn="unknown"
+  fi
 fi
 
 # --- 4) $ARGUMENTS を tabId / urlContains に分類 / classify the argument --------
@@ -82,7 +101,8 @@ else
 fi
 
 # --- 分岐判断 / branch: MCP(主) > FILE(救済) > NONE ----------------------------
-if [ "$mcp" = "registered" ]; then
+# mcp_conn=not-connected(登録行はあるが疎通確認で ✔ Connected が出なかった)なら MCP へ倒さない。
+if [ "$mcp" = "registered" ] && [ "$mcp_conn" != "not-connected" ]; then
   source_branch="MCP"
 elif [ "$capture" = "yes" ]; then
   source_branch="FILE"
@@ -95,10 +115,12 @@ echo "daemon   : $daemon        (healthz: $DAEMON_HEALTHZ)"
 echo "inbox    : $INBOX"
 echo "capture  : $capture${latest:+   最新: $latest}"
 echo "           (storage=memory はファイル無し→no でも MCP で取得可)"
-echo "mcp      : $mcp   (bag_page_feedback / 旧 bag_visual_feedback)"
+echo "mcp      : $mcp / $mcp_conn   (bag_page_feedback。registered は設定登録の意味のみ ——"
+echo "           このコマンド実行時点の疎通確認結果であり、いまの会話セッション自身が"
+echo "           ToolSearch でツールを見つけられる保証ではない。呼び出し前に必ず確認する)"
 echo "arg      : kind=$arg_kind  tabId=$scope_tabId  url=$scope_url"
 [ "$arg_kind" = "tabId" ] && echo "resolved : windowId=$m_windowId  url=$m_url   (一致 annotation.json から best-effort)"
 echo "browser  : $browser   (ライブ確認は任意・副次)"
 echo "─────────────────────────────────────────────────────────"
 # 自由文字列フィールド(scope_url/url)は空白混入でもトークン境界が壊れないよう引用する。
-echo "STATUS daemon=$daemon mcp=$mcp capture=$capture source_branch=$source_branch arg_kind=$arg_kind scope_tabId=$scope_tabId windowId=$m_windowId scope_url=\"$scope_url\" url=\"$m_url\" inbox=$INBOX latest=${latest:-none}"
+echo "STATUS daemon=$daemon mcp=$mcp mcp_conn=$mcp_conn capture=$capture source_branch=$source_branch arg_kind=$arg_kind scope_tabId=$scope_tabId windowId=$m_windowId scope_url=\"$scope_url\" url=\"$m_url\" inbox=$INBOX latest=${latest:-none}"
