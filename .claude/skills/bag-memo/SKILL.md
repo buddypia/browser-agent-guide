@@ -72,12 +72,21 @@ UI要素にバグを見つけて拡張でメモを残したあと、**`/bag-memo
 
 | フィールド | 使い方 |
 |---|---|
-| `source_branch=MCP` | daemon 稼働 + MCP 登録済み → **MCP 経路**(主)。ステップ2へ |
-| `source_branch=FILE` | inbox にキャプチャはあるが MCP 未登録 → **FILE 直読み**(救済)。あわせて次回用に登録を案内 |
+| `source_branch=MCP` | daemon 稼働 + MCP 登録済み(かつ疎通確認 `mcp_conn=connected`) → **MCP 経路**(主)。ステップ2へ |
+| `source_branch=FILE` | inbox にキャプチャはあるが MCP 未登録/未疎通 → **FILE 直読み**(救済)。あわせて次回用に登録を案内 |
 | `source_branch=NONE` | 取得手段なし → **停止**。`references/fallbacks.md`(`../bag-workflow/references/fallbacks.md`)の該当ブロックを**コピペ可のコマンド付き日本語＋英語**で案内。スタックトレースは出さない |
 | `arg_kind=tabId` `scope_tabId=N` | tabId 確定。`windowId=`/`url=` も解決できていれば併用 |
 | `arg_kind=urlContains` `scope_url=…` | URL 断片でスコープ |
 | `arg_kind=none` | **スコープ未指定** → ステップ1の「一覧→tabId を尋ねる」へ(bare 取得は禁止) |
+
+> **`source_branch=MCP` は「呼んでよい」という許可であって「呼べる」保証ではない**:
+> `mcp=registered`/`mcp_conn=connected` は、この preflight を実行した**その瞬間**に別プロセスの
+> `claude mcp list`/`codex mcp list` が疎通確認した結果にすぎない。Claude Code は MCP サーバーへの
+> 接続を**この会話セッションが起動した時点**で確立し、途中で切断された時だけ自動再接続する
+> (最大5回)。**起動した時点で接続できていなければ、daemon が後から立ち上がっても、この会話
+> セッションでは自動回復しない**。よって `source_branch=MCP` でも、実際にツールを呼ぶ前に
+> **必ず ToolSearch で `bag_page_feedback` 系ツール(`mcp__bag_page_feedback__*`)が見つかるか確認**し、
+> 見つからなければステップ2の「MCP 未接続の場合」に従う。
 
 ---
 
@@ -94,19 +103,35 @@ UI要素にバグを見つけて拡張でメモを残したあと、**`/bag-memo
 
 ## ステップ 2 — メモを取得する(MCP・画像なし・tabId スコープ)
 
-主経路。接頭辞 `bag_page_feedback:` は登録 alias 例。旧 `bag_visual_feedback` で**登録**していても同じ daemon に
-届くが、**旧ツール名(`*_visual_feedback*`)は撤去済み**(新 5 ツール名のみ。`get_latest_feedback_context` 等を使う)。
+**呼び出す前に必ず ToolSearch で `bag_page_feedback` 系ツール(`mcp__bag_page_feedback__*`)が見つかるか確認する**
+(`source_branch=MCP` でも省略しない — 理由はステップ0の注記)。
 
-```
-bag_page_feedback:get_latest_feedback_context({ tabId: <N>, windowId: <M if known> })
-# urlContains も分かれば併用: { urlContains: "<frag>", tabId: <N> }
-# 引数が id だった場合: bag_page_feedback:get_feedback_context({ id: "<id>" })
-```
+- **見つかった場合(主経路)**: 接頭辞 `bag_page_feedback:` は登録 alias 例。旧 `bag_visual_feedback` で**登録**
+  していても同じ daemon に届くが、**旧ツール名(`*_visual_feedback*`)は撤去済み**(新 5 ツール名のみ。
+  `get_latest_feedback_context` 等を使う)。
 
-`structuredContent.annotations[]` から読む: `note`(=メモ本文) / `intent` / `dataAgentId`(@agent:) /
-`anchorLabel`(表示テキスト) / `selector` / `testid` / `html.outerHTML` / `a11y{role,name,level,states}` /
-`targetCandidates[]`。tab メタは `structuredContent.tab.tabId / .windowId / .index / .active`。
-**この経路で `*_image` ツールは呼ばない**(画像トークン0)。
+  ```
+  bag_page_feedback:get_latest_feedback_context({ tabId: <N>, windowId: <M if known> })
+  # urlContains も分かれば併用: { urlContains: "<frag>", tabId: <N> }
+  # 引数が id だった場合: bag_page_feedback:get_feedback_context({ id: "<id>" })
+  ```
+
+  `structuredContent.annotations[]` から読む: `note`(=メモ本文) / `intent` / `dataAgentId`(@agent:) /
+  `anchorLabel`(表示テキスト) / `selector` / `testid` / `html.outerHTML` / `a11y{role,name,level,states}` /
+  `targetCandidates[]`。tab メタは `structuredContent.tab.tabId / .windowId / .index / .active`。
+  **この経路で `*_image` ツールは呼ばない**(画像トークン0)。
+
+- **見つからない場合(MCP 未接続と確定)**: `source_branch=MCP`/`mcp=registered` だったとしても、
+  ToolSearch に出ない = このセッションは daemon への接続を確立できていない。**「メモ未送信」と
+  即断しない**(それは別の原因)。
+  1. `capture=yes`(FILE 経路が使える)なら次の「FILE 経路(救済)」でそのまま続行する。
+  2. `capture=no` なら、daemon の healthz(`daemon=up`)を確認した上で、日本語＋英語で案内する:
+     > MCP はこの会話セッションでは接続できていないようです(設定上は登録済みでも、セッション
+     > 開始時に daemon との接続が確立できないと、このセッション内では自動回復しません)。
+     > お手数ですが**新しい会話を開始**して `/bag-memo <tabId>` をやり直してください。
+     > It looks like the MCP connection wasn't established for this session (even though it's
+     > registered) — Claude Code only connects to MCP servers at session startup, and won't
+     > auto-recover within this session. Please start a new conversation and re-run `/bag-memo <tabId>`.
 
 **FILE 経路(救済)**: preflight の `latest=` が指す `~/Downloads/ai-inbox/<slug>/` の
 `annotation.json`(top-level `tab.tabId` が要求 tabId と一致するキャプチャを選ぶ)＋ `memo.md` を Read。同じ項目・画像なし。
