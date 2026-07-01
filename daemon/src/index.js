@@ -81,7 +81,7 @@ function adoptDownloadsDir(downloadsDir) {
 }
 
 const server = createHttpServer({ inboxDir: getInbox, entryStore, token, latestWindowMs });
-attachWebSocketServer(server, {
+const wss = attachWebSocketServer(server, {
   inboxDir: getInbox,
   entryStore,
   token,
@@ -116,13 +116,27 @@ server.listen(port, host, () => {
   }
 });
 
+let shuttingDown = false;
 function shutdown() {
+  if (shuttingDown) {
+    process.exit(1);
+  }
+  shuttingDown = true;
+
   if (sweepTimer) clearInterval(sweepTimer);
   // memory モードが一時 materialize した OS tmp を破棄する（disk/hybrid は no-op）。
   try {
     entryStore.cleanup?.();
   } catch {
     /* tmp 後始末失敗は無視 */
+  }
+  try {
+    wss.close();
+  } catch {
+    /* wss close 失敗は無視 */
+  }
+  if (typeof server.closeAllConnections === 'function') {
+    server.closeAllConnections();
   }
   server.close(() => process.exit(0));
 }
