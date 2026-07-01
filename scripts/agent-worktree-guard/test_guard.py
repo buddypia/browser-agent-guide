@@ -235,6 +235,35 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         self.assertTrue(wt.exists())
         subprocess.run(["git", "worktree", "remove", str(wt), "--force"], cwd=self.repo, check=True)
 
+    def test_mark_merged_and_cleanup_reconcile_stale_entry_after_directory_already_gone(self) -> None:
+        # Mirrors a real zombie-ledger incident: a worktree's directory is removed by some
+        # OTHER flow (e.g. a plain `git worktree remove` outside this guard, or the PR merged
+        # via GitHub's web UI) before this ledger's bookkeeping ever recorded pr_merged_at.
+        # The owner marker lives *inside* that directory, so once it's gone, `mark-merged` and
+        # `cleanup` used to hard-fail forever with "Owner marker missing or invalid" — a stale
+        # entry like this permanently blocked bare `cleanup --confirmed` for the WHOLE ledger,
+        # not just itself.
+        run(["init"], self.repo)
+        wt = self.repo / ".worktrees" / "feature" / "goneexternally"
+        run(["add", str(wt)], self.repo)
+        (wt / "f.txt").write_text("work\n", encoding="utf-8")
+        subprocess.run(["git", "add", "f.txt"], cwd=wt, check=True)
+        subprocess.run(["git", "commit", "-m", "work"], cwd=wt, check=True, stdout=subprocess.PIPE)
+        run(["mark-done", str(wt), "--reason", "commit"], self.repo)
+
+        subprocess.run(["git", "worktree", "remove", str(wt), "--force"], cwd=self.repo, check=True)
+        self.assertFalse(wt.exists())
+
+        mark = run(["mark-merged", str(wt)], self.repo, check=False)
+        self.assertEqual(mark.returncode, 0, f"stdout={mark.stdout}\nstderr={mark.stderr}")
+        ledger = json.loads((self.repo / ".tmp/worktree-guard-ledger/test-session.json").read_text())
+        self.assertTrue(ledger["worktrees"][0]["pr_merged_at"])
+
+        cleanup = run(["cleanup", "--confirmed"], self.repo)
+        self.assertIn("cleaned 1 worktree", cleanup.stdout)
+        ledger = json.loads((self.repo / ".tmp/worktree-guard-ledger/test-session.json").read_text())
+        self.assertEqual(ledger["worktrees"][0]["status"], "cleaned")
+
     def _git_out(self, args: list[str], cwd: Path) -> str:
         return subprocess.run(
             ["git", *args], cwd=cwd, text=True, stdout=subprocess.PIPE, check=True

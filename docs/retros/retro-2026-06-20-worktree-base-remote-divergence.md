@@ -31,6 +31,8 @@ recurring class (multi-session-concurrent work is this repo's designed mode, so 
 - **Why this tier:** The blind spot is a non-obvious, reusable insight in a repo whose standard mode is concurrent sessions, so it warrants a standing note rather than record-only (⑥). It is captured at near-zero maintenance cost (a doc line, no code path to rot). A higher tier is not appropriate *now*: ① cannot make "remote divergence during a session" unrepresentable; ② would require a Stop-time `git fetch` (network — the cost the guard deliberately avoids) and the real predictor (upstream-deletes-a-file-I-touch) would false-block ordinary safe drift; ③ is the right *future* upgrade but the ship/create-pr machinery was just gutted by `4a425a0`, so wiring a new gate into a flow in flux is premature (negative maintenance ROI today).
 - Rejected tiers + reason (inner-loop REVISE reasons: violated C# + redirection): ② new hook — C3 false-block of legitimate safe drift + C1 needs network at Stop time → redirect to ⑤ now / ③ later; ③ ship-time gate — C4 maintenance cost against a ship flow currently being gutted → deferred to `## Next`; ⑥ record-only — under-powered for a recurring designed-mode class → upgrade to ⑤.
 - (tier ② only) hook failure mode: N/A (no hook added).
+- Superseded-by: retro-2026-06-30-worktree-base-remote-divergence-recurrence.md (the class
+  recurred with this tier-5 prevention active; escalated to tier ③).
 
 ## Cure (existing instances)
 - [x] The triggering instance (PR #14) was already resolved at incident time via user-approved adaptation (`git merge -X theirs origin/main` + manual modify/delete resolution); runtime feature shipped at `6e96bc1`.
