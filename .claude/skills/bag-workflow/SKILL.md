@@ -46,12 +46,21 @@ disallowed-tools: Bash(rm *)
 
 | source_branch | 意味 | 進み方 |
 |---|---|---|
-| `MCP` | daemon 稼働 + Claude Code に MCP 登録済み | ステップ1 を **MCP** で (主経路) |
-| `FILE` | お描きファイルは inbox にあるが MCP 未登録 | ステップ1 を **ファイル直読み** で。あわせて「次回のため」に MCP 登録を案内 (`references/daemon-mcp.md`) |
+| `MCP` | daemon 稼働 + Claude Code に MCP 登録済み(かつ疎通確認 `mcp_conn=connected`) | ステップ1 を **MCP** で (主経路) |
+| `FILE` | お描きファイルは inbox にあるが MCP 未登録/未疎通 | ステップ1 を **ファイル直読み** で。あわせて「次回のため」に MCP 登録を案内 (`references/daemon-mcp.md`) |
 | `NONE` | daemon 停止、かつお描きも無い | **ここで停止**。`references/fallbacks.md` の該当ブロックを **そのままコピペできるコマンド付きで日本語＋英語**で案内する。スタックトレースは出さない |
 
 > daemon が `down` でも `capture=yes` なら `FILE` 経路で進める (お描きはファイルとして残っているため)。
 > daemon を起こしたい場合の案内も `references/fallbacks.md` にある。
+
+> **`source_branch=MCP` は「呼んでよい」という許可であって「呼べる」保証ではない**: `mcp=registered`
+> は、この preflight を実行した**その瞬間**に別プロセスの `claude mcp list`/`codex mcp list` が確認した
+> 結果にすぎない。Claude Code は MCP サーバーへの接続を**この会話セッションが起動した時点**で確立し、
+> 起動時点で接続できていなければ、daemon が後から立ち上がってもこのセッションでは自動回復しない。
+> よって MCP 経路に進む前に**必ず ToolSearch で `bag_page_feedback` 系ツール(`mcp__bag_page_feedback__*`)
+> が見つかるか確認**し、見つからなければ FILE 経路(`capture=yes` の場合)に切り替えるか、`capture=no`
+> なら「新しい会話セッションを開始してください」と日本語＋英語で案内する(`references/fallbacks.md`
+> の該当ブロック参照)。
 
 ---
 
@@ -59,7 +68,10 @@ disallowed-tools: Bash(rm *)
 
 お描きは**指示の正本**。番号順 (n=1,2,3…) に「手順」として読む。
 
-**MCP 経路 (主):** MCP ツールを**完全修飾名**で呼ぶ。接頭辞 `bag_page_feedback:` は登録時の alias 例 (任意の名前でよい。旧 `bag_visual_feedback:` を使っていたら付け替える → `references/daemon-mcp.md`)。`$ARGUMENTS` を `urlContains` に渡して、自分のプロジェクトのお描きだけに絞る (共有 inbox `~/Downloads/ai-inbox` は他プロジェクトの直近キャプチャを返しうる)。
+**MCP 経路 (主):** 呼ぶ前に ToolSearch で `bag_page_feedback` 系ツール(`mcp__bag_page_feedback__*`)が
+見つかるか確認する(`source_branch=MCP` でも省略しない — 理由はステップ0の注記)。見つからなければ
+MCP 未接続と確定し、下の FILE 経路に切り替えるか、`capture=no` なら新しい会話セッションの開始を案内する。
+見つかった場合: MCP ツールを**完全修飾名**で呼ぶ。接頭辞 `bag_page_feedback:` は登録時の alias 例 (任意の名前でよい。旧 `bag_visual_feedback:` を使っていたら付け替える → `references/daemon-mcp.md`)。`$ARGUMENTS` を `urlContains` に渡して、自分のプロジェクトのお描きだけに絞る (共有 inbox `~/Downloads/ai-inbox` は他プロジェクトの直近キャプチャを返しうる)。
 
 - まず `bag_page_feedback:get_latest_feedback_context({ urlContains: "<$ARGUMENTS>" })` — 最新のお描きを **画像なしの軽量 context** で取得。`@agent:` (`dataAgentId`) / selector / testid / anchorLabel に加え、**メモを残した要素の `html` (outerHTML) と `a11y` も画像なしで返る**ので、まずこれで対象を特定できるか見る。
 - context だけで十分なら画像は読まない (HTML を直したいだけなら `html` で足りることが多い)。曖昧、または見た目の判断が必要な時だけ `bag_page_feedback:get_latest_feedback_image({ urlContains, contextId: "<context.id>", imageReason: "<なぜvisionが必要か>" })` / `bag_page_feedback:get_feedback_image({ id, contextId: id, imageReason })` で **注釈付きPNG (vision) ＋ 絶対パス file_path** を取得する。

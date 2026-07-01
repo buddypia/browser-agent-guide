@@ -42,6 +42,27 @@ FILE 経路で読むもの (preflight の `latest=` フォルダ):
 
 ---
 
+## MCP は registered/Connected のはずなのに ToolSearch で見つからない (mcp=registered だが未接続)
+
+preflight の `mcp=registered`(`claude mcp list`/`codex mcp list` で行がある)は、**その場で新規に
+疎通確認した結果**でしかない。Claude Code は MCP サーバーへの接続を**この会話セッションが起動した
+時点**で確立し、そこで失敗すると、daemon が後から立ち上がってもこのセッション内では自動回復しない
+(切断からの自動再接続はある。未接続からの自動接続は無い)。よくある原因は「daemon をこの会話の
+**後から**起動した」「`claude mcp add` をこの会話の**途中で**実行した」の2つ。
+
+> MCP はこの会話セッションでは接続できていないようです(設定上は登録済みでも、セッション開始時に
+> daemon との接続が確立できないと、このセッション内では自動回復しません)。ファイルから直接読める
+> 場合はそちらで進めます。**次回から自動取得したい場合は、新しい会話を開始してから** `/bag-workflow`
+> を実行し直してください。
+> The MCP connection wasn't established for this session (even though it's registered) — Claude
+> Code only connects to MCP servers at session startup and won't auto-recover mid-session. If a
+> file capture exists, proceed with that. Otherwise, please start a new conversation and re-run.
+
+`capture=yes` なら FILE 経路でそのまま続行できる。`capture=no` なら新しい会話セッションの開始を促す
+(この preflight を再実行しても直らない — bash からは今のセッションの接続状態を検出できない)。
+
+---
+
 ## お描き／メモが見つからない (capture=no / source_branch=NONE)
 
 > お描き／メモがまだ届いていません。拡張機能の「お描き / Draw」で直したい所を丸や矢印で囲む、

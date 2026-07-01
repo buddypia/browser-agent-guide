@@ -57,6 +57,11 @@ claude mcp list   # bag_page_feedback が出れば登録済み
 > または `~/.codex/config.toml` の `url`。Antigravity は `serverUrl` キー。いずれも同じ `…/mcp` を指す。
 > **旧 alias `bag_visual_feedback` で登録していた場合は付け替える** (旧 deprecated ツール名は撤去済み):
 > `claude mcp remove bag_visual_feedback && claude mcp add --transport http bag_page_feedback http://127.0.0.1:8765/mcp`。
+>
+> **登録は今の会話には効かない**: Claude Code は MCP サーバーへの接続をセッション**起動時**にしか
+> 確立しない。`claude mcp add` を会話の途中で実行しても、その会話は接続を確立し直さない —— **新しい
+> 会話を開始**して初めて `mcp__bag_page_feedback__*` ツールが使えるようになる。同様に、daemon をこの
+> 会話の**後から**起動した場合も、この会話はセッション起動時点の(未接続の)状態のままになりうる。
 
 ## daemon を起動する
 
