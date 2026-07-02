@@ -24,11 +24,12 @@ function fakeWebp(sizeBytes = 64) {
 let httpServer;
 let inboxDir;
 let wsUrl;
+let wss;
 
 before(async () => {
   inboxDir = mkdtempSync(join(tmpdir(), 'vf-ws-'));
   httpServer = createHttpServer({ inboxDir });
-  attachWebSocketServer(httpServer, { inboxDir, token: TOKEN });
+  wss = attachWebSocketServer(httpServer, { inboxDir, token: TOKEN });
   await new Promise((r) => httpServer.listen(0, '127.0.0.1', r));
   const { port } = httpServer.address();
   wsUrl = `ws://127.0.0.1:${port}/ws`;
@@ -118,6 +119,63 @@ test('writeEntry: image.inline(webp) を shot.inline.webp として永続し fil
   // inline 無しは何も書かない（後方互換）。
   const noInline = writeEntry(inboxDir, { capturedAt: '2026-06-18T09:12:00.000Z', image: { shot: PNG_B64 } });
   assert.ok(!noInline.files.some((f) => f.startsWith('shot.inline')), 'inline 無しは inline ファイルを作らない');
+});
+
+test('bridgeStatus: 未接続→接続(push前)→push後→切断 の状態遷移を追跡する', async () => {
+  // 既存の before フックの共有サーバーは前段テストの push で汚れているため、独立サーバーで検証する。
+  const dir = mkdtempSync(join(tmpdir(), 'vf-ws-bridge-'));
+  const server = createHttpServer({ inboxDir: dir });
+  const localWss = attachWebSocketServer(server, { inboxDir: dir, token: TOKEN });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const url = `ws://127.0.0.1:${port}/ws`;
+
+  try {
+    const initial = localWss.getBridgeStatus();
+    assert.deepEqual(initial, { connected: false, everConnected: false, lastConnectedAt: null, lastPushAt: null });
+
+    const ws = new WebSocket(`${url}?token=${TOKEN}`);
+    await new Promise((resolve, reject) => {
+      ws.once('open', resolve);
+      ws.once('error', reject);
+    });
+
+    const connectedBeforePush = localWss.getBridgeStatus();
+    assert.equal(connectedBeforePush.connected, true);
+    assert.equal(connectedBeforePush.everConnected, true);
+    assert.ok(connectedBeforePush.lastConnectedAt);
+    assert.equal(connectedBeforePush.lastPushAt, null, 'push 前は lastPushAt が入らない');
+
+    const ack = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timeout')), 4000);
+      ws.once('message', (d) => {
+        clearTimeout(timer);
+        resolve(JSON.parse(d.toString()));
+      });
+      ws.send(
+        JSON.stringify({
+          type: 'visual_feedback',
+          capturedAt: '2026-06-18T01:02:03.004Z',
+          url: 'https://example.com/bridge',
+          image: { shot: PNG_B64 },
+          annotation: {},
+        })
+      );
+    });
+    assert.equal(ack.type, 'ack');
+
+    const afterPush = localWss.getBridgeStatus();
+    assert.ok(afterPush.lastPushAt, 'push 後は lastPushAt が入る');
+
+    ws.close();
+    await new Promise((r) => setTimeout(r, 100));
+    const afterClose = localWss.getBridgeStatus();
+    assert.equal(afterClose.connected, false, '切断後は connected=false');
+    assert.equal(afterClose.everConnected, true, 'everConnected は切断後も保持される');
+  } finally {
+    await new Promise((r) => server.close(r));
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('decodeBase64: png/webp/jpeg data URL と生 base64 を扱う / inlineFilename マッピング', () => {
