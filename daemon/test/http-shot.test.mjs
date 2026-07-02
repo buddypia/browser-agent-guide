@@ -117,6 +117,12 @@ async function get(base, path) {
     assert.equal(json.imageRoute, '/shot/<id>.png');
   });
 
+  test('/healthz は bridgeStatus 未指定なら拡張未接続の既定値を返す', async () => {
+    const res = await fetch(`${base}/healthz`);
+    const json = await res.json();
+    assert.deepEqual(json.extension, { connected: false, everConnected: false, lastConnectedAt: null, lastPushAt: null });
+  });
+
   test('MCP context に shot_url が併走し、そのまま GET で 200 になる', async () => {
     const client = new Client({ name: 'test-client', version: '0.0.0' });
     const transport = new StreamableHTTPClientTransport(new URL(`${base}/mcp`));

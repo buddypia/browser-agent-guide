@@ -181,6 +181,14 @@ node src/index.js --storage disk --inbox ~/Downloads/ai-inbox --port 8765
 curl -s http://127.0.0.1:8765/healthz   # {"ok":true,"inboxDir":"...","imageRoute":"/shot/<id>.png","latestWindowMs":5400000,...}
 ```
 
+`healthz` の `extension` フィールドは拡張との WebSocket 橋渡し状態を表す
+（`{connected, everConnected, lastConnectedAt, lastPushAt}`）。
+「daemon は起きているが拡張がまだ一度も繋がっていない」（`everConnected:false`）と
+「繋がってはいるが何もメモ/お描きが送信されていない」（`everConnected:true` かつ
+`lastPushAt:null`）を区別できる。MCP ツールが inbox 空を返す時のメッセージにも
+この状態を反映し、次に取るべき具体的な手順（拡張 Options での daemon 有効化・
+自動同期の有効化・手動送信）を案内する。
+
 環境変数でも設定可: `BAG_VF_INBOX`, `BAG_VF_PORT`, `BAG_VF_HOST`, `BAG_VF_STORAGE`,
 `BAG_VF_RETENTION`(on/off), `BAG_VF_RETENTION_MAX_AGE`, `BAG_VF_RETENTION_MAX_PER_FAMILY`,
 `BAG_VF_RETENTION_GRACE`, `BAG_VF_RETENTION_DONE_TTL`, `BAG_VF_RETENTION_INTERVAL`, `BAG_VF_LATEST_WINDOW_MIN`。

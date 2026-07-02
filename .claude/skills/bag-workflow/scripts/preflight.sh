@@ -15,11 +15,20 @@ INBOX="${BAG_VF_INBOX:-$HOME/Downloads/ai-inbox}"
 
 # --- 1) daemon が起きているか / is the daemon up? -----------------------------
 health="$(curl -s -m 2 "$DAEMON_HEALTHZ" 2>/dev/null || true)"
+ext_connected="unknown"; ext_ever_connected="unknown"; ext_last_push="none"
 if [ -n "$health" ]; then
   daemon="up"
   # healthz は {"ok":true,"inboxDir":"..."} を返す。inboxDir を採用する。
   inbox_from_health="$(printf '%s' "$health" | sed -n 's/.*"inboxDir":"\([^"]*\)".*/\1/p')"
   [ -n "$inbox_from_health" ] && INBOX="$inbox_from_health"
+  # healthz.extension = {connected, everConnected, lastConnectedAt, lastPushAt}。
+  # 「daemon は起きているが拡張がまだ一度も繋がっていない」を capture=no と区別できる。
+  ec="$(printf '%s' "$health" | sed -n -E 's/.*"connected":(true|false).*/\1/p')"
+  eec="$(printf '%s' "$health" | sed -n -E 's/.*"everConnected":(true|false).*/\1/p')"
+  elp="$(printf '%s' "$health" | sed -n -E 's/.*"lastPushAt":("[^"]*"|null).*/\1/p')"
+  [ -n "$ec" ] && ext_connected="$ec"
+  [ -n "$eec" ] && ext_ever_connected="$eec"
+  [ -n "$elp" ] && [ "$elp" != "null" ] && ext_last_push="$elp"
 else
   daemon="down"
 fi
@@ -88,10 +97,12 @@ fi
 
 echo "── bag-workflow preflight ──────────────────────────────"
 echo "daemon   : $daemon        (healthz: $DAEMON_HEALTHZ)"
+echo "extension: connected=$ext_connected everConnected=$ext_ever_connected lastPush=$ext_last_push"
+echo "           (everConnected=false なら拡張の Options で daemon 有効化・URL・token 未設定の疑い)"
 echo "inbox    : $INBOX"
 echo "capture  : $capture${latest:+   最新: $latest}"
 echo "mcp      : $mcp / $mcp_conn   (Claude Code の bag_page_feedback 登録。registered は設定登録の"
 echo "           意味のみ —— いまの会話セッション自身が ToolSearch でツールを見つけられる保証ではない)"
 echo "browser  : $browser_detail"
 echo "─────────────────────────────────────────────────────────"
-echo "STATUS daemon=$daemon mcp=$mcp mcp_conn=$mcp_conn capture=$capture browser=$browser source_branch=$source_branch inbox=$INBOX latest=${latest:-none}"
+echo "STATUS daemon=$daemon ext_connected=$ext_connected ext_ever_connected=$ext_ever_connected mcp=$mcp mcp_conn=$mcp_conn capture=$capture browser=$browser source_branch=$source_branch inbox=$INBOX latest=${latest:-none}"
