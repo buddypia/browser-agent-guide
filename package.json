@@ -28,7 +28,7 @@
   ],
   "scripts": {
     "check": "npm run check:js && npm run check:markers && npm run check:glossary && npm run test:glossary && npm test && npm run test:slug && npm run test:recipe && npm run test:prompt && npm run test:workflow-lib && npm run test:vf && npm run test:ui",
-    "check:js": "for f in content/content-script.js sidepanel/sidepanel.js sidepanel/i18n.js background/service-worker.js lib/ai-client.js lib/prompt.js lib/storage.js lib/site-matcher.js lib/slug.js lib/recipe-merge.js lib/workflow.js lib/visual-feedback/compositor.js offscreen/offscreen.js offscreen/inline-encode.js options/options.js scripts/check-agent-markers.mjs scripts/glossary/lib/frontmatter.mjs scripts/glossary/lib/entries.mjs scripts/glossary/lib/markers.mjs scripts/glossary/lib/git.mjs scripts/glossary/lib/code.mjs scripts/glossary/validate.mjs scripts/glossary/check-staleness.mjs scripts/glossary/build-traceability.mjs scripts/glossary/touch.mjs; do node --check \"$f\" || exit 1; done && echo 'syntax OK'",
+    "check:js": "for f in content/content-script.js sidepanel/sidepanel.js sidepanel/i18n.js background/service-worker.js lib/ai-client.js lib/prompt.js lib/storage.js lib/site-matcher.js lib/slug.js lib/recipe-merge.js lib/workflow.js lib/visual-feedback/compositor.js offscreen/offscreen.js offscreen/inline-encode.js options/options.js scripts/check-agent-markers.mjs scripts/read-annotations-cdp.mjs scripts/glossary/lib/frontmatter.mjs scripts/glossary/lib/entries.mjs scripts/glossary/lib/markers.mjs scripts/glossary/lib/git.mjs scripts/glossary/lib/code.mjs scripts/glossary/validate.mjs scripts/glossary/check-staleness.mjs scripts/glossary/build-traceability.mjs scripts/glossary/touch.mjs; do node --check \"$f\" || exit 1; done && echo 'syntax OK'",
     "check:markers": "node scripts/check-agent-markers.mjs",
     "check:glossary": "node scripts/glossary/validate.mjs",
     "test:glossary": "node --test 'test/glossary/*.test.mjs'",
@@ -43,6 +43,7 @@
     "test:vf": "node test/visual-feedback/compositor.test.mjs",
     "test:ui": "playwright test -c playwright.config.mjs",
     "debug:playground": "node scripts/debug-with-extension.mjs",
+    "read-annotations": "node scripts/read-annotations-cdp.mjs",
     "zip": "./package-extension.sh"
   },
   "devDependencies": {
