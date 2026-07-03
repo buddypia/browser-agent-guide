@@ -86,6 +86,15 @@ claude mcp add playwright npx @playwright/mcp@latest
 `evaluate_script` / `browser_evaluate` で `data-bag-id` / `data-agent-id` を読める。
 chrome-devtools-mcp はツールが多くコンテキスト消費も大きい点に注意。
 
+> **拡張機能自身の `chrome.storage`(この拡張の `aiAdvisorAnnotations` 等)を読みたい場合は
+> chrome-devtools-mcp を使わない。** v1.4.0 時点で `--categoryExtensions`(`chrome-extension://`
+> ターゲットを見るのに必須)は chrome-devtools-mcp が**自分で新規 Chrome を起動する経路でしか
+> 有効にならない**よう配線されており、`--autoConnect`/`--browserUrl`/`--wsEndpoint` による
+> **既存 Chrome への attach とは併用不可**(`CHANGELOG.md` に明記の意図的仕様)。つまり
+> ユーザーが既に開いている Chrome にそのまま繋いで拡張機能のストレージを読むことはできない。
+> 代わりに `node scripts/read-annotations-cdp.mjs` (依存ゼロ・生 CDP 直叩き) を使う。
+> 詳細: `docs/reading-annotations-via-cdp.md`。
+
 ---
 
 ## 4. Codex computer-use — 逃げ道のみ (重要な制約)

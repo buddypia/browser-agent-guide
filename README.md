@@ -106,6 +106,24 @@ a plain-language description (e.g. *"circled in red. comment: …"*), so "look h
 instructions land precisely. Saved drawings (kind: **Drawing**) are editable/removable from the
 **Page cues** list.
 
+### Recovering a note you forgot to send (advanced)
+
+**Add note** only saves to the extension's own `chrome.storage.local` (key `aiAdvisorAnnotations`) —
+it is **not** sent to the daemon/MCP until you press **Send image to AI** (or enable `daemon` +
+`visualFeedback.autoSync` in Options, both off by default). If you left a note and closed the tab
+before sending it, `scripts/read-annotations-cdp.mjs` reads it back directly from the browser via the
+Chrome DevTools Protocol — no daemon, no re-capture, no lost work:
+
+```bash
+# Chrome must be running with a remote-debugging port (see the doc for a safe launch recipe):
+npm run read-annotations                         # prints every note/drawing, newest first
+node scripts/read-annotations-cdp.mjs --kind note --scope example.com
+```
+
+Full setup, flags, and a note on why this bypasses `chrome-devtools-mcp` (its `--categoryExtensions`
+flag doesn't work over an attach connection as of v1.4.0) are in
+[docs/reading-annotations-via-cdp.md](docs/reading-annotations-via-cdp.md).
+
 ## Verb registry (excerpt)
 
 Implemented in `content/content-script.js` as `AI_VERBS`. Every function name is a verb.
