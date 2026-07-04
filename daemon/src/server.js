@@ -11,7 +11,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { buildEntryContent, buildEntryContext, buildEntryContextText, peekDistinctRecent } from './inbox.js';
+import { buildEntryContent, buildEntryContext, buildEntryContextText, peekDistinctRecent, tabSummary } from './inbox.js';
 import { createDiskEntryStore } from './store.js';
 
 // 引数なし latest が曖昧（直近に複数プロジェクト）と判定する時間窓（既定90分、capturedAt 基準）。
@@ -105,11 +105,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
           return ambiguousLatestResult(peek);
         }
         // 単一プロジェクト（または空）→ 従来どおり最新を返す。
-        const context = buildEntryContext(entry, { shotUrlFor });
-        return {
-          content: [{ type: 'text', text: buildEntryContextText(context) }],
-          structuredContent: context,
-        };
+        return contextResult(entry, shotUrlFor);
       }
       // フィルタ指定時は従来どおり（呼び出し側が既にスコープを絞っている）。
       const [entry] = entryStore.queryEntries({ limit: 1, urlContains, titleContains, tabId, windowId });
@@ -118,11 +114,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       }
       const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains, tabId, windowId });
       if (stale) return stale;
-      const context = buildEntryContext(entry, { shotUrlFor });
-      return {
-        content: [{ type: 'text', text: buildEntryContextText(context) }],
-        structuredContent: context,
-      };
+      return contextResult(entry, shotUrlFor);
     }
   );
 
@@ -154,9 +146,9 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
         if (peek.distinctCount >= 2) {
           const picked = peek.candidates.find((c) => c.id === contextId);
           if (picked && String(imageReason || '').trim()) {
-            const entry = entryStore.findEntry(picked.id);
-            if (entry) {
-              const content = buildEntryContent(materializeForImage(entryStore, entry), { shotUrlFor });
+            const pickedEntry = entryStore.findEntry(picked.id);
+            if (pickedEntry) {
+              const content = buildImageContent(entryStore, pickedEntry, shotUrlFor);
               // 別案件混在の警告を image と一緒に必ず連れて行く。
               content.unshift({ type: 'text', text: ambiguousLatestMessage(peek.candidates) });
               return { content };
@@ -165,9 +157,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
           return ambiguousLatestResult(peek);
         }
         // 単一プロジェクト（または空）→ 従来の imageGate 経路をそのまま。
-        const blocked = imageGateMessage(entry, { contextId, imageReason });
-        if (blocked) return { content: [{ type: 'text', text: blocked }] };
-        return { content: buildEntryContent(materializeForImage(entryStore, entry), { shotUrlFor }) };
+        return imageResult(entryStore, entry, shotUrlFor, { contextId, imageReason });
       }
       // フィルタ指定時は従来どおり。
       const [entry] = entryStore.queryEntries({ limit: 1, urlContains, titleContains, tabId, windowId });
@@ -176,9 +166,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       }
       const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains, tabId, windowId });
       if (stale) return stale;
-      const blocked = imageGateMessage(entry, { contextId, imageReason });
-      if (blocked) return { content: [{ type: 'text', text: blocked }] };
-      return { content: buildEntryContent(materializeForImage(entryStore, entry), { shotUrlFor }) };
+      return imageResult(entryStore, entry, shotUrlFor, { contextId, imageReason });
     }
   );
 
@@ -194,11 +182,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
     async ({ id }) => {
       const entry = entryStore.findEntry(id);
       if (!entry) return { content: [{ type: 'text', text: `id=${id} は見つかりません。` }], isError: true };
-      const context = buildEntryContext(entry, { shotUrlFor });
-      return {
-        content: [{ type: 'text', text: buildEntryContextText(context) }],
-        structuredContent: context,
-      };
+      return contextResult(entry, shotUrlFor);
     }
   );
 
@@ -214,9 +198,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
     async ({ id, contextId, imageReason }) => {
       const entry = entryStore.findEntry(id);
       if (!entry) return { content: [{ type: 'text', text: `id=${id} は見つかりません。` }], isError: true };
-      const blocked = imageGateMessage(entry, { contextId, imageReason });
-      if (blocked) return { content: [{ type: 'text', text: blocked }] };
-      return { content: buildEntryContent(materializeForImage(entryStore, entry), { shotUrlFor }) };
+      return imageResult(entryStore, entry, shotUrlFor, { contextId, imageReason });
     }
   );
 
@@ -235,6 +217,29 @@ function materializeForImage(entryStore, entry) {
   }
 }
 
+// get_latest_feedback_context / get_feedback_context の3分岐で共通の「text + structuredContent」応答。
+function contextResult(entry, shotUrlFor) {
+  const context = buildEntryContext(entry, { shotUrlFor });
+  return {
+    content: [{ type: 'text', text: buildEntryContextText(context) }],
+    structuredContent: context,
+  };
+}
+
+// materialize + buildEntryContent の共通入口。image ツールの通常分岐と disambiguation の
+// picked-candidate 分岐（gate 済み判定が異なる）の両方から呼ぶ。
+function buildImageContent(entryStore, entry, shotUrlFor) {
+  return buildEntryContent(materializeForImage(entryStore, entry), { shotUrlFor });
+}
+
+// get_latest_feedback_image / get_feedback_image の3分岐で共通の「imageGate → content[]のみ」応答。
+// 不変条件（Codex#10334 パリティ）: structuredContent は絶対に載せない。
+function imageResult(entryStore, entry, shotUrlFor, { contextId, imageReason } = {}) {
+  const blocked = imageGateMessage(entry, { contextId, imageReason });
+  if (blocked) return { content: [{ type: 'text', text: blocked }] };
+  return { content: buildImageContent(entryStore, entry, shotUrlFor) };
+}
+
 function asEntryStore(entrySource) {
   if (entrySource?.queryEntries && entrySource?.findEntry && entrySource?.materialize) return entrySource;
   return createDiskEntryStore(entrySource);
@@ -246,15 +251,8 @@ function entryStatus(entry) {
 }
 
 function entryTab(entry) {
-  const tab = entry?.tab;
-  if (!tab) return '';
-  const parts = [
-    Number.isInteger(tab.tabId) && `tabId=${tab.tabId}`,
-    Number.isInteger(tab.windowId) && `windowId=${tab.windowId}`,
-    Number.isInteger(tab.index) && `index=${tab.index}`,
-    typeof tab.active === 'boolean' && `active=${tab.active}`,
-  ].filter(Boolean);
-  return parts.length ? `  tab=${parts.join(' ')}` : '';
+  const summary = tabSummary(entry?.tab);
+  return summary ? `  tab=${summary}` : '';
 }
 
 function imageGateMessage(entry, { contextId, imageReason } = {}) {

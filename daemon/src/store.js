@@ -66,7 +66,7 @@ function createMemoryBackedStore({ inboxDir, mode, memoryLimit }) {
         inboxDir: currentInbox(),
         payload,
         now: opts?.now,
-        taken: (id) => memory.some((e) => e.id === id) || Boolean(findDiskEntry(currentInbox(), id)),
+        taken: (id) => memory.some((e) => e.id === id) || existsSync(join(currentInbox(), id)),
       });
       memory.unshift(entry);
       trimMemory(memory, memoryLimit);
@@ -190,8 +190,4 @@ function mergeEntries(memoryEntries, diskEntries, limit) {
   }
   merged.sort((a, b) => b.mtime - a.mtime || (a.id < b.id ? 1 : -1));
   return merged.slice(0, Math.max(1, limit));
-}
-
-export function wasMaterialized(entry) {
-  return Boolean(entry?.materialized || (entry?.shot && existsSync(entry.shot)));
 }

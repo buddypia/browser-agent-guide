@@ -187,7 +187,9 @@ export function matchesFilter(annotation, { urlContains, titleContains, tabId, w
   return true;
 }
 
-// 新しい順スキャン + url/title/tab フィルタ。each entry に {url,title,tab} メタを付けて返す。
+// 新しい順スキャン + url/title/tab フィルタ。each entry に {url,title,tab,annotation} メタを付けて返す。
+// annotation は読み込み済みの完全な JSON を持たせる（readEntryAnnotation が entry.annotation を
+// 優先するので、後続の buildEntryContext/buildEntryContent が同じ annotation.json を再読み込みしない）。
 export function queryEntries(inboxDir, { urlContains, titleContains, tabId, windowId, limit = 20, scan = 500 } = {}) {
   const out = [];
   for (const e of listEntries(inboxDir, scan)) {
@@ -195,6 +197,7 @@ export function queryEntries(inboxDir, { urlContains, titleContains, tabId, wind
     if (!matchesFilter(annotation, { urlContains, titleContains, tabId, windowId })) continue;
     out.push({
       ...e,
+      annotation,
       url: annotation?.url || '',
       title: annotation?.title || '',
       capturedAt: annotation?.capturedAt || '',
@@ -220,7 +223,9 @@ function normalizeTabMetadata(tab) {
   return Object.keys(out).length ? out : null;
 }
 
-function tabSummary(tab) {
+// tab メタ({tabId,windowId,index,active}) を "tabId=… windowId=… …" に整形する。
+// server.js の entryTab() が同じ整形に '  tab=' プレフィックスを足して使う（両者が別々に実装しない）。
+export function tabSummary(tab) {
   if (!tab) return '';
   const parts = [
     Number.isInteger(tab.tabId) && `tabId=${tab.tabId}`,
@@ -478,12 +483,6 @@ function readEntryAnnotation(entry) {
   return entry?.dir ? readAnnotation(entry.dir) : null;
 }
 
-function readEntryShotBase64(entry) {
-  const buf = readEntryImageBuffer(entry, 'shot');
-  if (!buf) throw new Error(`shot.png not found for entry ${entry?.id || ''}`);
-  return buf.toString('base64');
-}
-
 // PNG のバイト列を返す共通入口（MCP の base64 化と HTTP 画像配信が共有する）。kind='shot'|'raw'。
 // メモリ保持(materialize 前)エントリは payload/shotBuffer から、ディスクエントリはファイルから読む。
 // バイトが取れなければ null（呼び出し側で 404 / throw を選ぶ）。
@@ -510,7 +509,7 @@ function entryFiles(entry, materialized) {
     return { shot: '', raw: '', annotation: '', memo: '' };
   }
   return {
-    shot: entry.shot,
+    shot: pathIfExists(entry.dir, SHOT),
     raw: pathIfExists(entry.dir, RAW),
     annotation: pathIfExists(entry.dir, ANNOTATION),
     memo: pathIfExists(entry.dir, MEMO),

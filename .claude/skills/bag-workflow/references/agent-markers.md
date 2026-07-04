@@ -5,7 +5,8 @@
 
 ## 付与状況 — 主要UIに付与済み、それ以外は未付与
 
-**主要UI (`sidepanel.html` 5 / `options.html` 8 = 計13) に付与済み。** 大半の要素には未付与なので、マーカーが無い要素は selector/表示テキストのフォールバックで特定する。
+**主要UI (`sidepanel.html` / `options.html`) に付与済み。** 大半の要素には未付与なので、マーカーが無い要素は selector/表示テキストのフォールバックで特定する。
+正確な件数は固定値でなく都度 `rg -c 'data-agent-id="@agent:' sidepanel/sidepanel.html options/options.html` で確認する(要素追加で増減するため、ここに数を埋め込むと陳腐化する)。
 ライブの目印は動的採番の `data-bag-id` (例 `button#3`) と、chat/recipe 経路でブロックされる高リスク verb `defineMarker`。
 
 → **既定は「マーカー無し」前提のフォールバック経路** (SKILL.md ステップ3):

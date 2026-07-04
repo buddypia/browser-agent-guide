@@ -56,32 +56,10 @@ dataAgentId(@agent:)  →  selector  →  testid  →  anchorLabel  →  targetC
 
 ---
 
-## 3. バグ・トリアージ票テンプレート(唯一の成果物・日本語/英語)
+## 3. バグ・トリアージ票テンプレート
 
-1画面で読める票。**ここで止まる**(修正・操作・検証はしない)。
-
-```
-# 🐛 バグ・トリアージ / Bug Triage
-1. 対象タブ / Tab    : tabId=<N> windowId=<M> index=<i> active=<bool>   ✓ 要求 tabId と一致 / matched
-                       url=<…>   title=<…>   captured_at=<ISO>
-                       ※ tabId は Chrome セッション内ID / Chrome-session scoped
-                         （daemon の filter+識別子であって CDP ハンドルではない / not a CDP handle）
-2. メモ / Memo       : 「<note 本文 / verbatim>」  (n=1, intent: <…>)
-                       ← 複数なら描いた順に n=1,2,3。note が空なら shapeText。
-3. 対象要素 / Element: @agent:=<…or なし>   target="<anchorLabel>"
-                       a11y: role=<…> name="<…>" states=[…]   selector=<…> testid=<…>
-                       html: <button class="…">…</button>   (truncated=<true/false>)
-4. ソース / Source   : <絶対 file:line>            confidence: 高/中/低
-                       resolved via: <@agent: | selector | testid | anchorLabel | targetCandidate | file:// | html-grep>
-                       code: <該当行の1行抜粋>
-                       alt: <file:line>  /  <file:line>     ← 最大2件
-                       （file:// キャプチャなら: この file:// ページ自体がソース / the file:// page IS the source）
-5. 推定原因 / Cause? : <メモと要素を結ぶ控えめな1行仮説。断定しない。推測なら推測と明記>
-6. 次の一手 / Next   : 修正は /bag-workflow（操作+検証つき）を実行するか、上の file:line を Edit で直す
-                       （承認プロンプトが出ます）。bag-memo は取得・特定のみ（直さない）。
-                       To fix: run /bag-workflow (operate+verify) or Edit the file:line (approval prompt). 
-                       bag-memo is retrieve + locate only.
-```
+**正本(唯一のコピー)は `../SKILL.md` ステップ5**。ここでは重複再掲せず、そちらを参照する
+(1画面で読める票を出し、ここで止まる — 修正・操作・検証はしない)。
 
 ### スコープ未指定/曖昧のとき
 票の代わりに**候補テーブル**を出して tabId を選ばせる:

@@ -57,6 +57,19 @@ function sweep(dir) {
   }
 }
 
+// push 毎の sweep 呼び出しをスロットルする。grace floor（既定30分）がある限り、連続する push の
+// 度に inbox 全体を同期スキャンし直す必要はなく、次の定期 timer sweep でも同じ stale entry を
+// 安全に退避できる。起動時 sweep / 定期 timer sweep / downloadsDir 採用時の sweep は対象外
+// （頻度が低く意図的なタイミングのため、スロットルせず常に実行する）。
+const PUSH_SWEEP_THROTTLE_MS = 5000;
+let lastPushSweepAt = 0;
+function sweepAfterPush(dir) {
+  const now = Date.now();
+  if (now - lastPushSweepAt < PUSH_SWEEP_THROTTLE_MS) return;
+  lastPushSweepAt = now;
+  sweep(dir);
+}
+
 // latest の鮮度判定 + 引数なし latest の曖昧検知の時間窓（分指定・任意）。未指定は 90分。
 const latestWindowMin = Number(args.latestWindowMin || process.env.BAG_VF_LATEST_WINDOW_MIN);
 const effectiveLatestWindowMin = Number.isFinite(latestWindowMin) && latestWindowMin > 0 ? latestWindowMin : 90;
@@ -96,7 +109,7 @@ const wss = attachWebSocketServer(server, {
   token,
   onSaved: ({ id, storage, materialized }) => {
     process.stderr.write(`[bag-vf] saved ${id}${storage ? ` (${storage}${materialized ? ', materialized' : ''})` : ''}\n`);
-    sweep(getInbox()); // 新しいキャプチャは自分の同一ページ族の旧世代を即退避する
+    sweepAfterPush(getInbox()); // 新しいキャプチャは自分の同一ページ族の旧世代を即退避する（スロットル付き）
   },
   onHello: (downloadsDir) => adoptDownloadsDir(downloadsDir),
 });

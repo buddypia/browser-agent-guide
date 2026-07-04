@@ -28,8 +28,7 @@ MCP 5ツール(`list_feedback` / `get_latest_feedback_context` / `get_feedback_c
 daemon は `matchesFilter` → `filterNumberMatches` で `annotation.tab.tabId` / `annotation.tab.windowId` を
 **整数の完全一致**で絞る。だから「このタブのメモだけ」は文字どおり真。
 
-> 注: 共有 `../bag-workflow/references/daemon-mcp.md` の表は `list_feedback` の引数に `tabId/windowId` を
-> 書いていない(ドキュメントが少し古い)が、**コードは受け付ける**。`list_feedback` にも tabId を渡してよい。
+> 注: `list_feedback` にも `tabId`/`windowId` を渡してよい(共有 `../bag-workflow/references/daemon-mcp.md` の表にも記載済み)。
 
 ### 「効くからくり」: tabId は曖昧解消もやる。ただし freshness ガードは別物
 共有 `~/Downloads/ai-inbox` は全プロジェクト共有。daemon の安全弁は**発火条件が2種類**あり、混同しないこと:

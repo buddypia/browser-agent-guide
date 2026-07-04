@@ -8,72 +8,23 @@
 # スタックトレースは一切出さない（落ちても STATUS を返す）。Never prints a stack trace.
 set -u
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# daemon/healthz プローブ・inbox 最新capture走査・mcp登録+疎通確認は bag-workflow と共通実装。
+# shellcheck source=../../bag-workflow/scripts/preflight-common.sh
+. "${SCRIPT_DIR}/../../bag-workflow/scripts/preflight-common.sh"
+
 ARG="${1:-}"
 DAEMON_HEALTHZ="${BAG_VF_HEALTHZ:-http://127.0.0.1:8765/healthz}"
 # 既定は best-effort（Unix の典型値）。権威的な値は healthz の inboxDir（拡張の報告で自動追従）。
 INBOX="${BAG_VF_INBOX:-$HOME/Downloads/ai-inbox}"
 
-# --- 1) daemon が起きているか + 権威的 inboxDir / daemon up? --------------------
-health="$(curl -s -m 2 "$DAEMON_HEALTHZ" 2>/dev/null || true)"
-ext_connected="unknown"; ext_ever_connected="unknown"; ext_last_push="none"
-if [ -n "$health" ]; then
-  daemon="up"
-  inbox_from_health="$(printf '%s' "$health" | sed -n 's/.*"inboxDir":"\([^"]*\)".*/\1/p')"
-  [ -n "$inbox_from_health" ] && INBOX="$inbox_from_health"
-  # healthz.extension = {connected, everConnected, lastConnectedAt, lastPushAt}。
-  # 「daemon は起きているが拡張がまだ一度も繋がっていない」を capture=no と区別できる。
-  ec="$(printf '%s' "$health" | sed -n -E 's/.*"connected":(true|false).*/\1/p')"
-  eec="$(printf '%s' "$health" | sed -n -E 's/.*"everConnected":(true|false).*/\1/p')"
-  elp="$(printf '%s' "$health" | sed -n -E 's/.*"lastPushAt":("[^"]*"|null).*/\1/p')"
-  [ -n "$ec" ] && ext_connected="$ec"
-  [ -n "$eec" ] && ext_ever_connected="$eec"
-  [ -n "$elp" ] && [ "$elp" != "null" ] && ext_last_push="$elp"
-else
-  daemon="down"
-fi
-
-# --- 2) inbox に最近のキャプチャがあるか / latest capture? ----------------------
+bag_probe_daemon    # daemon / ext_connected / ext_ever_connected / ext_last_push / INBOX(採用) を設定
 # 注: 既定の storage=memory はファイルを書かない（RAM 保持）ので capture=no になりうるが、
 #     MCP 経由なら取得できる（source_branch は mcp 登録を優先して MCP になる）。
-latest=""
-if [ -d "$INBOX" ]; then
-  while IFS= read -r d; do
-    [ -z "$d" ] && continue
-    case "$d" in */done/) continue;; esac
-    if [ -f "${d}shot.png" ]; then latest="$d"; break; fi
-  done <<EOF
-$(ls -dt "$INBOX"/*/ 2>/dev/null)
-EOF
-fi
-[ -n "$latest" ] && capture="yes" || capture="no"
+bag_probe_capture   # latest / capture を設定。BAG_INBOX_DIR_LIST に ls -dt 結果もキャッシュされる
+bag_probe_mcp       # mcp / mcp_conn を設定
 
-# --- 3) Claude Code / Codex に MCP が登録されているか / registered? ----------
-# 注: これは「claude/codex の設定に登録され、このコマンドを叩いた瞬間に疎通できたか」の
-#     チェックであり、いま進行中の会話セッション自身がそのツールを呼べるかどうかとは別物。
-#     Claude Code は MCP サーバーへの接続をセッション起動時に確立し、起動時点で接続に失敗すると
-#     そのセッションでは(daemon が後から起動しても)自動回復しない。だから mcp=registered でも
-#     ToolSearch でツールが見つからないことがある → SKILL.md 側で呼び出し前に必ず確認する。
-mcp="absent"
-mcp_conn="n/a"
-if command -v claude >/dev/null 2>&1; then
-  mcp_line="$(claude mcp list 2>/dev/null | grep -i 'bag_page_feedback' | head -1)"
-  if [ -n "$mcp_line" ]; then
-    mcp="registered"
-    if printf '%s' "$mcp_line" | grep -qi 'connected'; then
-      mcp_conn="connected"
-    else
-      mcp_conn="not-connected"
-    fi
-  fi
-fi
-if [ "$mcp" = "absent" ] && command -v codex >/dev/null 2>&1; then
-  if codex mcp list 2>/dev/null | grep -qi 'bag_page_feedback'; then
-    mcp="registered"
-    mcp_conn="unknown"
-  fi
-fi
-
-# --- 4) $ARGUMENTS を tabId / urlContains に分類 / classify the argument --------
+# --- $ARGUMENTS を tabId / urlContains に分類 / classify the argument --------------
 arg_kind="none"; scope_tabId="none"; scope_url="none"; m_windowId="none"; m_url="none"
 if [ -n "$ARG" ]; then
   case "$ARG" in
@@ -84,6 +35,7 @@ fi
 
 # tabId が来たら、一致する最新 annotation.json から windowId / url を best-effort 解決。
 # （disk/hybrid モードでのみファイルが存在。memory モードは none のまま＝tabId 単体で MCP に渡せば十分）
+# bag_probe_capture が既にキャッシュした BAG_INBOX_DIR_LIST を再利用し、ls -dt を再実行しない。
 if [ "$arg_kind" = "tabId" ] && [ -d "$INBOX" ]; then
   while IFS= read -r d; do
     [ -z "$d" ] && continue
@@ -98,26 +50,18 @@ if [ "$arg_kind" = "tabId" ] && [ -d "$INBOX" ]; then
       break
     fi
   done <<EOF
-$(ls -dt "$INBOX"/*/ 2>/dev/null)
+$BAG_INBOX_DIR_LIST
 EOF
 fi
 
-# --- 5) ライブページ確認用ブラウザ（任意・副次） / live reader (optional) -------
+# --- ライブページ確認用ブラウザ（任意・副次） / live reader (optional) -------------
 if command -v playwright-cli >/dev/null 2>&1; then
   browser="playwright-cli"
 else
   browser="none"
 fi
 
-# --- 分岐判断 / branch: MCP(主) > FILE(救済) > NONE ----------------------------
-# mcp_conn=not-connected(登録行はあるが疎通確認で ✔ Connected が出なかった)なら MCP へ倒さない。
-if [ "$mcp" = "registered" ] && [ "$mcp_conn" != "not-connected" ]; then
-  source_branch="MCP"
-elif [ "$capture" = "yes" ]; then
-  source_branch="FILE"
-else
-  source_branch="NONE"
-fi
+bag_resolve_source_branch   # mcp/mcp_conn/capture → source_branch(MCP > FILE > NONE)
 
 echo "── bag-memo preflight ──────────────────────────────────"
 echo "daemon   : $daemon        (healthz: $DAEMON_HEALTHZ)"
