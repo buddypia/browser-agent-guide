@@ -13,6 +13,11 @@ export function attachWebSocketServer(httpServer, { inboxDir, entryStore, token,
   const currentInbox = () => (typeof inboxDir === 'function' ? inboxDir() : inboxDir);
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
 
+  // 拡張との橋渡し状態。healthz/preflight が「daemon は起きているが拡張がまだ一度も
+  // 繋がっていない」と「繋がったことはあるが今は切れている」を区別できるようにする。
+  const bridgeStatus = { connected: false, everConnected: false, lastConnectedAt: null, lastPushAt: null };
+  wss.getBridgeStatus = () => ({ ...bridgeStatus });
+
   httpServer.on('upgrade', (req, socket, head) => {
     let url;
     try {
@@ -37,6 +42,12 @@ export function attachWebSocketServer(httpServer, { inboxDir, entryStore, token,
   wss.on('connection', (ws, req) => {
     // 接続に使われた authority(host:port)。ack に載せる取得先 URL の host に使う（=画像配信ルートと同一サーバ）。
     const host = req?.headers?.host || '';
+    bridgeStatus.connected = true;
+    bridgeStatus.everConnected = true;
+    bridgeStatus.lastConnectedAt = new Date().toISOString();
+    ws.on('close', () => {
+      bridgeStatus.connected = false;
+    });
     ws.on('message', (data) => {
       let msg;
       try {
@@ -53,6 +64,7 @@ export function attachWebSocketServer(httpServer, { inboxDir, entryStore, token,
         // 拡張が実ダウンロード先を報告してきたら、書き込み前に inbox を合わせる（固定時は無視）。
         if (msg.downloadsDir) onHello?.(msg.downloadsDir);
         const saved = entryStore?.save ? entryStore.save(msg) : { storage: 'disk', materialized: true, ...writeEntry(currentInbox(), msg) };
+        bridgeStatus.lastPushAt = new Date().toISOString();
         onSaved?.(saved);
         // パス非依存の取得先 URL を ack に併走させる（拡張サイドパネルがそのまま表示できる）。
         // token は URL に埋め込まない（取得時に ?token= を付与）。raw は payload にある時だけ広告する。

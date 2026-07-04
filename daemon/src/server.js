@@ -39,9 +39,10 @@ const IMAGE_GATE_SCHEMA = {
 
 // shotUrlFor(id, kind) は、ディスクパス非依存の loopback HTTP 取得先（/shot|/raw/<id>.png?token=…）を
 // 返すオプション関数。渡された時だけ context/image テキストに shot_url/raw_url を併走させる。
-export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFAULT_LATEST_WINDOW_MS, nowMs } = {}) {
+export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFAULT_LATEST_WINDOW_MS, nowMs, bridgeStatus } = {}) {
   const entryStore = asEntryStore(entrySource);
   const currentNowMs = typeof nowMs === 'function' ? nowMs : () => (Number.isFinite(nowMs) ? nowMs : Date.now());
+  const emptyMessage = (filters) => filterEmptyMessage(filters, bridgeStatus ? bridgeStatus() : null);
   const server = new McpServer(
     { name: 'bag-page-feedback', version: '0.1.0' },
     {
@@ -73,7 +74,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
                 `${i + 1}. id=${e.id}  (${new Date(e.mtime).toISOString()})${entryStatus(e)}\n   url=${e.url || '(不明)'}  title=${e.title || '(不明)'}${entryTab(e)}`
             )
             .join('\n')
-        : filterEmptyMessage({ urlContains, titleContains, tabId, windowId });
+        : emptyMessage({ urlContains, titleContains, tabId, windowId });
       return { content: [{ type: 'text', text }] };
     }
   );
@@ -95,7 +96,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
         const rows = entryStore.queryEntries({ limit: 8 });
         const entry = rows[0];
         if (!entry) {
-          return { content: [{ type: 'text', text: filterEmptyMessage({}) }] };
+          return { content: [{ type: 'text', text: emptyMessage({}) }] };
         }
         const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains });
         if (stale) return stale;
@@ -113,7 +114,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       // フィルタ指定時は従来どおり（呼び出し側が既にスコープを絞っている）。
       const [entry] = entryStore.queryEntries({ limit: 1, urlContains, titleContains, tabId, windowId });
       if (!entry) {
-        return { content: [{ type: 'text', text: filterEmptyMessage({ urlContains, titleContains, tabId, windowId }) }] };
+        return { content: [{ type: 'text', text: emptyMessage({ urlContains, titleContains, tabId, windowId }) }] };
       }
       const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains, tabId, windowId });
       if (stale) return stale;
@@ -145,7 +146,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
         const rows = entryStore.queryEntries({ limit: 8 });
         const entry = rows[0];
         if (!entry) {
-          return { content: [{ type: 'text', text: filterEmptyMessage({}) }] };
+          return { content: [{ type: 'text', text: emptyMessage({}) }] };
         }
         const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains });
         if (stale) return stale;
@@ -171,7 +172,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       // フィルタ指定時は従来どおり。
       const [entry] = entryStore.queryEntries({ limit: 1, urlContains, titleContains, tabId, windowId });
       if (!entry) {
-        return { content: [{ type: 'text', text: filterEmptyMessage({ urlContains, titleContains, tabId, windowId }) }] };
+        return { content: [{ type: 'text', text: emptyMessage({ urlContains, titleContains, tabId, windowId }) }] };
       }
       const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains, tabId, windowId });
       if (stale) return stale;
@@ -390,7 +391,9 @@ function entryTimeMs(entry) {
 }
 
 // フィルタ有無で空時メッセージを出し分ける（誤って別プロジェクトのを掴ませない案内）。
-function filterEmptyMessage({ urlContains, titleContains, tabId, windowId } = {}) {
+// bridgeStatus（拡張の WS 橋渡し状態）が分かる時は、「拡張が一度も繋がっていない」と
+// 「繋がってはいるが何も送られていない」を区別し、次に取るべき具体的な手順を案内する。
+function filterEmptyMessage({ urlContains, titleContains, tabId, windowId } = {}, bridgeStatus = null) {
   const cond = [
     urlContains && `url に「${urlContains}」`,
     titleContains && `title に「${titleContains}」`,
@@ -401,6 +404,20 @@ function filterEmptyMessage({ urlContains, titleContains, tabId, windowId } = {}
     .join(' かつ ');
   if (cond) {
     return `${cond} を含むフィードバックは見つかりません。条件を外すか、list_feedback で一覧を確認してください。`;
+  }
+  if (bridgeStatus && !bridgeStatus.everConnected) {
+    return (
+      'inbox は空です。ブラウザ拡張がこの daemon にまだ一度も接続していません。' +
+      '拡張の Options → 「視覚フィードバック デーモン」で有効化・URL（ws://127.0.0.1:8765/ws 等）・' +
+      'トークン（daemon 起動時のログに表示、または ~/.bag-vf/token）を設定してください。'
+    );
+  }
+  if (bridgeStatus && bridgeStatus.everConnected && !bridgeStatus.lastPushAt) {
+    return (
+      'inbox は空です。拡張は daemon に接続済みですが、まだメモ／お描きが送信されていません。' +
+      'ページで「メモを残す」または「お描き」を保存した後、サイドパネルの送信操作を行うか、' +
+      'Options → 視覚フィードバック で「自動同期」を有効にしてください。'
+    );
   }
   return 'inbox は空です。ブラウザ拡張の「お描き／メモをAIへ」で保存してください。';
 }
