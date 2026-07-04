@@ -575,3 +575,53 @@ test('get_feedback_context: v0 entry は html=null / a11y=null（後方互換）
     }
   );
 });
+
+// bridgeStatus（拡張の WS 橋渡し状態）が空応答メッセージへ反映されることを検証する。
+// 「拡張が一度も繋がっていない」と「繋がってはいるが何も送られていない」を区別して案内する。
+async function withBridgeStatusClient(bridgeStatus, fn) {
+  const inboxDir = mkdtempSync(join(tmpdir(), 'vf-mcp-bridge-'));
+  const server = createHttpServer({ inboxDir, bridgeStatus });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const client = new Client({ name: 'mcp-bridge-client', version: '0.0.0' });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
+  try {
+    return await fn(client);
+  } finally {
+    await client.close();
+    await new Promise((r) => server.close(r));
+    rmSync(inboxDir, { recursive: true, force: true });
+  }
+}
+
+test('list_feedback: bridgeStatus 無し(既定)は従来どおりの空メッセージ', async () => {
+  await withBridgeStatusClient(undefined, async (client) => {
+    const res = await client.callTool({ name: 'list_feedback', arguments: {} });
+    const text = res.content.find((c) => c.type === 'text').text;
+    assert.match(text, /^inbox は空です。ブラウザ拡張の「お描き／メモをAIへ」で保存してください。$/);
+  });
+});
+
+test('get_latest_feedback_context: 拡張が一度も接続していない時は接続手順を案内する', async () => {
+  await withBridgeStatusClient(
+    () => ({ connected: false, everConnected: false, lastConnectedAt: null, lastPushAt: null }),
+    async (client) => {
+      const res = await client.callTool({ name: 'get_latest_feedback_context', arguments: {} });
+      const text = res.content.find((c) => c.type === 'text').text;
+      assert.match(text, /まだ一度も接続していません/);
+      assert.match(text, /Options/);
+    }
+  );
+});
+
+test('list_feedback: 拡張は接続済みだが push が無い時は自動同期/手動送信を案内する', async () => {
+  await withBridgeStatusClient(
+    () => ({ connected: true, everConnected: true, lastConnectedAt: '2026-07-02T00:00:00.000Z', lastPushAt: null }),
+    async (client) => {
+      const res = await client.callTool({ name: 'list_feedback', arguments: {} });
+      const text = res.content.find((c) => c.type === 'text').text;
+      assert.match(text, /接続済みですが、まだメモ／お描きが送信されていません/);
+      assert.match(text, /自動同期/);
+    }
+  );
+});

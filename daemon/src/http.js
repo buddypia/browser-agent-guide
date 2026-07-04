@@ -22,7 +22,7 @@ const IMAGE_ROUTE = /^\/(shot|raw)\/([A-Za-z0-9_-]+)\.png$/;
 // inboxDir は文字列でも「現在の inbox を返す関数」でも良い（実行時に inbox を差し替えられるように）。
 // entryStore を渡すと、MCP は disk 直読みではなく store 抽象を通して context/image を取得する。
 // token を渡すと /shot|/raw 画像配信が有効化される（クエリ ?token= を定数時間比較）。未指定なら画像配信は 401。
-export function createHttpServer({ inboxDir, entryStore, token, path = '/mcp', latestWindowMs, nowMs } = {}) {
+export function createHttpServer({ inboxDir, entryStore, token, path = '/mcp', latestWindowMs, nowMs, bridgeStatus } = {}) {
   const currentInbox = () => (typeof inboxDir === 'function' ? inboxDir() : inboxDir);
   // 画像配信用の lookup store。entryStore が無ければ disk store を都度生成（現在の inbox を読む）。
   const lookupStore = () => entryStore || createDiskEntryStore(currentInbox());
@@ -38,6 +38,9 @@ export function createHttpServer({ inboxDir, entryStore, token, path = '/mcp', l
           imageRoute: token ? '/shot/<id>.png' : null,
           latestWindowMs: latestWindowMs ?? null,
           ...(entryStore?.info?.() || {}),
+          // 拡張の WebSocket 橋渡し状態。「daemon は起きているが拡張がまだ一度も繋がっていない」
+          // (extension.everConnected=false) と「繋がったことはあるが今は切れている」を区別できる。
+          extension: bridgeStatus ? bridgeStatus() : { connected: false, everConnected: false, lastConnectedAt: null, lastPushAt: null },
         })
       );
       return;
@@ -62,7 +65,7 @@ export function createHttpServer({ inboxDir, entryStore, token, path = '/mcp', l
     }
     // この POST に使われた authority(host:port) からパス非依存の取得先 URL を組み立て、MCP テキストに併走させる。
     const shotUrlFor = makeShotUrlFor(req, token);
-    const server = createMcpServer(entryStore || currentInbox(), { shotUrlFor, latestWindowMs, nowMs });
+    const server = createMcpServer(entryStore || currentInbox(), { shotUrlFor, latestWindowMs, nowMs, bridgeStatus });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => {
       transport.close().catch(() => {});

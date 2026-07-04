@@ -80,7 +80,16 @@ function adoptDownloadsDir(downloadsDir) {
   return true;
 }
 
-const server = createHttpServer({ inboxDir: getInbox, entryStore, token, latestWindowMs });
+// attachWebSocketServer は createHttpServer の後に生成されるため、healthz へは
+// 遅延評価の getter で渡す(inboxDir と同じパターン)。
+let wssRef = null;
+const server = createHttpServer({
+  inboxDir: getInbox,
+  entryStore,
+  token,
+  latestWindowMs,
+  bridgeStatus: () => wssRef?.getBridgeStatus?.() || { connected: false, everConnected: false, lastConnectedAt: null, lastPushAt: null },
+});
 const wss = attachWebSocketServer(server, {
   inboxDir: getInbox,
   entryStore,
@@ -91,6 +100,7 @@ const wss = attachWebSocketServer(server, {
   },
   onHello: (downloadsDir) => adoptDownloadsDir(downloadsDir),
 });
+wssRef = wss;
 
 server.listen(port, host, () => {
   // stdout は汚さず stderr に出す（MCP の stdio とは独立だが慣習に合わせる）。

@@ -15,10 +15,19 @@ INBOX="${BAG_VF_INBOX:-$HOME/Downloads/ai-inbox}"
 
 # --- 1) daemon が起きているか + 権威的 inboxDir / daemon up? --------------------
 health="$(curl -s -m 2 "$DAEMON_HEALTHZ" 2>/dev/null || true)"
+ext_connected="unknown"; ext_ever_connected="unknown"; ext_last_push="none"
 if [ -n "$health" ]; then
   daemon="up"
   inbox_from_health="$(printf '%s' "$health" | sed -n 's/.*"inboxDir":"\([^"]*\)".*/\1/p')"
   [ -n "$inbox_from_health" ] && INBOX="$inbox_from_health"
+  # healthz.extension = {connected, everConnected, lastConnectedAt, lastPushAt}。
+  # 「daemon は起きているが拡張がまだ一度も繋がっていない」を capture=no と区別できる。
+  ec="$(printf '%s' "$health" | sed -n -E 's/.*"connected":(true|false).*/\1/p')"
+  eec="$(printf '%s' "$health" | sed -n -E 's/.*"everConnected":(true|false).*/\1/p')"
+  elp="$(printf '%s' "$health" | sed -n -E 's/.*"lastPushAt":("[^"]*"|null).*/\1/p')"
+  [ -n "$ec" ] && ext_connected="$ec"
+  [ -n "$eec" ] && ext_ever_connected="$eec"
+  [ -n "$elp" ] && [ "$elp" != "null" ] && ext_last_push="$elp"
 else
   daemon="down"
 fi
@@ -112,6 +121,8 @@ fi
 
 echo "── bag-memo preflight ──────────────────────────────────"
 echo "daemon   : $daemon        (healthz: $DAEMON_HEALTHZ)"
+echo "extension: connected=$ext_connected everConnected=$ext_ever_connected lastPush=$ext_last_push"
+echo "           (everConnected=false なら拡張の Options で daemon 有効化・URL・token 未設定の疑い)"
 echo "inbox    : $INBOX"
 echo "capture  : $capture${latest:+   最新: $latest}"
 echo "           (storage=memory はファイル無し→no でも MCP で取得可)"
@@ -123,4 +134,4 @@ echo "arg      : kind=$arg_kind  tabId=$scope_tabId  url=$scope_url"
 echo "browser  : $browser   (ライブ確認は任意・副次)"
 echo "─────────────────────────────────────────────────────────"
 # 自由文字列フィールド(scope_url/url)は空白混入でもトークン境界が壊れないよう引用する。
-echo "STATUS daemon=$daemon mcp=$mcp mcp_conn=$mcp_conn capture=$capture source_branch=$source_branch arg_kind=$arg_kind scope_tabId=$scope_tabId windowId=$m_windowId scope_url=\"$scope_url\" url=\"$m_url\" inbox=$INBOX latest=${latest:-none}"
+echo "STATUS daemon=$daemon ext_connected=$ext_connected ext_ever_connected=$ext_ever_connected mcp=$mcp mcp_conn=$mcp_conn capture=$capture source_branch=$source_branch arg_kind=$arg_kind scope_tabId=$scope_tabId windowId=$m_windowId scope_url=\"$scope_url\" url=\"$m_url\" inbox=$INBOX latest=${latest:-none}"
