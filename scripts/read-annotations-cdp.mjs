@@ -197,6 +197,14 @@ function findOpenPageTarget(targets, extId) {
   );
 }
 
+// MV3 は service_worker、MV2 は background_page として拡張のバックグラウンドコンテキストが
+// 既に /json/list に載っていることがある。見つかれば新規タブを開かずに済む。
+function findExistingBackgroundTarget(targets, extId) {
+  return targets.find(
+    (t) => (t.type === 'service_worker' || t.type === 'background_page') && extractExtId(t.url) === extId
+  );
+}
+
 async function evalInSession(cdp, sessionId, expression, { awaitPromise = false, attempts = 1, delayMs = 300 } = {}) {
   let last = null;
   for (let i = 0; i < attempts; i++) {
@@ -245,7 +253,9 @@ async function resolveExtensionSession(cdp, port, args) {
   }
 
   for (const extId of candidateIds) {
-    const existing = findOpenPageTarget(targets, extId);
+    // 優先順位: 開いているページ > 既存のバックグラウンドコンテキスト(service_worker/
+    // background_page) > 最後の手段としての新規タブ作成。前2つならタブを一切開かずに済む。
+    const existing = findOpenPageTarget(targets, extId) || findExistingBackgroundTarget(targets, extId);
     let targetId = existing ? existing.id : null;
     let createdTargetId = null;
 
