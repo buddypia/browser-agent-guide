@@ -57,8 +57,11 @@ node scripts/read-annotations-cdp.mjs --port 9222 --limit 5
 2. `/json/list` でターゲット一覧を取得し、`chrome-extension://` ページのうち
    `sidepanel/sidepanel.html` または `options/options.html` で終わるものを候補として集める
    (既にサイドパネル/オプションが開いていれば、それをそのまま再利用する — 新規タブは開かない)。
-3. 該当ページが1つも開いていない場合のみ、CDP `Target.createTarget` で候補拡張IDの
-   `options/options.html` を **バックグラウンドタブとして**新規に開く(フォーカスは奪わない)。
+3. ターゲットの再利用には優先順位がある: (a) 開いているページ(sidepanel/options)があればそれを
+   再利用し、(b) 無ければ `/json/list` 上に既に存在する当該拡張の `service_worker`(MV3)/
+   `background_page`(MV2)ターゲットを探して再利用する — どちらも新規タブは一切開かない。
+   (c) それでも見つからない場合に**限り最後の手段として**、CDP `Target.createTarget` で候補拡張ID
+   の `options/options.html` を **バックグラウンドタブとして**新規に開く(フォーカスは奪わない)。
 4. `Target.attachToTarget({flatten:true})` でセッションを張り、`chrome.runtime.getManifest().name`
    を評価して対象拡張(既定 `"Browser Agent Guide"`、`--extension-name` で変更可)であることを確認する。
    一致しなければ(自分で開いたタブなら)閉じて次の候補へ進む — 無関係な拡張機能を最大
@@ -101,3 +104,8 @@ node scripts/read-annotations-cdp.mjs --port 9222 --limit 5
   読み込んでおく必要がある)。
 - 複数の Chrome ウィンドウ/プロファイルにまたがる探索はしない。対象は `--port` で指定した
   remote-debugging エンドポイント1つに閉じる。
+- 候補拡張に開いているページも生きている service_worker/background_page も無い場合(例: MV3 の
+  service worker がアイドルで終了済み)は、上記の再利用ができないため、manifest name を確認するのに
+  一時的にバックグラウンドタブを1つ開いて閉じる、という副作用が今も残る。これは
+  `MAX_CANDIDATE_EXTENSIONS`(既定8)で上限を設けているが、「事前情報なしに未知の拡張機能の正体を
+  確認する」という処理そのものに内在する限界であり、完全には無くせない。
