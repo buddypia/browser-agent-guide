@@ -104,7 +104,7 @@ export async function setupMcp(options = {}) {
   console.log('\n======================================================');
   console.log('Registered MCP Server Configurations:');
   console.log('======================================================');
-  console.log('\n[Claude Code & Cursor] (mcpServers / ~/.mcp.json):');
+  console.log('\n[Claude Code & Cursor] (mcpServers / ~/.claude.json & ~/.cursor/mcp.json):');
   console.log(JSON.stringify({
     mcpServers: {
       [serverName]: {
@@ -134,9 +134,9 @@ export async function setupMcp(options = {}) {
   console.log('  npm run service');
 }
 
-// Fallback: Claude Code global JSON (~/.mcp.json)
+// Fallback: Claude Code global JSON (~/.claude.json)
 function setupClaudeMcpJson(serverName, serverUrl) {
-  const p = path.join(home, '.mcp.json');
+  const p = path.join(home, '.claude.json');
   try {
     let data = { mcpServers: {} };
     if (fs.existsSync(p)) {
@@ -201,24 +201,16 @@ function setupCodexConfigToml(serverName, serverUrl) {
 
 // Cursor config
 function setupCursorMcpJson(serverName, serverUrl) {
-  let cursorMcpPath;
-  if (process.platform === 'win32') {
-    cursorMcpPath = path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Cursor', 'User', 'globalStorage', 'moose-coding', 'mcpServers.json');
-  } else if (process.platform === 'darwin') {
-    cursorMcpPath = path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'moose-coding', 'mcpServers.json');
-  } else {
-    cursorMcpPath = path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'moose-coding', 'mcpServers.json');
-  }
-
+  const p = path.join(home, '.cursor', 'mcp.json');
   try {
-    const parentDir = path.dirname(cursorMcpPath);
+    const parentDir = path.dirname(p);
     if (!fs.existsSync(parentDir)) {
       fs.mkdirSync(parentDir, { recursive: true });
     }
 
     let data = { mcpServers: {} };
-    if (fs.existsSync(cursorMcpPath)) {
-      data = JSON.parse(fs.readFileSync(cursorMcpPath, 'utf8'));
+    if (fs.existsSync(p)) {
+      data = JSON.parse(fs.readFileSync(p, 'utf8'));
     }
     if (!data.mcpServers) data.mcpServers = {};
 
@@ -231,10 +223,10 @@ function setupCursorMcpJson(serverName, serverUrl) {
       url: serverUrl
     };
 
-    fs.writeFileSync(cursorMcpPath, JSON.stringify(data, null, 2), 'utf8');
-    console.log(`Successfully registered Cursor config at ${cursorMcpPath}`);
+    fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
+    console.log(`Successfully registered Cursor config at ${p}`);
   } catch (err) {
-    console.error(`Failed to update Cursor config at ${cursorMcpPath}:`, err.message);
+    console.error(`Failed to update Cursor config at ${p}:`, err.message);
   }
 }
 
