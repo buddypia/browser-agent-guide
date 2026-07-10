@@ -1,4 +1,4 @@
-.PHONY: wt.new wt.run q.check q.ci-mirror
+.PHONY: wt.new wt.run q.check q.ci-mirror setup.skills
 
 wt.new:
 	@if [ -z "$(BR)" ]; then \
@@ -21,3 +21,6 @@ q.check:
 q.ci-mirror: q.check
 	@mkdir -p .tmp
 	@touch .tmp/ci-mirror-passed
+
+setup.skills:
+	@node .claude/scripts/setup-skills.mjs

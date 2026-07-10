@@ -51,9 +51,12 @@ tmp/
 .agents/*
 !.agents/
 !.agents/hooks.json
+!.agents/skills/
 .codex/*
 !.codex/hooks.json
 .claude/settings.local.json
+.claude/skills/*
+.codex/skills/*
 
 # AI 画像生成ツール (nanobanana) の出力スクラッチ — アイコンは icons/ に採用済み
 nanobanana-output/
