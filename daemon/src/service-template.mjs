@@ -8,8 +8,8 @@
 //   - escape を厳密に: launchd は XML(<>&), systemd は値の改行除去。
 //   - 既定ラベル/サービス名は LABEL でSSOT化。
 
-export const LABEL = 'com.buddypia.bag-vf-daemon';
-export const SYSTEMD_UNIT_NAME = 'bag-vf-daemon.service';
+export const LABEL = 'com.buddypia.bag-pf-daemon';
+export const SYSTEMD_UNIT_NAME = 'bag-pf-daemon.service';
 
 /** XML テキストノード用 escape(launchd plist)。 */
 export function xmlEscape(value) {
@@ -62,8 +62,8 @@ export function launchdPlist(cfg = {}) {
         '  </dict>',
       ].join('\n')
     : '';
-  const outLog = `${cfg.logDir}/bag-vf-daemon.out.log`;
-  const errLog = `${cfg.logDir}/bag-vf-daemon.err.log`;
+  const outLog = `${cfg.logDir}/bag-pf-daemon.out.log`;
+  const errLog = `${cfg.logDir}/bag-pf-daemon.err.log`;
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -95,7 +95,7 @@ export function launchdPlist(cfg = {}) {
  * @param {{ nodePath: string, scriptPath: string, args?: string[], env?: Record<string,string>, description?: string }} cfg
  */
 export function systemdUnit(cfg = {}) {
-  const description = oneLine(cfg.description || 'Browser Agent Guide visual-feedback daemon');
+  const description = oneLine(cfg.description || 'Browser Agent Guide page-feedback daemon');
   const exec = [cfg.nodePath, cfg.scriptPath, ...(cfg.args || [])]
     .filter((s) => s != null && s !== '')
     .map((s) => oneLine(s))

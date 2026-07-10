@@ -24,7 +24,7 @@ No data is synced unless you export it manually. We do not use `chrome.storage.s
 
 ## 4. Third-Party Services
 The Extension interacts with the third-party AI service provider that you configure in the Settings page (OpenAI, Anthropic, Gemini, or a custom OpenAI-compatible API endpoint).
-*   **Data Sent:** When you send a prompt or capture context, the prompt, page description, and visual feedback drawings are sent directly to the configured AI API endpoint.
+*   **Data Sent:** When you send a prompt or capture context, the prompt, page description, and page feedback drawings are sent directly to the configured AI API endpoint.
 *   **Direct Connection:** The Extension makes direct HTTPS requests from your browser to the chosen AI provider's API. No intermediate proxy servers are used.
 *   **Privacy Policies:** Please refer to the privacy policies of your chosen AI provider (e.g., OpenAI, Anthropic, or Google Gemini) to understand how they handle data submitted via their APIs.
 

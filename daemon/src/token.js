@@ -8,22 +8,34 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 
 export function tokenPath() {
+  return join(homedir(), '.bag-pf', 'token');
+}
+
+// 旧命名(bag-vf)の永続先。新パスが無いとき後方互換で読む。
+export function legacyTokenPath() {
   return join(homedir(), '.bag-vf', 'token');
 }
 
-// 優先順: 明示指定 > 環境変数 > 永続ファイル > 新規生成(0600で保存)。
+function readTokenFile(p) {
+  if (!existsSync(p)) return '';
+  try {
+    return readFileSync(p, 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
+// 優先順: 明示指定 > 環境変数(新 BAG_PF_ > 旧 BAG_VF_) > 永続ファイル(新 > 旧) > 新規生成(0600で保存)。
 export function loadOrCreateToken(explicit) {
   if (explicit) return String(explicit);
+  if (process.env.BAG_PF_TOKEN) return process.env.BAG_PF_TOKEN;
   if (process.env.BAG_VF_TOKEN) return process.env.BAG_VF_TOKEN;
   const p = tokenPath();
-  if (existsSync(p)) {
-    try {
-      const t = readFileSync(p, 'utf8').trim();
-      if (t) return t;
-    } catch {
-      /* 読めなければ作り直す */
-    }
-  }
+  const current = readTokenFile(p);
+  if (current) return current;
+  // 旧 ~/.bag-vf/token があればそれを尊重（作り直さない）。
+  const legacy = readTokenFile(legacyTokenPath());
+  if (legacy) return legacy;
   const token = randomBytes(24).toString('base64url');
   try {
     mkdirSync(dirname(p), { recursive: true, mode: 0o700 });

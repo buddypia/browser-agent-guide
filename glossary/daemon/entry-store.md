@@ -16,7 +16,7 @@ code_refs:
   - { path: "daemon/src/store.js", symbol: "normalizeStorageMode" }
 api_refs: []
 db_refs: []
-related: ["visual-feedback"]
+related: ["page-feedback"]
 last_verified: 2026-06-28
 confidence: high
 ---

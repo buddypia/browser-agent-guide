@@ -164,7 +164,7 @@ test.describe('お描き連動のAIメモ', () => {
     await drawRectAndFinish(page, '自動同期して');
     await expect
       .poll(() =>
-        page.evaluate(() => window.__runtimeMessages.filter((m) => m?.type === 'VISUAL_FEEDBACK_CHANGED').at(-1)?.sendCount)
+        page.evaluate(() => window.__runtimeMessages.filter((m) => m?.type === 'PAGE_FEEDBACK_CHANGED').at(-1)?.sendCount)
       )
       .toBe(1);
 
@@ -172,11 +172,11 @@ test.describe('お描き連動のAIメモ', () => {
     await expect
       .poll(() =>
         page.evaluate(() => {
-          const events = window.__runtimeMessages.filter((m) => m?.type === 'VISUAL_FEEDBACK_CHANGED');
+          const events = window.__runtimeMessages.filter((m) => m?.type === 'PAGE_FEEDBACK_CHANGED');
           return events.at(-1);
         })
       )
-      .toMatchObject({ type: 'VISUAL_FEEDBACK_CHANGED', reason: 'update', sendCount: 0 });
+      .toMatchObject({ type: 'PAGE_FEEDBACK_CHANGED', reason: 'update', sendCount: 0 });
   });
 
   // 「メモを残す」(kind:'note') が capture(=daemon)経路に図形なしアイテムとして乗ること。
@@ -238,7 +238,7 @@ test.describe('お描き連動のAIメモ', () => {
     await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'LIST_ANNOTATIONS' }, {}, r)));
 
     const author = page.locator('.bag-author');
-    // メモを編集して保存 → VISUAL_FEEDBACK_CHANGED(sendCount>=1) が飛ぶ。
+    // メモを編集して保存 → PAGE_FEEDBACK_CHANGED(sendCount>=1) が飛ぶ。
     await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'EDIT_ANNOTATION', id: 'note-1' }, {}, r)));
     await expect(author).toBeVisible();
     await author.locator('[data-f="note"]').fill('やっぱりこう直す');
@@ -246,7 +246,7 @@ test.describe('お描き連動のAIメモ', () => {
     await expect(author).toHaveCount(0);
     await expect
       .poll(() =>
-        page.evaluate(() => window.__runtimeMessages.filter((m) => m?.type === 'VISUAL_FEEDBACK_CHANGED').at(-1)?.sendCount)
+        page.evaluate(() => window.__runtimeMessages.filter((m) => m?.type === 'PAGE_FEEDBACK_CHANGED').at(-1)?.sendCount)
       )
       .toBe(1);
 
@@ -258,7 +258,7 @@ test.describe('お描き連動のAIメモ', () => {
     await expect(author).toHaveCount(0);
     await expect
       .poll(() =>
-        page.evaluate(() => window.__runtimeMessages.filter((m) => m?.type === 'VISUAL_FEEDBACK_CHANGED').at(-1)?.sendCount)
+        page.evaluate(() => window.__runtimeMessages.filter((m) => m?.type === 'PAGE_FEEDBACK_CHANGED').at(-1)?.sendCount)
       )
       .toBe(0);
 

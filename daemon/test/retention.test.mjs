@@ -63,8 +63,8 @@ test('coerceDuration: 単位付き / 純数値(ms) / 不正は fallback', () => 
 
 test('resolveRetentionPolicy: 既定 OFF / flag>env / grace クランプ / count 既定', () => {
   assert.equal(resolveRetentionPolicy({}).enabled, false, '既定は OFF');
-  assert.equal(resolveRetentionPolicy({ args: { retention: 'on' }, env: { BAG_VF_RETENTION: 'off' } }).enabled, true, 'flag > env');
-  assert.equal(resolveRetentionPolicy({ args: {}, env: { BAG_VF_RETENTION: 'on' } }).enabled, true, 'env も効く');
+  assert.equal(resolveRetentionPolicy({ args: { retention: 'on' }, env: { BAG_PF_RETENTION: 'off' } }).enabled, true, 'flag > env');
+  assert.equal(resolveRetentionPolicy({ args: {}, env: { BAG_PF_RETENTION: 'on' } }).enabled, true, 'env も効く');
   const p = resolveRetentionPolicy({
     args: { retention: 'on', retentionGrace: '10d', retentionMaxAge: '1d', retentionDoneTtl: '1h' },
   });

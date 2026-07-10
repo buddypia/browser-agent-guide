@@ -72,11 +72,11 @@ async function withClient(fn) {
   }
 }
 
-test('tools/list が新名5ツールのみを公開する（旧 visual_feedback エイリアスは撤去済み）', async () => {
+test('tools/list が新名5ツールのみを公開する（旧 page_feedback エイリアスは撤去済み）', async () => {
   await withClient(async (client) => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    // 厳密一致なので、旧 deprecated エイリアス（*_visual_feedback*）が1つでも残れば失敗する。
+    // 厳密一致なので、旧 deprecated エイリアス（*_page_feedback*）が1つでも残れば失敗する。
     assert.deepEqual(names, [
       'get_feedback_context',
       'get_feedback_image',

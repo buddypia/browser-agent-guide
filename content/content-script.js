@@ -1215,7 +1215,7 @@
     notifyPageRemembered('annotation');
     await recordWorkflowStep(saved);
     renderAnnotations();
-    if (saved.kind === 'drawing' || saved.kind === 'note') notifyVisualFeedbackChanged('upsert');
+    if (saved.kind === 'drawing' || saved.kind === 'note') notifyPageFeedbackChanged('upsert');
     return annoSummary(saved);
   }
 
@@ -1289,18 +1289,18 @@
     await persistAnnotations();
     await unrecordWorkflowStep(id);
     renderAnnotations();
-    if (removed?.kind === 'drawing' || removed?.kind === 'note') notifyVisualFeedbackChanged('delete');
+    if (removed?.kind === 'drawing' || removed?.kind === 'note') notifyPageFeedbackChanged('delete');
     return { removed: id };
   }
 
-  function notifyVisualFeedbackChanged(reason) {
-    // 送信対象 = お描き＋本文ありメモ（collectVisualFeedbackData の収集条件と一致させる）。
+  function notifyPageFeedbackChanged(reason) {
+    // 送信対象 = お描き＋本文ありメモ（collectPageFeedbackData の収集条件と一致させる）。
     const sendCount = annotations.filter(
       (a) => (a.kind === 'drawing' || (a.kind === 'note' && String(a.note || '').trim())) && memoForAI(a)
     ).length;
     try {
       chrome.runtime.sendMessage(
-        { type: 'VISUAL_FEEDBACK_CHANGED', url: location.href, title: document.title, reason, sendCount },
+        { type: 'PAGE_FEEDBACK_CHANGED', url: location.href, title: document.title, reason, sendCount },
         () => void chrome.runtime.lastError
       );
     } catch {
@@ -3269,7 +3269,7 @@
     }
     if (!changed) return;
     await persistAnnotations();
-    if (a.kind === 'drawing') notifyVisualFeedbackChanged('update');
+    if (a.kind === 'drawing') notifyPageFeedbackChanged('update');
   }
 
   // メモ⇄図形の相互ハイライト。on=true で対象ペアを強調し、他ペアを減光する。
@@ -3896,7 +3896,7 @@
   }
 
   // ===========================================================================
-  // 視覚フィードバックの収集（vision ブリッジ用）
+  // ページフィードバックの収集（vision ブリッジ用）
   // お描き注釈を「現在のビューポート px」へ解決して返す。service worker が
   // captureVisibleTab した PNG の上に、この座標で図形を burn-in する。
   // 比率(0..1)座標は対象要素の現在矩形を基準に px へ戻す（redrawEntry と同式）。
@@ -3992,7 +3992,7 @@
   }
 
   // お描き注釈を vision ブリッジ用のデータに変換する。
-  function collectVisualFeedbackData() {
+  function collectPageFeedbackData() {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const items = [];
@@ -4358,7 +4358,7 @@
           renderAnnotations();
           document.documentElement.classList.add('bag-capturing');
           await nextFrames(2); // 非表示が確実に描画されてから capture させる
-          return collectVisualFeedbackData();
+          return collectPageFeedbackData();
         }
         case 'FINISH_CAPTURE':
           document.documentElement.classList.remove('bag-capturing');
