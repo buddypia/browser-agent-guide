@@ -27,6 +27,7 @@
     "deterministic"
   ],
   "scripts": {
+    "postinstall": "node .claude/scripts/setup-skills.mjs",
     "check": "npm run check:js && npm run check:markers && npm run check:glossary && npm run test:glossary && npm test && npm run test:slug && npm run test:recipe && npm run test:prompt && npm run test:workflow-lib && npm run test:pf && npm run test:ui",
     "check:js": "for f in content/content-script.js sidepanel/sidepanel.js sidepanel/i18n.js background/service-worker.js lib/ai-client.js lib/prompt.js lib/storage.js lib/site-matcher.js lib/slug.js lib/recipe-merge.js lib/workflow.js lib/page-feedback/compositor.js offscreen/offscreen.js offscreen/inline-encode.js options/options.js scripts/check-agent-markers.mjs scripts/read-annotations-cdp.mjs scripts/glossary/lib/frontmatter.mjs scripts/glossary/lib/entries.mjs scripts/glossary/lib/markers.mjs scripts/glossary/lib/git.mjs scripts/glossary/lib/code.mjs scripts/glossary/validate.mjs scripts/glossary/check-staleness.mjs scripts/glossary/build-traceability.mjs scripts/glossary/touch.mjs; do node --check \"$f\" || exit 1; done && echo 'syntax OK'",
     "check:markers": "node scripts/check-agent-markers.mjs",
