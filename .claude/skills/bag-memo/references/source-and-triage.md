@@ -1,6 +1,6 @@
-# ソース特定の優先順位 と バグ・トリアージ票
+# ソース特定の優先順位 と UIメモ取得票
 
-「メモを残した要素」を**コード上の `file:line`** に対応づけ、1画面のトリアージ票にするための実務リファレンス。
+「メモを残した要素」を**コード上の `file:line`** に対応づけ、1画面のUIメモ取得票にするための実務リファレンス。
 一次情報: `daemon/src/inbox.js` の `agentLookup`(`buildEntryContext`)と `buildEntryContextText` の
 `priority:` 行が**正本**。`annotation.json` スキーマ詳細は `../bag-workflow/references/daemon-mcp.md`。
 
@@ -56,10 +56,10 @@ dataAgentId(@agent:)  →  selector  →  testid  →  anchorLabel  →  targetC
 
 ---
 
-## 3. バグ・トリアージ票テンプレート
+## 3. UIメモ取得票テンプレート
 
 **正本(唯一のコピー)は `../SKILL.md` ステップ5**。ここでは重複再掲せず、そちらを参照する
-(1画面で読める票を出し、ここで止まる — 修正・操作・検証はしない)。
+(1画面で読める票を出し、ここで止まる — 余計な分析や提案、および修正・操作・検証は一切行わない)。
 
 ### スコープ未指定/曖昧のとき
 票の代わりに**候補テーブル**を出して tabId を選ばせる:
