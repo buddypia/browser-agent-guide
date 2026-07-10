@@ -84,18 +84,6 @@ test('正しいトークンで push → ack + inbox にファイル', async () =
   assert.equal(ann.url, 'https://example.com/x');
 });
 
-test('後方互換: 旧 type "visual_feedback" も受理する', async () => {
-  const ack = await sendOnce(`${wsUrl}?token=${TOKEN}`, {
-    type: 'visual_feedback',
-    capturedAt: '2026-06-18T05:06:07.008Z',
-    url: 'https://legacy.example.com/y',
-    title: 'Y',
-    image: { shot: PNG_B64 },
-    annotation: { url: 'https://legacy.example.com/y', items: [{ n: 1, note: 'legacy' }] },
-  });
-  assert.equal(ack.type, 'ack');
-  assert.ok(ack.id, '旧 type でも slug id が返る');
-});
 
 test('トークン不一致は接続拒否（401）', async () => {
   await assert.rejects(

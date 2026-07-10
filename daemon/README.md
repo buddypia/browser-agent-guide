@@ -35,8 +35,7 @@
   > サーバ内部名も `bag-visual-feedback` → `bag-page-feedback` にした。**旧ツール名（deprecated エイリアス）は撤去済み**で、
   > 現在は新名 5 ツールのみを公開する（旧名で書かれた古い手順は動かない）。
   > なお Claude Code/Codex 等で打つ接頭辞（本 README の例は `bag_page_feedback:`）は**ユーザが登録時に決めた alias**で、
-  > サーバ名とは別物。旧 alias `bag_visual_feedback` で登録していた場合は付け替える:
-  > `claude mcp remove bag_visual_feedback && claude mcp add --transport http bag_page_feedback http://127.0.0.1:8765/mcp`。
+  > サーバ名とは別物。
 
 - **対象要素の HTML 取得（schema v1）**: お描き/メモを残した要素の `outerHTML`（≤8KB、超過時 `truncated:true`）と
   軽量 a11y（role/name/level/state）を `annotation.json` の各 item に保存し、context ツールが text と `structuredContent`
@@ -192,7 +191,7 @@ curl -s http://127.0.0.1:8765/healthz   # {"ok":true,"inboxDir":"...","imageRout
 環境変数でも設定可: `BAG_PF_INBOX`, `BAG_PF_PORT`, `BAG_PF_HOST`, `BAG_PF_STORAGE`,
 `BAG_PF_RETENTION`(on/off), `BAG_PF_RETENTION_MAX_AGE`, `BAG_PF_RETENTION_MAX_PER_FAMILY`,
 `BAG_PF_RETENTION_GRACE`, `BAG_PF_RETENTION_DONE_TTL`, `BAG_PF_RETENTION_INTERVAL`, `BAG_PF_LATEST_WINDOW_MIN`。
-新しい `BAG_PF_*` を優先し、旧 `BAG_VF_*` 名も後方互換で読む（設定済みなら移行不要）。
+(コマンドライン引数が環境変数より優先されます)。
 
 ## 常駐化（ログイン/再起動を跨いで動かす）
 
@@ -247,7 +246,7 @@ claude mcp add --transport http bag_page_feedback http://127.0.0.1:8765/mcp
 }
 ```
 
-> alias 名は任意。旧 `bag_visual_feedback` で登録していた場合は `claude mcp remove bag_visual_feedback` してから上記で付け替える。
+> alias 名は任意。
 
 ### Codex CLI
 

@@ -23,9 +23,9 @@ q.ci-mirror: q.check
 	@touch .tmp/ci-mirror-passed
 
 setup.skills:
-	@node .claude/scripts/setup-skills.mjs
+	@node .claude/scripts/setup-skills.mjs $(ARGS)
 
 setup.mcp:
-	@node .claude/scripts/setup-mcp.mjs
+	@node .claude/scripts/setup-mcp.mjs $(ARGS)
 
 mcp.setup: setup.mcp

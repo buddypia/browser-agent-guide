@@ -26,8 +26,8 @@ import { loadOrCreateToken, tokenPath } from './token.js';
 import { createPageFeedbackStore, normalizeStorageMode } from './store.js';
 import { resolveRetentionPolicy, pruneInbox } from './retention.js';
 
-// 環境変数は新命名 BAG_PF_* を優先し、旧命名 BAG_VF_* を後方互換で読む。
-const envOr = (name) => process.env[`BAG_PF_${name}`] ?? process.env[`BAG_VF_${name}`];
+// 環境変数は新命名 BAG_PF_* を読み込む。
+const envOr = (name) => process.env[`BAG_PF_${name}`];
 
 const args = parseArgs(process.argv.slice(2));
 // --inbox / 環境変数による明示指定があれば「固定」し、拡張の報告では上書きしない。
