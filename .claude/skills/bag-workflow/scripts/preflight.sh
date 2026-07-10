@@ -14,10 +14,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./preflight-common.sh
 . "${SCRIPT_DIR}/preflight-common.sh"
 
-DAEMON_HEALTHZ="${BAG_VF_HEALTHZ:-http://127.0.0.1:8765/healthz}"
+DAEMON_HEALTHZ="${BAG_PF_HEALTHZ:-http://127.0.0.1:8765/healthz}"
 # 既定は best-effort（Unix の典型値）。実保存先はブラウザ設定依存で異なりうる（移動済み/Edge・Brave/Windows）。
-# 権威的な値は下の healthz の inboxDir（拡張の報告で自動追従する）。BAG_VF_INBOX で明示上書きも可。
-INBOX="${BAG_VF_INBOX:-$HOME/Downloads/ai-inbox}"
+# 権威的な値は下の healthz の inboxDir（拡張の報告で自動追従する）。BAG_PF_INBOX で明示上書きも可。
+INBOX="${BAG_PF_INBOX:-$HOME/Downloads/ai-inbox}"
 
 bag_probe_daemon    # daemon / ext_connected / ext_ever_connected / ext_last_push / INBOX(採用) を設定
 bag_probe_capture   # latest / capture を設定

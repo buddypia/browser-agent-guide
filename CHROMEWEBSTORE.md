@@ -87,7 +87,7 @@ English
 | `tabs` | permissions | Used to retrieve the URL and title of the active tab in order to query/apply matching rules. |
 | `userScripts` | permissions | Used to dynamically execute custom user scripts saved for page-specific automation rules via Chrome's secure User Scripts API. |
 | `offscreen` | permissions | Used to create a temporary offscreen canvas context to composite user drawings onto page screenshots without DOM access in the service worker. |
-| `downloads` | permissions | Used to export and save visual feedback packages and page metadata logs directly to the user's local Downloads folder. |
+| `downloads` | permissions | Used to export and save page feedback packages and page metadata logs directly to the user's local Downloads folder. |
 | `<all_urls>` | host_permissions | Used to detect interactive elements, show overlay instructions, and run safe automation verbs on any site the user navigates to. |
 
 

@@ -69,11 +69,11 @@ async function changeLanguage(nextLanguage) {
   setStatus('ai-status', t('language.changed', { language: languageName(i18n.locale) }), true);
 }
 
-// ---- 視覚フィードバック デーモン ----
+// ---- ページフィードバック デーモン ----
 function fillDaemonForm() {
   const d = settings.daemon || {};
   $('daemon-enabled').checked = Boolean(d.enabled);
-  $('vf-auto-sync').checked = Boolean(settings.visualFeedback?.autoSync);
+  $('pf-auto-sync').checked = Boolean(settings.pageFeedback?.autoSync);
   $('daemon-url').value = d.url || DEFAULT_SETTINGS.daemon.url;
   $('daemon-token').value = d.token || '';
   $('daemon-save-dir').value = d.saveDir || '';
@@ -87,9 +87,9 @@ async function saveDaemon() {
     token: $('daemon-token').value.trim(),
     saveDir: $('daemon-save-dir').value.trim(),
   };
-  settings.visualFeedback = {
-    ...(settings.visualFeedback || {}),
-    autoSync: $('vf-auto-sync').checked,
+  settings.pageFeedback = {
+    ...(settings.pageFeedback || {}),
+    autoSync: $('pf-auto-sync').checked,
   };
   await saveSettings(settings);
   setStatus('daemon-status', t('opt.status.saved'), true);
@@ -374,7 +374,7 @@ function importSettings(file) {
       workflow: { ...DEFAULT_SETTINGS.workflow, ...(data.workflow || {}) },
       ui: { ...DEFAULT_SETTINGS.ui, ...(data.ui || {}) },
       daemon: { ...DEFAULT_SETTINGS.daemon, ...(data.daemon || {}) },
-      visualFeedback: { ...DEFAULT_SETTINGS.visualFeedback, ...(data.visualFeedback || {}) },
+      pageFeedback: { ...DEFAULT_SETTINGS.pageFeedback, ...(data.pageFeedback || {}) },
     };
       await saveSettings(settings);
       // インポートした言語設定を反映する。

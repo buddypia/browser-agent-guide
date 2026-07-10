@@ -1,4 +1,4 @@
-# 視覚フィードバック MVP（Phase 0）の使い方と検証手順
+# ページフィードバック MVP（Phase 0）の使い方と検証手順
 
 > この文書は Phase 0（データ／MCP なし）の実装をどう動かし、Phase 0 の前提を
 > どう目視確認するかをまとめる。
@@ -11,7 +11,7 @@
 `chrome.downloads.search` で取得してサイドパネルに表示する（保存先はブラウザ設定依存で `~/Downloads` とは限らない）。
 
 - `manifest.json`: `offscreen` / `downloads` 権限を追加
-- `lib/visual-feedback/compositor.js`: 純粋な合成モジュール（Canvas 2D 直描き / 2000px ガード / DPR 整合）
+- `lib/page-feedback/compositor.js`: 純粋な合成モジュール（Canvas 2D 直描き / 2000px ガード / DPR 整合）
 - `offscreen/offscreen.{html,js}`: OffscreenCanvas で実際に焼き込む
 - `content/content-script.js`: `PREPARE_CAPTURE`（自前UIを隠して図形をビューポートpxに解決）/ `FINISH_CAPTURE`
 - `background/service-worker.js`: 撮影 → 合成 → `chrome.downloads` 保存のオーケストレーション
@@ -31,7 +31,7 @@
 ## 操作手順
 
 1. `chrome://extensions` で「パッケージ化されていない拡張機能を読み込む」→ このリポジトリのルートを選択。
-   （JS注入を使う場合は拡張詳細で「Allow User Scripts」も有効化。視覚フィードバックだけなら不要。）
+   （JS注入を使う場合は拡張詳細で「Allow User Scripts」も有効化。ページフィードバックだけなら不要。）
 2. 対象ページを開き、拡張アイコンでサイドパネルを開く。
    サイドパネル上部には対象 Chrome タブの `tabId` / `windowId` / タブ位置が表示される。
 3. 「お描き」で対象を円/四角/矢印/ペンで囲み、隣のメモに指示を書く（複数可）。
@@ -78,8 +78,8 @@ CLI 登録方法と検証は `daemon/README.md` を参照。WebSocket 常時 pus
 
 ## 自動テスト
 
-- `npm run test:vf` — compositor の回帰（2000px 境界 / DPR 変換 / 決定的な描画呼び出し列 / foreignObject 不使用）
-- `npx playwright test test/visual-feedback/canvas.spec.mjs` — 実ブラウザの Canvas で
+- `npm run test:pf` — compositor の回帰（2000px 境界 / DPR 変換 / 決定的な描画呼び出し列 / foreignObject 不使用）
+- `npx playwright test test/page-feedback/canvas.spec.mjs` — 実ブラウザの Canvas で
   taint せず有効な PNG を焼き込めることを実測（SecurityError 罠の回避を保証）
 
 ## 既知の制限（Phase 0）

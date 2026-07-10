@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const compositorSrc = readFileSync(resolve(here, '../../lib/visual-feedback/compositor.js'), 'utf8');
+const compositorSrc = readFileSync(resolve(here, '../../lib/page-feedback/compositor.js'), 'utf8');
 // `export` を剥がしてグローバル関数化し、必要なシンボルを window に公開する。
 const injected =
   compositorSrc.replace(/^export\s+/gm, '') +

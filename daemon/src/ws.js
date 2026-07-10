@@ -56,7 +56,8 @@ export function attachWebSocketServer(httpServer, { inboxDir, entryStore, token,
         ws.send(JSON.stringify({ type: 'error', error: 'invalid json' }));
         return;
       }
-      if (msg?.type !== 'visual_feedback') {
+      // 新命名 'page_feedback' を受ける。旧拡張が送る 'visual_feedback' も後方互換で受理。
+      if (msg?.type !== 'page_feedback' && msg?.type !== 'visual_feedback') {
         ws.send(JSON.stringify({ type: 'error', error: `unknown type: ${msg?.type}` }));
         return;
       }

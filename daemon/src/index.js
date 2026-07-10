@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Browser Agent Guide 視覚フィードバック デーモン（Phase 1 / 消費側）。
+// Browser Agent Guide ページフィードバック デーモン（Phase 1 / 消費側）。
 // inbox を Streamable HTTP MCP で公開し、Claude Code / Codex / Antigravity が
 // context-first で annotation メタを読み、必要時だけ image+パスを取得できるようにする。
 //
@@ -8,7 +8,7 @@
 //   node src/index.js --storage hybrid      # 受信時はメモリ保持、image/file_path 要求時だけ inbox に保存
 //   node src/index.js --storage disk        # 受信ごとに inbox へ即時保存（再起動を跨ぐ永続化・retention 用）
 //   node src/index.js --inbox ./.ai-inbox --port 8765   # 明示指定すると「固定」され拡張の報告で上書きされない
-//   BAG_VF_INBOX=/path BAG_VF_PORT=8765 BAG_VF_STORAGE=disk node src/index.js
+//   BAG_PF_INBOX=/path BAG_PF_PORT=8765 BAG_PF_STORAGE=disk node src/index.js
 //
 // storage 既定は memory: 合成PNG はメモリ保持のみで <Downloads>/ai-inbox/ を作らない（inbox 完全撤去）。
 //   image を読める CLI（Claude Code）は inline image、読めない CLI（Codex）は image/file_path 要求時に
@@ -23,19 +23,22 @@ import { createHttpServer } from './http.js';
 import { resolveInboxDir, inboxFromDownloadsDir } from './inbox.js';
 import { attachWebSocketServer } from './ws.js';
 import { loadOrCreateToken, tokenPath } from './token.js';
-import { createVisualFeedbackStore, normalizeStorageMode } from './store.js';
+import { createPageFeedbackStore, normalizeStorageMode } from './store.js';
 import { resolveRetentionPolicy, pruneInbox } from './retention.js';
+
+// 環境変数は新命名 BAG_PF_* を優先し、旧命名 BAG_VF_* を後方互換で読む。
+const envOr = (name) => process.env[`BAG_PF_${name}`] ?? process.env[`BAG_VF_${name}`];
 
 const args = parseArgs(process.argv.slice(2));
 // --inbox / 環境変数による明示指定があれば「固定」し、拡張の報告では上書きしない。
-const explicitInbox = args.inbox || process.env.BAG_VF_INBOX || '';
+const explicitInbox = args.inbox || envOr('INBOX') || '';
 const inboxState = { dir: resolveInboxDir(explicitInbox || undefined), pinned: Boolean(explicitInbox) };
 const getInbox = () => inboxState.dir;
-const port = Number(args.port || process.env.BAG_VF_PORT || 8765);
-const host = args.host || process.env.BAG_VF_HOST || '127.0.0.1';
+const port = Number(args.port || envOr('PORT') || 8765);
+const host = args.host || envOr('HOST') || '127.0.0.1';
 const token = loadOrCreateToken(args.token);
-const storageMode = normalizeStorageMode(args.storage || process.env.BAG_VF_STORAGE || 'memory');
-const entryStore = createVisualFeedbackStore({ inboxDir: getInbox, storageMode });
+const storageMode = normalizeStorageMode(args.storage || envOr('STORAGE') || 'memory');
+const entryStore = createPageFeedbackStore({ inboxDir: getInbox, storageMode });
 
 // 起動ログ用の storage モード説明（memory が既定 = inbox を作らない）。
 const STORAGE_DESC = {
@@ -51,9 +54,9 @@ function sweep(dir) {
   if (!retentionPolicy.enabled) return;
   try {
     const { archived, purged } = pruneInbox(dir, retentionPolicy);
-    if (archived || purged) process.stderr.write(`[bag-vf] retention: archived ${archived}, purged ${purged} (${dir})\n`);
+    if (archived || purged) process.stderr.write(`[bag-pf] retention: archived ${archived}, purged ${purged} (${dir})\n`);
   } catch (e) {
-    process.stderr.write(`[bag-vf] retention sweep 失敗: ${e?.message || e}\n`);
+    process.stderr.write(`[bag-pf] retention sweep 失敗: ${e?.message || e}\n`);
   }
 }
 
@@ -71,13 +74,13 @@ function sweepAfterPush(dir) {
 }
 
 // latest の鮮度判定 + 引数なし latest の曖昧検知の時間窓（分指定・任意）。未指定は 90分。
-const latestWindowMin = Number(args.latestWindowMin || process.env.BAG_VF_LATEST_WINDOW_MIN);
+const latestWindowMin = Number(args.latestWindowMin || envOr('LATEST_WINDOW_MIN'));
 const effectiveLatestWindowMin = Number.isFinite(latestWindowMin) && latestWindowMin > 0 ? latestWindowMin : 90;
 const latestWindowMs = effectiveLatestWindowMin * 60 * 1000;
 
 // 拡張が報告してきた実ダウンロード先を採用する（固定時/範囲外/不正時は無視）。
 // これにより、ブラウザのダウンロード先が OS 既定と違っても（移動済み/Edge・Brave）inbox が一致する。
-// 採用先はホーム配下に限定する（inboxFromDownloadsDir）。範囲外は明示 --inbox/BAG_VF_INBOX を使う。
+// 採用先はホーム配下に限定する（inboxFromDownloadsDir）。範囲外は明示 --inbox/BAG_PF_INBOX を使う。
 function adoptDownloadsDir(downloadsDir) {
   if (inboxState.pinned) return false;
   const candidate = inboxFromDownloadsDir(downloadsDir);
@@ -88,7 +91,7 @@ function adoptDownloadsDir(downloadsDir) {
     return false; // 作成不可なら採用しない
   }
   inboxState.dir = candidate;
-  process.stderr.write(`[bag-vf] 拡張の報告により inbox を更新: ${candidate}\n`);
+  process.stderr.write(`[bag-pf] 拡張の報告により inbox を更新: ${candidate}\n`);
   sweep(candidate); // 新しく採用した inbox も一度掃除
   return true;
 }
@@ -108,7 +111,7 @@ const wss = attachWebSocketServer(server, {
   entryStore,
   token,
   onSaved: ({ id, storage, materialized }) => {
-    process.stderr.write(`[bag-vf] saved ${id}${storage ? ` (${storage}${materialized ? ', materialized' : ''})` : ''}\n`);
+    process.stderr.write(`[bag-pf] saved ${id}${storage ? ` (${storage}${materialized ? ', materialized' : ''})` : ''}\n`);
     sweepAfterPush(getInbox()); // 新しいキャプチャは自分の同一ページ族の旧世代を即退避する（スロットル付き）
   },
   onHello: (downloadsDir) => adoptDownloadsDir(downloadsDir),
@@ -117,25 +120,25 @@ wssRef = wss;
 
 server.listen(port, host, () => {
   // stdout は汚さず stderr に出す（MCP の stdio とは独立だが慣習に合わせる）。
-  process.stderr.write(`[bag-vf] MCP(Streamable HTTP)  http://${host}:${port}/mcp\n`);
-  process.stderr.write(`[bag-vf] 拡張 push (WebSocket)  ws://${host}:${port}/ws\n`);
-  process.stderr.write(`[bag-vf] 画像配信 (GET)         http://${host}:${port}/shot/<id>.png?token=…  (raw は /raw/<id>.png)\n`);
-  process.stderr.write(`[bag-vf] inbox: ${getInbox()}${inboxState.pinned ? ' (固定)' : ' (自動検出。拡張の報告で更新される場合あり)'}\n`);
-  process.stderr.write(`[bag-vf] storage: ${storageMode}${STORAGE_DESC[storageMode] || ''}\n`);
-  process.stderr.write(`[bag-vf] latest freshness/window: ${effectiveLatestWindowMin}m (--latest-window-min / BAG_VF_LATEST_WINDOW_MIN)\n`);
-  process.stderr.write(`[bag-vf] token: ${token}\n`);
-  process.stderr.write(`[bag-vf]   ↑ これを拡張オプションの「視覚フィードバック デーモン」に貼る (保存先: ${tokenPath()})\n`);
+  process.stderr.write(`[bag-pf] MCP(Streamable HTTP)  http://${host}:${port}/mcp\n`);
+  process.stderr.write(`[bag-pf] 拡張 push (WebSocket)  ws://${host}:${port}/ws\n`);
+  process.stderr.write(`[bag-pf] 画像配信 (GET)         http://${host}:${port}/shot/<id>.png?token=…  (raw は /raw/<id>.png)\n`);
+  process.stderr.write(`[bag-pf] inbox: ${getInbox()}${inboxState.pinned ? ' (固定)' : ' (自動検出。拡張の報告で更新される場合あり)'}\n`);
+  process.stderr.write(`[bag-pf] storage: ${storageMode}${STORAGE_DESC[storageMode] || ''}\n`);
+  process.stderr.write(`[bag-pf] latest freshness/window: ${effectiveLatestWindowMin}m (--latest-window-min / BAG_PF_LATEST_WINDOW_MIN)\n`);
+  process.stderr.write(`[bag-pf] token: ${token}\n`);
+  process.stderr.write(`[bag-pf]   ↑ これを拡張オプションの「ページフィードバック デーモン」に貼る (保存先: ${tokenPath()})\n`);
   if (retentionPolicy.enabled) {
     const min = (ms) => Math.round(ms / 60000);
     process.stderr.write(
-      `[bag-vf] retention: ON (maxAge=${min(retentionPolicy.maxAgeMs)}m, perFamily=${retentionPolicy.maxPerFamily}, ` +
+      `[bag-pf] retention: ON (maxAge=${min(retentionPolicy.maxAgeMs)}m, perFamily=${retentionPolicy.maxPerFamily}, ` +
         `grace=${min(retentionPolicy.graceWindowMs)}m, doneTtl=${min(retentionPolicy.doneTtlMs)}m, interval=${min(retentionPolicy.sweepIntervalMs)}m)\n`
     );
     sweep(getInbox()); // 起動時に一度掃除
     sweepTimer = setInterval(() => sweep(getInbox()), retentionPolicy.sweepIntervalMs);
     sweepTimer.unref(); // sweep のためにプロセスを起こし続けない
   } else {
-    process.stderr.write('[bag-vf] retention: OFF (--retention on / BAG_VF_RETENTION=on で有効化)\n');
+    process.stderr.write('[bag-pf] retention: OFF (--retention on / BAG_PF_RETENTION=on で有効化)\n');
   }
 });
 

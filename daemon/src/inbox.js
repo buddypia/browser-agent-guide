@@ -1,5 +1,5 @@
 // inbox スキャナ + MCP content ビルダー。
-// ブラウザ拡張（MVP）が保存した視覚フィードバックを読み、AI コーディング CLI へ
+// ブラウザ拡張（MVP）が保存したページフィードバックを読み、AI コーディング CLI へ
 // 「image(PNG) + ファイルパス」の両方で返すための土台。DOM/ネットワークに依存しない純粋寄りモジュール。
 //
 // inbox レイアウト（拡張 §4.3 と同一）:
@@ -111,7 +111,7 @@ export function defaultInboxDir() {
 
 // 拡張が報告した downloadsDir から「採用してよい inbox」を計算する。採用不可なら null。
 // 安全境界: 採用先はユーザーのホーム配下に限定する（WS トークンが漏れても書き込み範囲を絞る）。
-// ホーム外に Downloads を置くケース（例: Windows で D:\Downloads）は --inbox / BAG_VF_INBOX の明示指定を使う。
+// ホーム外に Downloads を置くケース（例: Windows で D:\Downloads）は --inbox / BAG_PF_INBOX の明示指定を使う。
 export function inboxFromDownloadsDir(downloadsDir, { home = homedir() } = {}) {
   if (!downloadsDir || typeof downloadsDir !== 'string' || !isAbsolute(downloadsDir)) return null;
   const candidate = resolve(join(downloadsDir, 'ai-inbox'));

@@ -94,7 +94,7 @@ Toolbar:
 - **Inspect page**: **List elements** shows current operable elements.
 - **History** reuses sent prompts, also via ↑/↓ at the textarea edge. **Settings** opens AI connection, memory, recipe, and daemon settings.
 
-The side panel also shows the addressed Chrome tab (`tabId`, `windowId`, and tab position). Visual-feedback captures store the same tab metadata in `annotation.json` / `memo.md` and expose it through the daemon MCP context, so two tabs on the same URL can be disambiguated by passing `tabId` (or `windowId`) to the MCP tools.
+The side panel also shows the addressed Chrome tab (`tabId`, `windowId`, and tab position). Page-feedback captures store the same tab metadata in `annotation.json` / `memo.md` and expose it through the daemon MCP context, so two tabs on the same URL can be disambiguated by passing `tabId` (or `windowId`) to the MCP tools.
 
 ### Drawing (circle/box/arrow/freehand around an element)
 
@@ -110,7 +110,7 @@ instructions land precisely. Saved drawings (kind: **Drawing**) are editable/rem
 
 **Add note** only saves to the extension's own `chrome.storage.local` (key `aiAdvisorAnnotations`) —
 it is **not** sent to the daemon/MCP until you press **Send image to AI** (or enable `daemon` +
-`visualFeedback.autoSync` in Options, both off by default). If you left a note and closed the tab
+`pageFeedback.autoSync` in Options, both off by default). If you left a note and closed the tab
 before sending it, `scripts/read-annotations-cdp.mjs` reads it back directly from the browser via the
 Chrome DevTools Protocol — no daemon, no re-capture, no lost work:
 
@@ -182,7 +182,7 @@ content-script (in the page / verb registry + executor)
 - `lib/site-matcher.js` — URL / domain / regex matching
 - `lib/storage.js` — settings persistence
 
-The `tabId` is the live Chrome-session target for page actions. Visual-feedback exports additionally persist `{tabId, windowId, index, active}` as capture metadata; `tabId` is not a durable browser-history ID, but it is the right discriminator while the tabs are open.
+The `tabId` is the live Chrome-session target for page actions. Page-feedback exports additionally persist `{tabId, windowId, index, active}` as capture metadata; `tabId` is not a durable browser-history ID, but it is the right discriminator while the tabs are open.
 
 ## Security / privacy
 

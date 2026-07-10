@@ -406,15 +406,15 @@ function filterEmptyMessage({ urlContains, titleContains, tabId, windowId } = {}
   if (bridgeStatus && !bridgeStatus.everConnected) {
     return (
       'inbox は空です。ブラウザ拡張がこの daemon にまだ一度も接続していません。' +
-      '拡張の Options → 「視覚フィードバック デーモン」で有効化・URL（ws://127.0.0.1:8765/ws 等）・' +
-      'トークン（daemon 起動時のログに表示、または ~/.bag-vf/token）を設定してください。'
+      '拡張の Options → 「ページフィードバック デーモン」で有効化・URL（ws://127.0.0.1:8765/ws 等）・' +
+      'トークン（daemon 起動時のログに表示、または ~/.bag-pf/token）を設定してください。'
     );
   }
   if (bridgeStatus && bridgeStatus.everConnected && !bridgeStatus.lastPushAt) {
     return (
       'inbox は空です。拡張は daemon に接続済みですが、まだメモ／お描きが送信されていません。' +
       'ページで「メモを残す」または「お描き」を保存した後、サイドパネルの送信操作を行うか、' +
-      'Options → 視覚フィードバック で「自動同期」を有効にしてください。'
+      'Options → ページフィードバック で「自動同期」を有効にしてください。'
     );
   }
   return 'inbox は空です。ブラウザ拡張の「お描き／メモをAIへ」で保存してください。';

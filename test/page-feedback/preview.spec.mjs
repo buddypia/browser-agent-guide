@@ -1,12 +1,12 @@
 // 開発用プレビュー: ユーザーのスクショに似た擬似ページに注釈を焼き込み、PNG を .tmp に保存する。
-// 目視確認専用（CI 対象外でよい）。実行: npx playwright test test/visual-feedback/preview.spec.mjs
+// 目視確認専用（CI 対象外でよい）。実行: npx playwright test test/page-feedback/preview.spec.mjs
 import { test } from '@playwright/test';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const compositorSrc = readFileSync(resolve(here, '../../lib/visual-feedback/compositor.js'), 'utf8');
+const compositorSrc = readFileSync(resolve(here, '../../lib/page-feedback/compositor.js'), 'utf8');
 const injected =
   compositorSrc.replace(/^export\s+/gm, '') +
   '\nwindow.__VF__ = { computeOutputSize, composeFeedback };';

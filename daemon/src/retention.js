@@ -74,12 +74,14 @@ export function familyKey(id) {
 // フラグ/環境変数/既定の優先順で retention ポリシーを解決する（flag > env > default）。
 // maxAgeMs/doneTtlMs は graceWindowMs 未満にならないようクランプ（grace floor をどの設定でも破れない）。
 export function resolveRetentionPolicy({ args = {}, env = {} } = {}) {
-  const enabled = parseEnabled(args.retention ?? env.BAG_VF_RETENTION);
-  const graceWindowMs = coerceDuration(args.retentionGrace ?? env.BAG_VF_RETENTION_GRACE, DEFAULTS.graceWindowMs);
-  let maxAgeMs = coerceDuration(args.retentionMaxAge ?? env.BAG_VF_RETENTION_MAX_AGE, DEFAULTS.maxAgeMs);
-  let doneTtlMs = coerceDuration(args.retentionDoneTtl ?? env.BAG_VF_RETENTION_DONE_TTL, DEFAULTS.doneTtlMs);
-  const sweepIntervalMs = coerceDuration(args.retentionInterval ?? env.BAG_VF_RETENTION_INTERVAL, DEFAULTS.sweepIntervalMs);
-  const maxPerFamily = coerceCount(args.retentionMaxPerFamily ?? env.BAG_VF_RETENTION_MAX_PER_FAMILY, DEFAULTS.maxPerFamily);
+  // 新命名 BAG_PF_* を優先し、旧命名 BAG_VF_* を後方互換で読む。
+  const envOr = (name) => env[`BAG_PF_${name}`] ?? env[`BAG_VF_${name}`];
+  const enabled = parseEnabled(args.retention ?? envOr('RETENTION'));
+  const graceWindowMs = coerceDuration(args.retentionGrace ?? envOr('RETENTION_GRACE'), DEFAULTS.graceWindowMs);
+  let maxAgeMs = coerceDuration(args.retentionMaxAge ?? envOr('RETENTION_MAX_AGE'), DEFAULTS.maxAgeMs);
+  let doneTtlMs = coerceDuration(args.retentionDoneTtl ?? envOr('RETENTION_DONE_TTL'), DEFAULTS.doneTtlMs);
+  const sweepIntervalMs = coerceDuration(args.retentionInterval ?? envOr('RETENTION_INTERVAL'), DEFAULTS.sweepIntervalMs);
+  const maxPerFamily = coerceCount(args.retentionMaxPerFamily ?? envOr('RETENTION_MAX_PER_FAMILY'), DEFAULTS.maxPerFamily);
   maxAgeMs = Math.max(maxAgeMs, graceWindowMs);
   doneTtlMs = Math.max(doneTtlMs, graceWindowMs);
   return { enabled, graceWindowMs, maxAgeMs, doneTtlMs, sweepIntervalMs, maxPerFamily };

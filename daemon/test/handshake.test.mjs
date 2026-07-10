@@ -97,7 +97,7 @@ function sendOnce(message) {
 test('downloadsDir ハンドシェイクで書き込み先 inbox が切り替わる', async () => {
   const reported = join(baseDir, 'custom-downloads'); // ブラウザの実ダウンロード先（想定）
   const ack = await sendOnce({
-    type: 'visual_feedback',
+    type: 'page_feedback',
     capturedAt: '2026-06-18T01:02:03.004Z',
     url: 'https://example.com/x',
     title: 'X',

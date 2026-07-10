@@ -1,11 +1,11 @@
 {
-  "name": "bag-visual-feedback-daemon",
+  "name": "bag-page-feedback-daemon",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Browser Agent Guide 視覚フィードバックの常駐デーモン。お描き注釈スクショの inbox を MCP(Streamable HTTP)で AI コーディング CLI に軽量contextとimage+パスで公開する。",
+  "description": "Browser Agent Guide ページフィードバックの常駐デーモン。お描き注釈スクショの inbox を MCP(Streamable HTTP)で AI コーディング CLI に軽量contextとimage+パスで公開する。",
   "bin": {
-    "bag-vf-daemon": "src/index.js"
+    "bag-pf-daemon": "src/index.js"
   },
   "scripts": {
     "start": "node src/index.js",

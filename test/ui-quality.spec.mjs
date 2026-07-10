@@ -97,7 +97,7 @@ async function installChromeMock(page, seed = {}) {
             actions: [],
             results: [],
           };
-        case 'CAPTURE_VISUAL_FEEDBACK':
+        case 'CAPTURE_PAGE_FEEDBACK':
           // daemon 経路: ack 由来の token-less な画像URL（res.imageUrl）をサイドパネルが表示する。
           return {
             transport: 'daemon',

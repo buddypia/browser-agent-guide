@@ -855,7 +855,7 @@ els.btnCapture.addEventListener('click', async () => {
   els.btnCapture.disabled = true;
   showBanner(escapeHtml(t('capture.processing')), true);
   try {
-    const res = await send({ type: 'CAPTURE_VISUAL_FEEDBACK', tabId: state.tabId });
+    const res = await send({ type: 'CAPTURE_PAGE_FEEDBACK', tabId: state.tabId });
     const dir = res?.dir || '';
     const meta = t('capture.meta', {
       width: res.width,
@@ -999,7 +999,7 @@ function updateMemoCountBadge(list) {
     }
   }
   // 画像でAIへ送る対象 = forAI ON のお描き + forAI ON かつ本文ありメモ。
-  // content の collectVisualFeedbackData / sendCount と同じ述語（kind + 本文あり + forAI!==false）に揃え、
+  // content の collectPageFeedbackData / sendCount と同じ述語（kind + 本文あり + forAI!==false）に揃え、
   // メモだけのページでも送信できるようにする（メモは forAI 未設定=ON 扱い）。
   const noteSendCount = list.filter(
     (a) => a.kind === 'note' && String(a.note || '').trim() && a.forAI !== false

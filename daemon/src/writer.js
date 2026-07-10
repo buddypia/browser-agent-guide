@@ -1,4 +1,4 @@
-// WebSocket で受け取った視覚フィードバックを inbox に書き出す。
+// WebSocket で受け取ったページフィードバックを inbox に書き出す。
 // MVP(chrome.downloads)と同じレイアウト: <inbox>/<slug>/{shot.png,raw.png,annotation.json,memo.md}
 // 原子的書き込み(tmp→rename) + 0600。slug はサーバ側で生成し、クライアントのパスは信用しない（traversal 防止）。
 import { writeFileSync, mkdirSync, renameSync, existsSync, rmSync } from 'node:fs';

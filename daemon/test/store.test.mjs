@@ -11,7 +11,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createHttpServer } from '../src/http.js';
 import { attachWebSocketServer } from '../src/ws.js';
-import { createVisualFeedbackStore, normalizeStorageMode } from '../src/store.js';
+import { createPageFeedbackStore, normalizeStorageMode } from '../src/store.js';
 import { listEntries } from '../src/inbox.js';
 
 const PNG_B64 =
@@ -73,7 +73,7 @@ test('normalizeStorageMode: disk/hybrid/memory を区別し、不明は disk', (
 
 test('hybrid store: context はメモリから返し、image 要求時だけ inbox に保存する', async () => {
   const inboxDir = mkdtempSync(join(tmpdir(), 'vf-hybrid-'));
-  const entryStore = createVisualFeedbackStore({ inboxDir, storageMode: 'hybrid' });
+  const entryStore = createPageFeedbackStore({ inboxDir, storageMode: 'hybrid' });
   const httpServer = createHttpServer({ inboxDir, entryStore, nowMs: Date.parse('2026-06-18T01:10:00.000Z') });
   const wss = attachWebSocketServer(httpServer, { inboxDir, entryStore, token: TOKEN });
   await new Promise((r) => httpServer.listen(0, '127.0.0.1', r));
@@ -83,7 +83,7 @@ test('hybrid store: context はメモリから返し、image 要求時だけ inb
 
   try {
     const ack = await sendOnce(`${wsUrl}?token=${TOKEN}`, {
-      type: 'visual_feedback',
+      type: 'page_feedback',
       capturedAt: '2026-06-18T01:02:03.004Z',
       url: 'https://hybrid.example/page',
       title: 'Hybrid Capture',
@@ -149,7 +149,7 @@ test('hybrid store: context はメモリから返し、image 要求時だけ inb
 
 test('hybrid store: 異なる host の memory push 2件で bare context が disambiguation を返す（N5）', async () => {
   const inboxDir = mkdtempSync(join(tmpdir(), 'vf-hybrid-amb-'));
-  const entryStore = createVisualFeedbackStore({ inboxDir, storageMode: 'hybrid' });
+  const entryStore = createPageFeedbackStore({ inboxDir, storageMode: 'hybrid' });
   const httpServer = createHttpServer({ inboxDir, entryStore, nowMs: Date.parse('2026-06-20T10:10:00.000Z') });
   const wss = attachWebSocketServer(httpServer, { inboxDir, entryStore, token: TOKEN });
   await new Promise((r) => httpServer.listen(0, '127.0.0.1', r));
@@ -158,7 +158,7 @@ test('hybrid store: 異なる host の memory push 2件で bare context が disa
   const mcpUrl = `http://127.0.0.1:${port}/mcp`;
   try {
     await sendOnce(`${wsUrl}?token=${TOKEN}`, {
-      type: 'visual_feedback',
+      type: 'page_feedback',
       capturedAt: '2026-06-20T10:00:00.000Z',
       url: 'https://amazon.co.jp/x',
       title: 'Amazon',
@@ -166,7 +166,7 @@ test('hybrid store: 異なる host の memory push 2件で bare context が disa
       annotation: { url: 'https://amazon.co.jp/x', title: 'Amazon', capturedAt: '2026-06-20T10:00:00.000Z', items: [] },
     });
     await sendOnce(`${wsUrl}?token=${TOKEN}`, {
-      type: 'visual_feedback',
+      type: 'page_feedback',
       capturedAt: '2026-06-20T09:58:00.000Z',
       url: 'https://example.com/y',
       title: 'MyApp',
@@ -189,7 +189,7 @@ test('hybrid store: 異なる host の memory push 2件で bare context が disa
 
 test('hybrid store: image.inline(webp) は inline を image に使い、materialize で shot.inline.webp を永続し、/shot はフル解像度 PNG', async () => {
   const inboxDir = mkdtempSync(join(tmpdir(), 'vf-hybrid-inline-'));
-  const entryStore = createVisualFeedbackStore({ inboxDir, storageMode: 'hybrid' });
+  const entryStore = createPageFeedbackStore({ inboxDir, storageMode: 'hybrid' });
   const httpServer = createHttpServer({ inboxDir, entryStore, token: TOKEN, nowMs: Date.parse('2026-06-18T01:10:00.000Z') });
   const wss = attachWebSocketServer(httpServer, { inboxDir, entryStore, token: TOKEN });
   await new Promise((r) => httpServer.listen(0, '127.0.0.1', r));
@@ -198,7 +198,7 @@ test('hybrid store: image.inline(webp) は inline を image に使い、material
   const mcpUrl = `http://127.0.0.1:${port}/mcp`;
   try {
     const ack = await sendOnce(`${wsUrl}?token=${TOKEN}`, {
-      type: 'visual_feedback',
+      type: 'page_feedback',
       capturedAt: '2026-06-18T01:02:03.004Z',
       url: 'https://inline.example/page',
       title: 'Inline Capture',
@@ -236,7 +236,7 @@ test('disk store 再起動相当: 永続した shot.inline.webp を新規 store 
   const inboxDir = mkdtempSync(join(tmpdir(), 'vf-disk-inline-restart-'));
   try {
     // disk store で eager 保存（shot.png + shot.inline.webp）。
-    const writer = createVisualFeedbackStore({ inboxDir, storageMode: 'disk' });
+    const writer = createPageFeedbackStore({ inboxDir, storageMode: 'disk' });
     const ack = writer.save({
       capturedAt: '2026-06-18T02:02:03.004Z',
       url: 'https://restart.example/p',
@@ -246,7 +246,7 @@ test('disk store 再起動相当: 永続した shot.inline.webp を新規 store 
     });
     assert.ok(ack.files.includes('shot.inline.webp'), 'disk は inline 変種を即時永続');
     // 別プロセス相当: RAM を共有しない新しい store がディスクから読む。
-    const fresh = createVisualFeedbackStore({ inboxDir, storageMode: 'disk' });
+    const fresh = createPageFeedbackStore({ inboxDir, storageMode: 'disk' });
     const entry = fresh.findEntry(ack.id);
     const { buildEntryContent } = await import('../src/inbox.js');
     const img = buildEntryContent(entry).find((c) => c.type === 'image');
@@ -259,7 +259,7 @@ test('disk store 再起動相当: 永続した shot.inline.webp を新規 store 
 
 test('memory store (既定): inbox を作らず、image 要求時のみ OS tmp に一時 materialize する', async () => {
   const inboxDir = mkdtempSync(join(tmpdir(), 'vf-memory-'));
-  const entryStore = createVisualFeedbackStore({ inboxDir, storageMode: 'memory' });
+  const entryStore = createPageFeedbackStore({ inboxDir, storageMode: 'memory' });
   const httpServer = createHttpServer({ inboxDir, entryStore, token: TOKEN, nowMs: Date.parse('2026-06-22T01:10:00.000Z') });
   const wss = attachWebSocketServer(httpServer, { inboxDir, entryStore, token: TOKEN });
   await new Promise((r) => httpServer.listen(0, '127.0.0.1', r));
@@ -270,7 +270,7 @@ test('memory store (既定): inbox を作らず、image 要求時のみ OS tmp �
 
   try {
     const ack = await sendOnce(`${wsUrl}?token=${TOKEN}`, {
-      type: 'visual_feedback',
+      type: 'page_feedback',
       capturedAt: '2026-06-22T01:02:03.004Z',
       url: 'https://memory.example/page',
       title: 'Memory Capture',

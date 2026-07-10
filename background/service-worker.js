@@ -214,10 +214,10 @@ async function handleMessage(msg, sender) {
       return ensureContentAndSend(msg.tabId, { type: 'REMOVE_ANNOTATION', id: msg.id });
     case 'EXPORT_CONTEXT':
       return ensureContentAndSend(msg.tabId, { type: 'EXPORT_CONTEXT' });
-    case 'CAPTURE_VISUAL_FEEDBACK':
-      return captureVisualFeedback({ tabId: msg.tabId });
-    case 'VISUAL_FEEDBACK_CHANGED':
-      return scheduleAutoVisualFeedback({
+    case 'CAPTURE_PAGE_FEEDBACK':
+      return capturePageFeedback({ tabId: msg.tabId });
+    case 'PAGE_FEEDBACK_CHANGED':
+      return scheduleAutoPageFeedback({
         tabId: sender?.tab?.id,
         sendCount: msg.sendCount,
       });
@@ -766,7 +766,7 @@ async function ensureContentAndSend(tabId, message) {
 }
 
 // ===========================================================================
-// 視覚フィードバック（vision ブリッジ）Phase 0 / MVP
+// ページフィードバック（vision ブリッジ）Phase 0 / MVP
 // お描き注釈をスクリーンショットへ burn-in し、Downloads/ai-inbox/<slug>/ へ保存する。
 //   流れ: content(PREPARE_CAPTURE) → captureVisibleTab → content(FINISH_CAPTURE)
 //        → offscreen(合成) → chrome.downloads(shot.png/raw.png/annotation.json/memo.md)
@@ -776,7 +776,7 @@ const OFFSCREEN_URL = 'offscreen/offscreen.html';
 const INBOX_ROOT = 'ai-inbox';
 let creatingOffscreen = null;
 
-async function scheduleAutoVisualFeedback({ tabId, sendCount } = {}) {
+async function scheduleAutoPageFeedback({ tabId, sendCount } = {}) {
   if (tabId == null) return { scheduled: false, reason: 'no-tab' };
   if (Number(sendCount || 0) <= 0) {
     clearAutoSyncTimer(tabId);
@@ -785,12 +785,12 @@ async function scheduleAutoVisualFeedback({ tabId, sendCount } = {}) {
 
   const settings = await getSettings();
   const daemon = settings.daemon || {};
-  if (!settings.visualFeedback?.autoSync || !daemon.enabled || !daemon.url || !daemon.token) {
+  if (!settings.pageFeedback?.autoSync || !daemon.enabled || !daemon.url || !daemon.token) {
     clearAutoSyncTimer(tabId);
     return { scheduled: false, reason: 'disabled' };
   }
 
-  const delayMs = clampAutoSyncDebounce(settings.visualFeedback?.autoSyncDebounceMs);
+  const delayMs = clampAutoSyncDebounce(settings.pageFeedback?.autoSyncDebounceMs);
   setAutoSyncTimer(tabId, delayMs);
   return { scheduled: true, delayMs };
 }
@@ -799,8 +799,8 @@ function setAutoSyncTimer(tabId, delayMs) {
   clearAutoSyncTimer(tabId);
   const timer = setTimeout(() => {
     autoSyncTimers.delete(tabId);
-    runAutoVisualFeedback(tabId).catch((e) => {
-      console.warn('[bag] visual feedback auto sync failed:', e?.message || e);
+    runAutoPageFeedback(tabId).catch((e) => {
+      console.warn('[bag] page feedback auto sync failed:', e?.message || e);
     });
   }, delayMs);
   autoSyncTimers.set(tabId, timer);
@@ -818,7 +818,7 @@ function clampAutoSyncDebounce(value) {
   return Math.min(AUTO_SYNC_MAX_DEBOUNCE_MS, Math.max(AUTO_SYNC_MIN_DEBOUNCE_MS, Math.round(n)));
 }
 
-async function runAutoVisualFeedback(tabId) {
+async function runAutoPageFeedback(tabId) {
   if (autoSyncInFlight.has(tabId)) {
     setAutoSyncTimer(tabId, AUTO_SYNC_DEFAULT_DEBOUNCE_MS);
     return;
@@ -834,17 +834,17 @@ async function runAutoVisualFeedback(tabId) {
 
   autoSyncInFlight.add(tabId);
   try {
-    await captureVisualFeedback({ tabId, autoSync: true });
+    await capturePageFeedback({ tabId, autoSync: true });
   } finally {
     autoSyncInFlight.delete(tabId);
   }
 }
 
-async function captureVisualFeedback({ tabId, autoSync = false }) {
+async function capturePageFeedback({ tabId, autoSync = false }) {
   if (tabId == null) throw new Error(t('errors.targetTabMissing'));
   const settings = await getSettings();
   const daemon = settings.daemon || {};
-  if (autoSync && (!settings.visualFeedback?.autoSync || !daemon.enabled || !daemon.url || !daemon.token)) {
+  if (autoSync && (!settings.pageFeedback?.autoSync || !daemon.enabled || !daemon.url || !daemon.token)) {
     return { transport: 'skipped', reason: 'auto-sync-disabled' };
   }
   const tab = await chrome.tabs.get(tabId);
@@ -874,7 +874,7 @@ async function captureVisualFeedback({ tabId, autoSync = false }) {
   await ensureOffscreen();
   const res = await sendToOffscreen({
     target: 'offscreen',
-    type: 'COMPOSITE_VISUAL_FEEDBACK',
+    type: 'COMPOSITE_PAGE_FEEDBACK',
     payload: { screenshotDataUrl, data },
   });
   if (!res?.ok) throw new Error(res?.error ? t(res.error) : t('sw.err.compositeFailed'));
@@ -906,7 +906,7 @@ async function captureVisualFeedback({ tabId, autoSync = false }) {
         url: daemon.url,
         token: daemon.token,
         payload: {
-          type: 'visual_feedback',
+          type: 'page_feedback',
           capturedAt,
           url: data.url,
           title: data.title,
@@ -1141,7 +1141,7 @@ function buildTabMetadata(tab) {
 function buildAnnotationJson({ data, composite, capturedAt, tab }) {
   return {
     // v1: 注釈要素の outerHTML / a11y を items に追加（画像なしで HTML 要素を CLI へ渡すため）。v0 も読める。
-    schema: 'bag.visual-feedback/v1',
+    schema: 'bag.page-feedback/v1',
     url: data.url,
     title: data.title,
     capturedAt,
