@@ -113,9 +113,9 @@
         </p>
       </section>
 
-      <!-- 視覚フィードバック デーモン -->
+      <!-- ページフィードバック デーモン -->
       <section class="card">
-        <h2 data-i18n="opt.daemon.h2">視覚フィードバック デーモン</h2>
+        <h2 data-i18n="opt.daemon.h2">ページフィードバック デーモン</h2>
         <p class="hint" data-i18n-html="opt.daemon.intro">
           「お描きを画像でAIへ」を、ダウンロード保存ではなく常駐デーモンへ <code>WebSocket</code> で直接送ります（有効時）。
           デーモンを起動し（<code>cd daemon &amp;&amp; npm start</code>）、起動時に表示される <code>token</code> を下に貼ってください。
@@ -127,7 +127,7 @@
             <span data-i18n="opt.daemon.enable">デーモンへ送る（WebSocket push を有効化）</span>
           </label>
           <label class="checkbox-row">
-            <input id="vf-auto-sync" type="checkbox" />
+            <input id="pf-auto-sync" type="checkbox" />
             <span data-i18n="opt.daemon.autoSync">AIトレイを自動同期（送信ボタン不要）</span>
           </label>
           <label>

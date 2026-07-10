@@ -14,9 +14,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/../../bag-workflow/scripts/preflight-common.sh"
 
 ARG="${1:-}"
-DAEMON_HEALTHZ="${BAG_VF_HEALTHZ:-http://127.0.0.1:8765/healthz}"
+DAEMON_HEALTHZ="${BAG_PF_HEALTHZ:-http://127.0.0.1:8765/healthz}"
 # 既定は best-effort（Unix の典型値）。権威的な値は healthz の inboxDir（拡張の報告で自動追従）。
-INBOX="${BAG_VF_INBOX:-$HOME/Downloads/ai-inbox}"
+INBOX="${BAG_PF_INBOX:-$HOME/Downloads/ai-inbox}"
 
 bag_probe_daemon    # daemon / ext_connected / ext_ever_connected / ext_last_push / INBOX(採用) を設定
 # 注: 既定の storage=memory はファイルを書かない（RAM 保持）ので capture=no になりうるが、

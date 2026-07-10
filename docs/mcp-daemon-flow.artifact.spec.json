@@ -1,6 +1,6 @@
 {
   "title": "MCP Daemon が Chrome 拡張連携で担う役割",
-  "eyebrow": "Browser Agent Guide / Visual Feedback",
+  "eyebrow": "Browser Agent Guide / Page Feedback",
   "subtitle": "Chrome拡張のお描き注釈を、AIコーディングCLIが自動で読める形に変えるローカル中継プロセスの説明資料。",
   "lang": "ja",
   "target": "document",
@@ -212,7 +212,7 @@
       "desc": "実装上の責務を、入口・保存・公開・安全策に分けて見る。",
       "columns": 2,
       "items": [
-        { "k": "WebSocket endpoint", "v": "/ws", "note": "Chrome拡張から type=visual_feedback のペイロードを受け取る。token が不一致なら 401 で拒否。" },
+        { "k": "WebSocket endpoint", "v": "/ws", "note": "Chrome拡張から type=page_feedback のペイロードを受け取る。token が不一致なら 401 で拒否。" },
         { "k": "MCP endpoint", "v": "/mcp", "note": "Streamable HTTP。AI CLI が MCP tool call でアクセスする。" },
         { "k": "Health check", "v": "/healthz", "note": "daemon が読んでいる現在の inboxDir を返す。保存先確認の権威。" },
         { "k": "保存ファイル", "v": "shot / raw / json / memo", "note": "注釈入り画像、元画像、構造化メタ、読みやすいメモを同じ slug 配下へ保存。" },
@@ -234,7 +234,7 @@
       "type": "callout",
       "variant": "success",
       "title": "導入後の使い方",
-      "body": "daemon を起動して token を拡張オプションへ貼り、CLI に http://127.0.0.1:8765/mcp を登録します。その後はブラウザでお描きして送るだけで、AI に「最新の視覚フィードバックを見て直して」と頼めるようになります。"
+      "body": "daemon を起動して token を拡張オプションへ貼り、CLI に http://127.0.0.1:8765/mcp を登録します。その後はブラウザでお描きして送るだけで、AI に「最新のページフィードバックを見て直して」と頼めるようになります。"
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "title": "MCP と Browser Agent Guide Chrome拡張のつながり",
-  "eyebrow": "Browser Agent Guide / MCP / Visual Feedback",
+  "eyebrow": "Browser Agent Guide / MCP / Page Feedback",
   "subtitle": "Chrome拡張本体、ローカル daemon、MCP、AIコーディングCLIの責務を一枚で把握するための説明資料。",
   "lang": "ja",
   "target": "document",
@@ -11,7 +11,7 @@
   "density": "comfortable",
   "meta": [
     { "k": "Extension", "v": "Chrome Manifest V3 side panel" },
-    { "k": "Daemon", "v": "bag-visual-feedback-daemon" },
+    { "k": "Daemon", "v": "bag-page-feedback-daemon" },
     { "k": "WebSocket", "v": "ws://127.0.0.1:8765/ws" },
     { "k": "MCP", "v": "http://127.0.0.1:8765/mcp" }
   ],
@@ -57,7 +57,7 @@
         {
           "k": "MCP",
           "v": "AI CLI向けの読み取り口",
-          "note": "AIコーディングCLIが最新の視覚フィードバックをcontext-firstで取得するための道具。"
+          "note": "AIコーディングCLIが最新のページフィードバックをcontext-firstで取得するための道具。"
         }
       ]
     },
@@ -86,7 +86,7 @@
           ]
         },
         {
-          "name": "MCP視覚フィードバック経路",
+          "name": "MCPページフィードバック経路",
           "metrics": [
             { "k": "入口", "v": "お描き/Draw capture" },
             { "k": "受け渡し", "v": "daemon /ws then /mcp" },
@@ -108,12 +108,12 @@
     },
     {
       "type": "diagram",
-      "title": "接続図: 拡張のページ操作経路とMCPの視覚フィードバック経路",
+      "title": "接続図: 拡張のページ操作経路とMCPのページフィードバック経路",
       "layout": "layered",
       "zones": ["Chrome extension", "Local daemon / inbox", "AI CLI / external services"],
       "groupLabels": {
         "1": "拡張内操作",
-        "2": "視覚フィードバック",
+        "2": "ページフィードバック",
         "3": "AI/CLI消費"
       },
       "nodes": [
@@ -137,9 +137,9 @@
         { "from": "content", "to": "page", "label": "closed verbs" },
         { "from": "sw", "to": "llm", "label": "Structured Outputs" },
         { "from": "content", "to": "sw", "label": "PREPARE_CAPTURE" },
-        { "from": "sw", "to": "offscreen", "label": "COMPOSITE_VISUAL_FEEDBACK" },
+        { "from": "sw", "to": "offscreen", "label": "COMPOSITE_PAGE_FEEDBACK" },
         { "from": "offscreen", "to": "sw", "label": "composite PNG" },
-        { "from": "sw", "to": "ws", "label": "visual_feedback payload" },
+        { "from": "sw", "to": "ws", "label": "page_feedback payload" },
         { "from": "ws", "to": "inbox", "label": "atomic write" },
         { "from": "cli", "to": "mcp", "label": "tool calls" },
         { "from": "mcp", "to": "inbox", "label": "scan newest" },
@@ -243,7 +243,7 @@
         {
           "n": 3,
           "title": "Offscreen document が画像を合成する",
-          "event": "COMPOSITE_VISUAL_FEEDBACK",
+          "event": "COMPOSITE_PAGE_FEEDBACK",
           "fn": "offscreen/offscreen.js",
           "desc": "Canvas 2Dだけでshot.png相当の注釈入り画像を作り、raw.png相当の元画像も保持する。",
           "level": "neutral",
@@ -346,7 +346,7 @@
     {
       "type": "features",
       "title": "Daemon / MCPでできること",
-      "desc": "外部AI CLIが、ブラウザで示された視覚フィードバックを扱うための機能です。",
+      "desc": "外部AI CLIが、ブラウザで示されたページフィードバックを扱うための機能です。",
       "columns": 3,
       "items": [
         {
@@ -445,12 +445,12 @@
         },
         {
           "k": "拡張options",
-          "v": "視覚フィードバック デーモン",
+          "v": "ページフィードバック デーモン",
           "note": "デーモンへ送るをON、WS URLとtokenを保存し、接続テストで確認する。"
         },
         {
           "k": "token",
-          "v": "~/.bag-vf/token",
+          "v": "~/.bag-pf/token",
           "note": "daemon起動時にstderrへ表示される。WebSocket認証に使う。"
         },
         {
@@ -461,7 +461,7 @@
         {
           "k": "明示inbox",
           "v": "node src/index.js --inbox ./.ai-inbox",
-          "note": "--inboxまたはBAG_VF_INBOXを指定すると拡張のdownloadsDir報告では上書きされない。"
+          "note": "--inboxまたはBAG_PF_INBOXを指定すると拡張のdownloadsDir報告では上書きされない。"
         }
       ]
     },
@@ -475,7 +475,7 @@
           "open": true
         },
         {
-          "summary": "daemonがないと視覚フィードバックは使えない？",
+          "summary": "daemonがないとページフィードバックは使えない？",
           "body": "<p>いいえ。daemonが無効または到達不能なら、拡張はchrome.downloadsでai-inboxへ保存します。ただしAI CLIへ自動で渡す体験はdaemon + MCPの方が滑らかです。</p>"
         },
         {
@@ -484,7 +484,7 @@
         },
         {
           "summary": "MCPはLLM APIを呼ぶ？",
-          "body": "<p>いいえ。拡張内チャットのLLM呼び出しはservice workerのlib/ai-client.jsです。daemonのMCPは保存済み視覚フィードバックをAI CLIへ返すだけです。</p>"
+          "body": "<p>いいえ。拡張内チャットのLLM呼び出しはservice workerのlib/ai-client.jsです。daemonのMCPは保存済みページフィードバックをAI CLIへ返すだけです。</p>"
         },
         {
           "summary": "なぜこの仕組みが必要？",

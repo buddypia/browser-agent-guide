@@ -13,7 +13,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createHttpServer } from '../src/http.js';
 import { writeEntry } from '../src/writer.js';
-import { createVisualFeedbackStore } from '../src/store.js';
+import { createPageFeedbackStore } from '../src/store.js';
 import { listEntries, buildEntryContext, buildEntryContextText } from '../src/inbox.js';
 
 // 1x1 PNG
@@ -156,7 +156,7 @@ async function get(base, path) {
 
   before(async () => {
     inboxDir = mkdtempSync(join(tmpdir(), 'vf-shot-mem-'));
-    const entryStore = createVisualFeedbackStore({ inboxDir, storageMode: 'hybrid' });
+    const entryStore = createPageFeedbackStore({ inboxDir, storageMode: 'hybrid' });
     const ack = entryStore.save({
       capturedAt: '2026-06-18T03:02:03.004Z',
       url: 'https://example.com/m',

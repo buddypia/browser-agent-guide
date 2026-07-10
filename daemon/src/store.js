@@ -1,4 +1,4 @@
-// 視覚フィードバック entry の保存・検索境界。
+// ページフィードバック entry の保存・検索境界。
 // disk は従来どおり <inbox>/<slug>/... を即時保存し、hybrid はまずメモリに保持して
 // image/file_path が必要になった時だけ <inbox> へ materialize する。
 // memory は inbox を一切作らず、image/file_path 要求時だけ OS tmp へ一時 materialize し
@@ -35,7 +35,7 @@ export function createDiskEntryStore(inboxDir) {
   };
 }
 
-export function createVisualFeedbackStore({ inboxDir, storageMode = 'disk', memoryLimit = DEFAULT_MEMORY_LIMIT } = {}) {
+export function createPageFeedbackStore({ inboxDir, storageMode = 'disk', memoryLimit = DEFAULT_MEMORY_LIMIT } = {}) {
   const mode = normalizeStorageMode(storageMode);
   if (mode === 'disk') return createDiskEntryStore(inboxDir);
   return createMemoryBackedStore({ inboxDir, mode, memoryLimit });
@@ -51,7 +51,7 @@ function createMemoryBackedStore({ inboxDir, mode, memoryLimit }) {
   // memory モードの一時 materialize 先（初回 materialize で遅延作成し、cleanup で丸ごと消す）。
   let tmpRoot = null;
   const memoryMaterializeRoot = () => {
-    if (!tmpRoot) tmpRoot = mkdtempSync(join(tmpdir(), 'bag-vf-'));
+    if (!tmpRoot) tmpRoot = mkdtempSync(join(tmpdir(), 'bag-pf-'));
     return tmpRoot;
   };
 

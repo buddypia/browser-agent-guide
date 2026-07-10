@@ -80,7 +80,7 @@ try {
 
   // 1) 拡張役: WS push
   const ack = await wsPush({
-    type: 'visual_feedback',
+    type: 'page_feedback',
     capturedAt: '2026-06-18T02:03:04.005Z',
     url: 'https://example.com/e2e',
     title: 'E2E',
@@ -132,7 +132,7 @@ try {
   //    保存直後の sweep(onSaved) が旧世代を family cap(=1) で done/ へ退避する。
   await wait(1500); // 1回目(ack.id)を grace(1s)外にする
   const ack2 = await wsPush({
-    type: 'visual_feedback',
+    type: 'page_feedback',
     capturedAt: '2026-06-18T02:03:06.005Z', // 別 capturedAt → 別 id・同 family(example-com__e2e)
     url: 'https://example.com/e2e',
     title: 'E2E',

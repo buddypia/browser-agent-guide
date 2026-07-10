@@ -1,16 +1,16 @@
-// Offscreen document の合成器。service worker から COMPOSITE_VISUAL_FEEDBACK を受け取り、
+// Offscreen document の合成器。service worker から COMPOSITE_PAGE_FEEDBACK を受け取り、
 // captureVisibleTab の PNG（device px）の上にユーザー注釈を Canvas 2D で burn-in して返す。
 //
 // 罠対策（handoff §4.1 / §6）:
 //  - OffscreenCanvas + Canvas 2D のみ。SVG/foreignObject を使わない → SecurityError 回避。
 //  - 2000px ガード（computeOutputSize）+ DPR 整合（factor = dpr × outputScale）は compositor.js に集約。
 
-import { computeOutputSize, composeFeedback } from '../lib/visual-feedback/compositor.js';
+import { computeOutputSize, composeFeedback } from '../lib/page-feedback/compositor.js';
 import { encodeInline } from './inline-encode.js';
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.target !== 'offscreen') return; // 自分宛て以外は無視（SW/sidepanel 宛てと混線させない）
-  if (msg.type === 'COMPOSITE_VISUAL_FEEDBACK') {
+  if (msg.type === 'COMPOSITE_PAGE_FEEDBACK') {
     composite(msg.payload)
       .then((result) => sendResponse({ ok: true, result }))
       .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
@@ -32,10 +32,10 @@ async function composite({ screenshotDataUrl, data }) {
 
   const canvas = new OffscreenCanvas(outWidth, outHeight);
   const ctx = canvas.getContext('2d');
-  // @term: visual-feedback  (用語定義: glossary/daemon/visual-feedback.md。背景描画で drawImage を使う唯一の箇所)
+  // @term: page-feedback  (用語定義: glossary/daemon/page-feedback.md。背景描画で drawImage を使う唯一の箇所)
   // 背景 = スクリーンショット（device px → output px へ一様縮小）。
   ctx.drawImage(bitmap, 0, 0, outWidth, outHeight);
-  // @endterm: visual-feedback
+  // @endterm: page-feedback
   if (typeof bitmap.close === 'function') bitmap.close();
 
   // 図形座標は CSS viewport px → device px(×dpr) → output px(×outputScale)。
