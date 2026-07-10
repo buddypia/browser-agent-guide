@@ -53,7 +53,7 @@ node --test test/inbox.test.mjs  # single daemon test file
 node scripts/e2e-smoke.mjs       # real-binary E2E: spawn daemon, WS push -> MCP get, on a temp inbox
 curl -s http://127.0.0.1:8765/healthz
 ```
-Override via flags `--inbox/--port/--host/--token` or env `BAG_PF_INBOX/BAG_PF_PORT/BAG_PF_HOST/BAG_PF_TOKEN` (the daemon reads the new `BAG_PF_*` names first and falls back to the legacy `BAG_VF_*` names).
+Override via flags `--inbox/--port/--host/--token` or env `BAG_PF_INBOX/BAG_PF_PORT/BAG_PF_HOST/BAG_PF_TOKEN`.
 
 > There is **no CI** and **no linter/formatter**. Run `npm run check` (root) and `cd daemon && npm test` manually before packaging — `npm run check` does **not** cover the daemon.
 
