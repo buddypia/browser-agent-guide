@@ -111,15 +111,6 @@ async function main() {
   }
 
   console.log('Skills setup complete!');
-
-  // MCP setup integration
-  if (isInteractive && !isForce) {
-    const runMcpSetup = await askQuestion('\nDo you want to set up the MCP daemon and register it to Claude Code as well? [y/N]: ');
-    if (runMcpSetup === 'y' || runMcpSetup === 'yes') {
-      const setupMcpModule = await import('./setup-mcp.mjs');
-      await setupMcpModule.setupMcp({ isInteractive, isForce, skipInitialPrompt: true });
-    }
-  }
 }
 
 async function setupSymlink(linkPath, relativeTarget, skill, label) {
