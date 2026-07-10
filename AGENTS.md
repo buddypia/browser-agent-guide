@@ -15,6 +15,8 @@ UI strings are bilingual JP/EN by design (e.g. `お描き/Draw`); `README.md` is
 make wt.new BR=feature/<task>     # create a fresh worktree from origin/main
 make wt.run CMD="npm run check"   # run a command in the active worktree
 make q.check                      # root npm run check + daemon npm test
+make setup.skills                 # interactive setup of skills across agent CLI environments (with overwrite prompt)
+make mcp.setup                    # interactive setup of MCP daemon & registration to Claude Code
 ```
 Tracked source changes should be made in an owned worktree, normally
 `.worktrees/<branch>`. Do not commit directly on `main`, do not use raw
