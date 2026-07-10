@@ -24,13 +24,31 @@ bag_probe_daemon    # daemon / ext_connected / ext_ever_connected / ext_last_pus
 bag_probe_capture   # latest / capture を設定。BAG_INBOX_DIR_LIST に ls -dt 結果もキャッシュされる
 bag_probe_mcp       # mcp / mcp_conn を設定
 
-# --- $ARGUMENTS を tabId / urlContains に分類 / classify the argument --------------
-arg_kind="none"; scope_tabId="none"; scope_url="none"; m_windowId="none"; m_url="none"
+# --- $ARGUMENTS を tabId / urlContains / instruction に分類 / classify the argument ---
+arg_kind="none"; scope_tabId="none"; scope_url="none"; m_windowId="none"; m_url="none"; instruction=""
 if [ -n "$ARG" ]; then
-  case "$ARG" in
-    *[!0-9]*) arg_kind="urlContains"; scope_url="$ARG";;   # 数字以外を含む → URL 断片
-    *)        arg_kind="tabId";       scope_tabId="$ARG";; # 純粋な数値 → tabId
-  esac
+  if [[ "$ARG" == *[[:space:]]* ]]; then
+    FIRST_WORD="${ARG%%[[:space:]]*}"
+    REST_WORDS="${ARG#*[[:space:]]}"
+  else
+    FIRST_WORD="$ARG"
+    REST_WORDS=""
+  fi
+
+  if [ -n "$FIRST_WORD" ]; then
+    case "$FIRST_WORD" in
+      *[!0-9]*)
+        arg_kind="urlContains"
+        scope_url="$FIRST_WORD"
+        instruction="$REST_WORDS"
+        ;;
+      *)
+        arg_kind="tabId"
+        scope_tabId="$FIRST_WORD"
+        instruction="$REST_WORDS"
+        ;;
+    esac
+  fi
 fi
 
 # tabId が来たら、一致する最新 annotation.json から windowId / url を best-effort 解決。
@@ -73,9 +91,9 @@ echo "           (storage=memory はファイル無し→no でも MCP で取得
 echo "mcp      : $mcp / $mcp_conn   (bag_page_feedback。registered は設定登録の意味のみ ——"
 echo "           このコマンド実行時点の疎通確認結果であり、いまの会話セッション自身が"
 echo "           ToolSearch でツールを見つけられる保証ではない。呼び出し前に必ず確認する)"
-echo "arg      : kind=$arg_kind  tabId=$scope_tabId  url=$scope_url"
+echo "arg      : kind=$arg_kind  tabId=$scope_tabId  url=$scope_url  instruction=\"$instruction\""
 [ "$arg_kind" = "tabId" ] && echo "resolved : windowId=$m_windowId  url=$m_url   (一致 annotation.json から best-effort)"
 echo "browser  : $browser   (ライブ確認は任意・副次)"
 echo "─────────────────────────────────────────────────────────"
-# 自由文字列フィールド(scope_url/url)は空白混入でもトークン境界が壊れないよう引用する。
-echo "STATUS daemon=$daemon ext_connected=$ext_connected ext_ever_connected=$ext_ever_connected mcp=$mcp mcp_conn=$mcp_conn capture=$capture source_branch=$source_branch arg_kind=$arg_kind scope_tabId=$scope_tabId windowId=$m_windowId scope_url=\"$scope_url\" url=\"$m_url\" inbox=$INBOX latest=${latest:-none}"
+# 自由文字列フィールド(scope_url/url/instruction)は空白混入でもトークン境界が壊れないよう引用する。
+echo "STATUS daemon=$daemon ext_connected=$ext_connected ext_ever_connected=$ext_ever_connected mcp=$mcp mcp_conn=$mcp_conn capture=$capture source_branch=$source_branch arg_kind=$arg_kind scope_tabId=$scope_tabId windowId=$m_windowId scope_url=\"$scope_url\" url=\"$m_url\" inbox=$INBOX latest=${latest:-none} instruction=\"$instruction\""
