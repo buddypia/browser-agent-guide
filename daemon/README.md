@@ -226,7 +226,7 @@ systemctl --user daemon-reload && systemctl --user enable --now bag-pf-daemon.se
 💡 **簡易セットアップ**:
 リポジトリのルートディレクトリで以下のコマンドを実行することで、デーモン依存関係のインストールから Claude Code への MCP サーバー登録までを対話形式でまとめてセットアップできます。
 ```bash
-make mcp.setup
+make setup.mcp
 ```
 
 ⚠️ **HTTP URL のキー名が CLI ごとに違う**（handoff §4.4 の罠）。同じ `http://127.0.0.1:8765/mcp` を指す。
