@@ -74,8 +74,8 @@ export function familyKey(id) {
 // フラグ/環境変数/既定の優先順で retention ポリシーを解決する（flag > env > default）。
 // maxAgeMs/doneTtlMs は graceWindowMs 未満にならないようクランプ（grace floor をどの設定でも破れない）。
 export function resolveRetentionPolicy({ args = {}, env = {} } = {}) {
-  // 新命名 BAG_PF_* を優先し、旧命名 BAG_VF_* を後方互換で読む。
-  const envOr = (name) => env[`BAG_PF_${name}`] ?? env[`BAG_VF_${name}`];
+  // 新命名 BAG_PF_* を読み込む。
+  const envOr = (name) => env[`BAG_PF_${name}`];
   const enabled = parseEnabled(args.retention ?? envOr('RETENTION'));
   const graceWindowMs = coerceDuration(args.retentionGrace ?? envOr('RETENTION_GRACE'), DEFAULTS.graceWindowMs);
   let maxAgeMs = coerceDuration(args.retentionMaxAge ?? envOr('RETENTION_MAX_AGE'), DEFAULTS.maxAgeMs);
