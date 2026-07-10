@@ -1,4 +1,4 @@
-.PHONY: wt.new wt.run q.check q.ci-mirror setup.skills
+.PHONY: wt.new wt.run q.check q.ci-mirror setup.skills mcp.setup setup.mcp
 
 wt.new:
 	@if [ -z "$(BR)" ]; then \
@@ -24,3 +24,8 @@ q.ci-mirror: q.check
 
 setup.skills:
 	@node .claude/scripts/setup-skills.mjs
+
+mcp.setup:
+	@node .claude/scripts/setup-mcp.mjs
+
+setup.mcp: mcp.setup
