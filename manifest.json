@@ -42,9 +42,22 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
+      "js": ["content/content-start.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": ["<all_urls>"],
       "js": ["content/content-script.js"],
       "css": ["content/content.css"],
       "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/clipboard-hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
       "all_frames": false
     }
   ]
