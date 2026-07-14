@@ -66,6 +66,26 @@
     annoOutline: 'data-bag-anno-outline',
   };
 
+  function getUiParent() {
+    const dialogs = document.querySelectorAll('dialog[open]');
+    if (dialogs.length > 0) {
+      return dialogs[dialogs.length - 1];
+    }
+    return document.documentElement;
+  }
+
+  // Bypassing focus traps: stop propagation of focus/focusin events on our elements in window capture phase
+  window.addEventListener('focus', (e) => {
+    if (e.target && typeof e.target.closest === 'function' && e.target.closest(`[${ATTR.ui}]`)) {
+      e.stopPropagation();
+    }
+  }, true);
+  window.addEventListener('focusin', (e) => {
+    if (e.target && typeof e.target.closest === 'function' && e.target.closest(`[${ATTR.ui}]`)) {
+      e.stopPropagation();
+    }
+  }, true);
+
   const CHAT_BLOCKED_VERBS = new Set(['defineMarker', 'setStyle', 'removeElement']);
   const RECIPE_BLOCKED_VERBS = new Set(['defineMarker', 'setStyle', 'removeElement']);
   // 自動実行(autorun)は deny-by-default の allow-list。手順実行に必要な
@@ -393,11 +413,14 @@
   // ---- ページ内トースト ----
   function toast(message, level = 'info') {
     let host = document.getElementById('bag-toast-host');
+    const parent = getUiParent();
     if (!host) {
       host = document.createElement('div');
       host.id = 'bag-toast-host';
       host.className = 'bag-toast-host';
-      document.documentElement.appendChild(host);
+      parent.appendChild(host);
+    } else if (host.parentNode !== parent) {
+      parent.appendChild(host);
     }
     const el = document.createElement('div');
     el.className = `bag-toast bag-toast--${level}`;
@@ -954,11 +977,14 @@
 
   function floatingHost() {
     let host = document.getElementById('bag-floating-host');
+    const parent = getUiParent();
     if (!host) {
       host = document.createElement('div');
       host.id = 'bag-floating-host';
       host.className = 'bag-floating-host';
-      document.documentElement.appendChild(host);
+      parent.appendChild(host);
+    } else if (host.parentNode !== parent) {
+      parent.appendChild(host);
     }
     return host;
   }
@@ -2117,15 +2143,16 @@
     if (drawing.active) stopDrawing(); // お描きモードと排他にする
     picking = true;
     document.documentElement.classList.add('bag-picking');
+    const parent = getUiParent();
     pickOverlay = document.createElement('div');
     pickOverlay.className = 'bag-pick-overlay';
     pickOverlay.setAttribute(ATTR.ui, '1');
-    document.documentElement.appendChild(pickOverlay);
+    parent.appendChild(pickOverlay);
     pickHintEl = document.createElement('div');
     pickHintEl.className = 'bag-pick-hint';
     pickHintEl.setAttribute(ATTR.ui, '1');
     pickHintEl.textContent = t('cs.picker.hint');
-    document.documentElement.appendChild(pickHintEl);
+    parent.appendChild(pickHintEl);
     document.addEventListener('pointerdown', onPickPointerDown, true);
     document.addEventListener('mousemove', onPickMove, true);
     document.addEventListener('click', onPickClick, true);
@@ -2255,10 +2282,14 @@
         <button data-f="cancel" type="button">${escapeHtml(t('cs.author.cancel'))}</button>
         <button data-f="save" type="button" class="primary">${escapeHtml(t('cs.author.save'))}</button>
       </div>`;
-    document.documentElement.appendChild(wrap);
+    getUiParent().appendChild(wrap);
     positionAuthoring(wrap, el);
     setupAuthoringDrag(wrap);
     authoringEl = wrap;
+
+    wrap.addEventListener('keydown', (e) => e.stopPropagation());
+    wrap.addEventListener('keyup', (e) => e.stopPropagation());
+    wrap.addEventListener('keypress', (e) => e.stopPropagation());
 
     // 既存編集時はAI向けの内容を初期表示する。noteは本文、marker/buttonは目的(intent)が
     // AI向けの中身なので、種類に応じて1欄に出し入れする(名前/ラベルは識別子なので保持して触らない)。
@@ -2266,6 +2297,9 @@
       const seed = existing.kind === 'note' ? existing.note : existing.intent || existing.note;
       wrap.querySelector('[data-f="note"]').value = seed || '';
     }
+    requestAnimationFrame(() => {
+      wrap.querySelector('[data-f="note"]')?.focus();
+    });
     requestAnimationFrame(() => clampAuthoringIntoViewport(wrap));
     wrap.querySelector('[data-f="cancel"]').addEventListener('click', closeAuthoring);
     wrap.querySelector('[data-f="save"]').addEventListener('click', async () => {
@@ -2523,7 +2557,7 @@
     drawOverlay.setAttribute(ATTR.ui, '1');
     drawCommitG = svgEl('g', { class: 'bag-draw-committed' });
     drawOverlay.appendChild(drawCommitG);
-    document.documentElement.appendChild(drawOverlay);
+    getUiParent().appendChild(drawOverlay);
     // ポインタ処理は window のキャプチャ段(addDrawShield)へ集約する。
     // overlay 自身に listener を張ると、サイトの document/window listener より後に
     // 走るため伝播を止めきれない(モーダルが閉じてしまう)。
@@ -2750,7 +2784,7 @@
         <button type="button" class="bag-draw-op primary" data-op="done" title="${escapeHtml(t('cs.draw.doneTitle'))}">${escapeHtml(t('cs.draw.done'))}</button>
       </div>
       <div class="bag-draw-hint">${escapeHtml(t('cs.draw.hint'))}</div>`;
-    document.documentElement.appendChild(drawToolbar);
+    getUiParent().appendChild(drawToolbar);
     drawToolbar.addEventListener('click', onDrawToolbarClick);
     updateDrawToolbarState();
   }
@@ -2966,18 +3000,30 @@
 
   // ---- 永続レイヤの確保 ----
   function ensureDrawLayer() {
-    if (drawLayer && drawLayer.isConnected) return;
+    const parent = getUiParent();
+    if (drawLayer && drawLayer.isConnected) {
+      if (drawLayer.parentNode !== parent) {
+        parent.appendChild(drawLayer);
+      }
+      return;
+    }
     drawLayer = svgEl('svg', { class: 'bag-draw-layer' });
     drawLayer.setAttribute(ATTR.ui, '1');
-    document.documentElement.appendChild(drawLayer);
+    parent.appendChild(drawLayer);
   }
 
   function ensureDrawPinHost() {
-    if (drawPinHost && drawPinHost.isConnected) return;
+    const parent = getUiParent();
+    if (drawPinHost && drawPinHost.isConnected) {
+      if (drawPinHost.parentNode !== parent) {
+        parent.appendChild(drawPinHost);
+      }
+      return;
+    }
     drawPinHost = document.createElement('div');
     drawPinHost.className = 'bag-draw-pin-host';
     drawPinHost.setAttribute(ATTR.ui, '1');
-    document.documentElement.appendChild(drawPinHost);
+    parent.appendChild(drawPinHost);
   }
 
   // お描きのペア識別色(ユーザーが選んだ図形色)と通し番号。図形・引き出し線・番号バッジ・
@@ -3103,6 +3149,10 @@
     foot.append(toggle, actions);
 
     card.append(head, ta, foot);
+
+    card.addEventListener('keydown', (e) => e.stopPropagation());
+    card.addEventListener('keyup', (e) => e.stopPropagation());
+    card.addEventListener('keypress', (e) => e.stopPropagation());
 
     // 編集テキストは入力が止まったら保存する(過剰書き込みを抑える)。
     // 保存は storage 書き込み→(サイドパネル経由で)再描画要求につながるため、編集中の
@@ -3589,11 +3639,17 @@
   let outlineBoxes = []; // [{ target, box, kind }] kind: 'note'(保存済み) | 'pick'(選択中の一時枠)
 
   function ensureOutlineHost() {
-    if (outlineHost && outlineHost.isConnected) return outlineHost;
+    const parent = getUiParent();
+    if (outlineHost && outlineHost.isConnected) {
+      if (outlineHost.parentNode !== parent) {
+        parent.appendChild(outlineHost);
+      }
+      return outlineHost;
+    }
     outlineHost = document.createElement('div');
     outlineHost.className = 'bag-anno-outline-host';
     outlineHost.setAttribute(ATTR.ui, '1');
-    document.documentElement.appendChild(outlineHost);
+    parent.appendChild(outlineHost);
     return outlineHost;
   }
 
@@ -3805,7 +3861,13 @@
 
   // 操作パネル(左下)。お描きが2件以上の時だけ表示する。一度だけ生成しイベントを束ねる。
   function ensureWorkflowPanel() {
-    if (wfPanel && wfPanel.isConnected) return wfPanel;
+    const parent = getUiParent();
+    if (wfPanel && wfPanel.isConnected) {
+      if (wfPanel.parentNode !== parent) {
+        parent.appendChild(wfPanel);
+      }
+      return wfPanel;
+    }
     wfPanel = document.createElement('div');
     wfPanel.className = 'bag-wf-panel';
     wfPanel.setAttribute(ATTR.ui, '1');
@@ -3827,7 +3889,7 @@
       `<button type="button" class="bag-wf-btn" data-wf="next" title="${wfNext}" aria-label="${wfNext}">⏭</button>` +
       '<span class="bag-wf-step" data-wf="step"></span>' +
       '</div>';
-    document.documentElement.appendChild(wfPanel);
+    parent.appendChild(wfPanel);
     const q = (s) => wfPanel.querySelector(`[data-wf="${s}"]`);
     q('mode').addEventListener('change', (e) => {
       wfMode = e.target.checked;
@@ -4085,12 +4147,20 @@
         <button data-f="cancel" type="button">${escapeHtml(t('cs.author.cancel'))}</button>
         <button data-f="save" type="button" class="primary">${escapeHtml(t('cs.author.placeMemo'))}</button>
       </div>`;
-    document.documentElement.appendChild(wrap);
+    getUiParent().appendChild(wrap);
     const target = anchor ? resolveAnchor(anchor) : null;
     positionAuthoring(wrap, target);
     setupAuthoringDrag(wrap);
     authoringEl = wrap;
+
+    wrap.addEventListener('keydown', (e) => e.stopPropagation());
+    wrap.addEventListener('keyup', (e) => e.stopPropagation());
+    wrap.addEventListener('keypress', (e) => e.stopPropagation());
+
     if (draft.note) wrap.querySelector('[data-f="note"]').value = draft.note;
+    requestAnimationFrame(() => {
+      wrap.querySelector('[data-f="note"]')?.focus();
+    });
     wrap.querySelector('[data-f="cancel"]').addEventListener('click', closeAuthoring);
     wrap.querySelector('[data-f="save"]').addEventListener('click', async () => {
       const note = wrap.querySelector('[data-f="note"]').value.trim();
