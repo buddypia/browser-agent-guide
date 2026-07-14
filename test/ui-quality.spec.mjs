@@ -225,6 +225,29 @@ test.describe('UI quality gates', () => {
     await expectNoAxeViolations(page);
   });
 
+  test('side panel separates page notes from workflow actions', async ({ page }) => {
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+
+    await expect(page.locator('#btn-workspace-memo')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#memo-workspace')).toBeVisible();
+    await expect(page.locator('#workflow-workspace')).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Add note' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Record workflow' })).toBeHidden();
+
+    await page.locator('#btn-workspace-workflow').click();
+
+    await expect(page.locator('#btn-workspace-workflow')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#btn-workspace-memo')).toHaveAttribute('aria-selected', 'false');
+    await expect(page.locator('#workflow-workspace')).toBeVisible();
+    await expect(page.locator('#memo-workspace')).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Record workflow' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Add note' })).toBeHidden();
+
+    await page.locator('#btn-workspace-workflow').press('ArrowLeft');
+    await expect(page.locator('#btn-workspace-memo')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#btn-workspace-memo')).toBeFocused();
+  });
+
   test('side panel copies the current tab ID from the target chip', async ({ page }) => {
     await page.goto(pageUrl('sidepanel/sidepanel.html'));
 
