@@ -1522,6 +1522,9 @@ chrome.runtime.onMessage?.addListener?.((msg) => {
   if (msg?.type === 'WORKFLOW_AUTORUN_EVENT' && msg.text) {
     addMessage('assistant', msg.text);
   }
+  if (msg?.type === 'PAGE_FEEDBACK_CHANGED' && msg.reason === 'resolution_change') {
+    refreshAnnotations();
+  }
 });
 
 // 注釈は content 側で保存されるため、storage変化を監視して一覧を更新する。

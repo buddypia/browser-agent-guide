@@ -191,3 +191,70 @@ test('decodeBase64: png/webp/jpeg data URL と生 base64 を扱う / inlineFilen
   assert.equal(inlineFilename('image/jpeg'), 'shot.inline.jpg');
   assert.equal(inlineFilename('image/png'), null, '未対応 mime は null（書かない）');
 });
+
+test('WebSocket executeActions: broadcast, wait and resolve/reject', async () => {
+  // connect client
+  const client = new WebSocket(`${wsUrl}?token=${TOKEN}`);
+  await new Promise((resolve, reject) => {
+    client.once('open', resolve);
+    client.once('error', reject);
+  });
+
+  // Listen for 'run_actions' message from daemon
+  const receivedMsgPromise = new Promise((resolve) => {
+    client.on('message', (data) => {
+      const msg = JSON.parse(data.toString());
+      if (msg.type === 'run_actions') {
+        resolve(msg);
+      }
+    });
+  });
+
+  // Call wss.executeActions on daemon side (it should send message to client)
+  const executePromise = wss.executeActions({
+    actions: [{ verb: 'clickElement', args: { selector: 'button' } }],
+    urlContains: 'example.com'
+  });
+
+  const msgReceived = await receivedMsgPromise;
+  assert.equal(msgReceived.type, 'run_actions');
+  assert.equal(msgReceived.urlContains, 'example.com');
+  assert.ok(msgReceived.requestId);
+
+  // Send back mock result from client
+  client.send(JSON.stringify({
+    type: 'run_actions_result',
+    requestId: msgReceived.requestId,
+    ok: true,
+    results: [{ ok: true }]
+  }));
+
+  const res = await executePromise;
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.results, [{ ok: true }]);
+
+  // Test failure case
+  const executeFailPromise = wss.executeActions({
+    actions: [{ verb: 'clickElement', args: { selector: 'button' } }]
+  });
+
+  const msgReceived2 = await new Promise((resolve) => {
+    client.once('message', (data) => {
+      const msg = JSON.parse(data.toString());
+      if (msg.type === 'run_actions') {
+        resolve(msg);
+      }
+    });
+  });
+
+  client.send(JSON.stringify({
+    type: 'run_actions_result',
+    requestId: msgReceived2.requestId,
+    ok: false,
+    error: 'Element not found'
+  }));
+
+  await assert.rejects(executeFailPromise, /Element not found/);
+
+  client.close();
+});

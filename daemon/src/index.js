@@ -105,6 +105,7 @@ const server = createHttpServer({
   token,
   latestWindowMs,
   bridgeStatus: () => wssRef?.getBridgeStatus?.() || { connected: false, everConnected: false, lastConnectedAt: null, lastPushAt: null },
+  executeActions: (params) => wssRef?.executeActions?.(params),
 });
 const wss = attachWebSocketServer(server, {
   inboxDir: getInbox,

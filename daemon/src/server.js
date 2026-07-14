@@ -39,7 +39,7 @@ const IMAGE_GATE_SCHEMA = {
 
 // shotUrlFor(id, kind) は、ディスクパス非依存の loopback HTTP 取得先（/shot|/raw/<id>.png?token=…）を
 // 返すオプション関数。渡された時だけ context/image テキストに shot_url/raw_url を併走させる。
-export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFAULT_LATEST_WINDOW_MS, nowMs, bridgeStatus } = {}) {
+export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFAULT_LATEST_WINDOW_MS, nowMs, bridgeStatus, executeActions } = {}) {
   const entryStore = asEntryStore(entrySource);
   const currentNowMs = typeof nowMs === 'function' ? nowMs : () => (Number.isFinite(nowMs) ? nowMs : Date.now());
   const emptyMessage = (filters) => filterEmptyMessage(filters, bridgeStatus ? bridgeStatus() : null);
@@ -201,6 +201,38 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       return imageResult(entryStore, entry, shotUrlFor, { contextId, imageReason });
     }
   );
+
+  if (executeActions) {
+    server.registerTool(
+      'execute_actions',
+      {
+        title: 'アクションの実行',
+        description: '接続されたブラウザ拡張を介して、指定したタブでアクションを実行する。',
+        inputSchema: {
+          actions: z.array(z.object({
+            verb: z.string().describe('実行する動詞の名前'),
+            args: z.record(z.any()).optional().describe('動詞の引数'),
+            reason: z.string().optional().describe('実行する理由/目的'),
+          })).describe('実行するアクションの リスト'),
+          ...FILTER_SCHEMA,
+        },
+      },
+      async ({ actions, urlContains, titleContains, tabId, windowId }) => {
+        try {
+          const res = await executeActions({ actions, urlContains, titleContains, tabId, windowId });
+          return {
+            content: [{ type: 'text', text: JSON.stringify(res.results || res, null, 2) }],
+            isError: !res.ok,
+          };
+        } catch (err) {
+          return {
+            content: [{ type: 'text', text: `Error: ${err.message}` }],
+            isError: true,
+          };
+        }
+      }
+    );
+  }
 
   return server;
 }

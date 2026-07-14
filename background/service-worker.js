@@ -81,6 +81,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.aiAdvisorSettings) {
     settingsCache = null;
     i18nLoadedFor = null;
+    connectDaemonWebSocket().catch(() => {});
   }
 });
 
@@ -1248,3 +1249,130 @@ function buildMemoMarkdown({ data, composite, capturedAt, tab }) {
   lines.push('');
   return lines.join('\n');
 }
+
+// ---- WebSocket Bidirectional Relay to Daemon ----
+let daemonWs = null;
+let reconnectTimeout = null;
+
+async function findMatchingTab({ tabId, windowId, urlContains, titleContains }) {
+  let tabs = await chrome.tabs.query({});
+  if (tabId != null) {
+    tabs = tabs.filter(t => t.id === tabId);
+  }
+  if (windowId != null) {
+    tabs = tabs.filter(t => t.windowId === windowId);
+  }
+  if (urlContains) {
+    const lowerUrl = urlContains.toLowerCase();
+    tabs = tabs.filter(t => t.url && t.url.toLowerCase().includes(lowerUrl));
+  }
+  if (titleContains) {
+    const lowerTitle = titleContains.toLowerCase();
+    tabs = tabs.filter(t => t.title && t.title.toLowerCase().includes(lowerTitle));
+  }
+  if (tabs.length === 0) return null;
+  tabs.sort((a, b) => {
+    if (a.active && !b.active) return -1;
+    if (!a.active && b.active) return 1;
+    return 0;
+  });
+  return tabs[0].id;
+}
+
+async function connectDaemonWebSocket() {
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout);
+    reconnectTimeout = null;
+  }
+  if (daemonWs) {
+    try {
+      daemonWs.onclose = null;
+      daemonWs.onerror = null;
+      daemonWs.close();
+    } catch (e) {}
+    daemonWs = null;
+  }
+
+  const settings = await getSettings();
+  const daemon = settings.daemon || {};
+  if (!daemon.enabled || !daemon.url || !daemon.token) {
+    return;
+  }
+
+  const wsUrl = `${daemon.url}?token=${encodeURIComponent(daemon.token)}`;
+  try {
+    const ws = new WebSocket(wsUrl);
+    daemonWs = ws;
+
+    ws.onopen = () => {
+      console.log('[bag] daemon WS connected');
+    };
+
+    ws.onmessage = async (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch (e) {
+        return;
+      }
+
+      if (msg?.type === 'run_actions') {
+        const { requestId, tabId, windowId, urlContains, titleContains, actions, source } = msg;
+        try {
+          const targetTabId = await findMatchingTab({ tabId, windowId, urlContains, titleContains });
+          if (!targetTabId) {
+            throw new Error('No matching tab found for the specified filters.');
+          }
+          const res = await ensureContentAndSend(targetTabId, {
+            type: 'RUN_ACTIONS',
+            actions,
+            source: source || 'execute_actions'
+          });
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'run_actions_result',
+              requestId,
+              ok: true,
+              results: res?.results || []
+            }));
+          }
+        } catch (err) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'run_actions_result',
+              requestId,
+              ok: false,
+              error: err.message
+            }));
+          }
+        }
+      }
+    };
+
+    ws.onclose = () => {
+      console.log('[bag] daemon WS closed');
+      if (daemonWs === ws) {
+        daemonWs = null;
+        scheduleReconnect();
+      }
+    };
+
+    ws.onerror = (err) => {
+      console.warn('[bag] daemon WS error:', err);
+    };
+  } catch (e) {
+    console.warn('[bag] failed to initiate daemon WS:', e);
+    scheduleReconnect();
+  }
+}
+
+function scheduleReconnect() {
+  if (reconnectTimeout) return;
+  reconnectTimeout = setTimeout(() => {
+    reconnectTimeout = null;
+    connectDaemonWebSocket().catch(() => {});
+  }, 5000);
+}
+
+// Initial connection on startup/load
+connectDaemonWebSocket().catch(() => {});

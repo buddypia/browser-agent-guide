@@ -8,6 +8,20 @@
 
   // 仕込んだボタン等のクリック履歴(AIが後で読み取る手がかり)
   const signalLog = [];
+  // Listen for clipboard hook events
+  window.addEventListener('BAG_CLIPBOARD_WRITE', (e) => {
+    const expectedNonce = window.__BAG_NONCE__;
+    if (!expectedNonce || e.detail?.nonce !== expectedNonce) {
+      return;
+    }
+    const text = e.detail?.text || '';
+    signalLog.push({
+      aiId: 'clipboard',
+      intent: 'clipboard-write: ' + text,
+      text: text,
+      at: new Date().toISOString()
+    });
+  });
   // 同一ページ読込内でのレシピ二重適用を防ぐための署名
   let appliedRecipeSig = null;
 
@@ -1188,6 +1202,7 @@
   }
 
   async function loadAnnotations() {
+    resolutionCacheInitialized = false;
     try {
       const all = await chrome.storage.local.get(ANNO_KEY);
       const map = all[ANNO_KEY] || {};
@@ -1335,7 +1350,9 @@
   }
 
   function annoSummary(a) {
-    const t = a.anchor ? resolveAnchor(a.anchor) : null;
+    const cached = annotationResolutionMap.get(a.id);
+    const t = cached ? cached.target : (a.anchor ? resolveAnchor(a.anchor) : null);
+    const resolved = cached ? cached.resolved : (Boolean(t) || a.placement === 'floating');
     const drawing = a.kind === 'drawing';
     return {
       id: a.id,
@@ -1347,11 +1364,11 @@
       shapeText: drawing ? describeShapes(a.shapes) : '',
       // 補足/お描きは番号付きの手順。AI・人間にステップ順を伝えるための通し番号。
       step: a.kind === 'note' ? annoNoteNumber(a) : drawing ? annoDrawingNumber(a) : undefined,
-      // お描きメモは forAI 未設定の旧レコードを ON 扱いにして後方互換にする。
+      // お描きメモは forAI 未設定 of 旧レコードを ON 扱いにして後方互換にする。
       forAI: drawing ? memoForAI(a) : undefined,
       shapePreview: drawing ? buildShapePreview(a.shapes) : undefined,
       target: t ? truncate(labelOf(t), 50) : '',
-      resolved: Boolean(t) || a.placement === 'floating',
+      resolved,
     };
   }
 
@@ -1899,6 +1916,8 @@
   let memoComposing = false; // IME変換中(compositionstart〜end)
   let pendingMemoRender = false; // 編集中に保留した再描画があるか
   let lastRenderResult = { resolved: 0, total: 0 };
+  const annotationResolutionMap = new Map();
+  let resolutionCacheInitialized = false;
 
   // 「いまページ上のAIメモを実際に編集中か」。ページが実フォーカスを持ち、テキストエリアが
   // 操作対象、またはIME変換中の時だけ true。サイドパネル側にフォーカスがある時は false。
@@ -1947,9 +1966,20 @@
       // 参照中の drawLayer だけを空にするのではなく、DOM 上のレイヤごと掃除する。
       resetDrawingDom();
 
+      const prevResolvedMap = new Map();
+      if (resolutionCacheInitialized) {
+        for (const [id, val] of annotationResolutionMap.entries()) {
+          prevResolvedMap.set(id, val.resolved);
+        }
+      }
+      annotationResolutionMap.clear();
+
       let unresolved = 0;
       for (const a of annotations) {
         const target = a.anchor ? resolveAnchor(a.anchor) : null;
+        const resolved = Boolean(target) || a.placement === 'floating';
+        annotationResolutionMap.set(a.id, { resolved, target });
+
         if (!target && a.placement !== 'floating' && a.kind !== 'button') unresolved += 1;
         if (a.kind === 'marker') applyMarker(a, target);
         else if (a.kind === 'button') renderAnnoButton(a, target);
@@ -1969,6 +1999,23 @@
       lastUnresolved = unresolved;
       if (unresolved === 0) resolveAttempts = 0; // 全解決でリトライ枠を回復
       lastRenderResult = { resolved: annotations.length - unresolved, total: annotations.length };
+
+      if (resolutionCacheInitialized) {
+        let resolutionChanged = false;
+        for (const a of annotations) {
+          const prev = prevResolvedMap.get(a.id);
+          const curr = annotationResolutionMap.get(a.id)?.resolved;
+          if (prev !== undefined && prev !== curr) {
+            resolutionChanged = true;
+            break;
+          }
+        }
+        if (resolutionChanged) {
+          notifyPageFeedbackChanged('resolution_change');
+        }
+      }
+      resolutionCacheInitialized = true;
+
       return lastRenderResult;
     } finally {
       observeAnno();
