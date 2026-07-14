@@ -82,7 +82,51 @@
         <span id="target-tab-title" class="target-tab-title" data-i18n="targetTab.unknownTitle">No active tab</span>
         <div id="target-tab-meta" class="target-tab-meta"></div>
       </section>
-      <div class="toolbar">
+      <nav id="workspace-tabs" class="workspace-tabs" role="tablist" aria-label="Workspaces" data-i18n-aria-label="workspace.tabListLabel">
+        <button
+          id="btn-workspace-memo"
+          class="workspace-tab memo-tab"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="memo-workspace"
+          tabindex="0"
+          data-workspace="memo"
+        >
+          <span class="workspace-tab-main">
+            <svg class="workspace-tab-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15.5A2.5 2.5 0 0 0 16.5 16H5V5.5Z" />
+              <path d="M5 16v2.5A2.5 2.5 0 0 0 7.5 21H19" />
+            </svg>
+            <span data-i18n="workspace.memo">Page notes</span>
+            <span id="memo-workspace-count" class="workspace-count" aria-hidden="true" hidden></span>
+          </span>
+          <span class="workspace-tab-scope" data-i18n="workspace.memoScope">This page</span>
+        </button>
+        <button
+          id="btn-workspace-workflow"
+          class="workspace-tab workflow-tab"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="workflow-workspace"
+          tabindex="-1"
+          data-workspace="workflow"
+        >
+          <span class="workspace-tab-main">
+            <svg class="workspace-tab-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="6" cy="6" r="2.2" />
+              <circle cx="18" cy="18" r="2.2" />
+              <path d="M8 6h4a4 4 0 0 1 4 4v6" />
+              <path d="M16 18h-4a4 4 0 0 1-4-4V8" />
+            </svg>
+            <span data-i18n="workspace.workflow">Workflow</span>
+            <span id="workflow-workspace-count" class="workspace-count" aria-hidden="true" hidden></span>
+          </span>
+          <span class="workspace-tab-scope" data-i18n="workspace.workflowScope">Across pages</span>
+        </button>
+      </nav>
+      <div id="memo-workspace" class="toolbar workspace-panel" role="tabpanel" aria-labelledby="btn-workspace-memo">
         <div class="tool-group">
           <p class="tool-cap mark" data-i18n="toolbar.markGroup">Leave cues</p>
           <div class="quick-actions two" aria-label="Frequent actions" data-i18n-aria-label="quickActions.label">
@@ -142,7 +186,30 @@
           </div>
         </div>
         <div class="tool-group">
-          <p class="tool-cap workflow" data-i18n="toolbar.workflowGroup">Workflow</p>
+          <p class="tool-cap inspect" data-i18n="toolbar.inspectGroup">Inspect page</p>
+          <div class="quick-actions one" aria-label="Inspect page" data-i18n-aria-label="toolbar.inspectGroup">
+            <button
+              id="btn-affordances"
+              class="quick-action inspect"
+              type="button"
+              title="Inspect operable elements on this page"
+              aria-label="List elements"
+              data-i18n-title="actions.affordancesTitle"
+              data-i18n-aria-label="actions.affordancesAria"
+            >
+              <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9 6h11M9 12h11M9 18h11" />
+                <path d="M4 6h.01M4 12h.01M4 18h.01" />
+              </svg>
+              <span data-i18n="actions.affordances">List elements</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div id="workflow-workspace" class="toolbar workspace-panel" role="tabpanel" aria-labelledby="btn-workspace-workflow" hidden>
+        <div class="workflow-entry">
+          <p class="workflow-entry-title" data-i18n="workspace.workflowEntryTitle">Build a reusable workflow</p>
+          <p class="workflow-entry-hint" data-i18n="workspace.workflowEntryHint">Record notes across pages in URL order, then save or auto-run the steps.</p>
           <div class="quick-actions one" aria-label="Workflow" data-i18n-aria-label="toolbar.workflowGroup">
             <button
               id="btn-workflow"
@@ -160,26 +227,6 @@
               </svg>
               <span data-i18n="actions.workflow">Record workflow</span>
               <span id="workflow-count-badge" class="memo-count-badge" aria-hidden="true" hidden></span>
-            </button>
-          </div>
-        </div>
-        <div class="tool-group">
-          <p class="tool-cap inspect" data-i18n="toolbar.inspectGroup">Inspect page</p>
-          <div class="quick-actions one" aria-label="Inspect page" data-i18n-aria-label="toolbar.inspectGroup">
-            <button
-              id="btn-affordances"
-              class="quick-action inspect"
-              type="button"
-              title="Inspect operable elements on this page"
-              aria-label="List elements"
-              data-i18n-title="actions.affordancesTitle"
-              data-i18n-aria-label="actions.affordancesAria"
-            >
-              <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M9 6h11M9 12h11M9 18h11" />
-                <path d="M4 6h.01M4 12h.01M4 18h.01" />
-              </svg>
-              <span data-i18n="actions.affordances">List elements</span>
             </button>
           </div>
         </div>
