@@ -4468,6 +4468,12 @@
           return await deleteAnnotation(msg.id);
         case 'EXPORT_CONTEXT':
           return { text: buildContextText() };
+        case 'COLLECT_PAGE_FEEDBACK': {
+          // text-only(メモのみ)同期用: スクリーンショットを撮らないので UI 隠し
+          // (PREPARE/FINISH_CAPTURE)を経ずに送信対象だけを収集する。
+          await loadAnnotations();
+          return collectPageFeedbackData();
+        }
         case 'PREPARE_CAPTURE': {
           // capture 直前: 注釈を最新解決し、自前UIを一時的に隠す（二重描画回避）。
           // 図形は自前 px 計算で burn-in するので、隠しても座標計算には影響しない。

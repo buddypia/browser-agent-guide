@@ -149,8 +149,9 @@ export function attachWebSocketServer(httpServer, { inboxDir, entryStore, token,
         onSaved?.(saved);
         // パス非依存の取得先 URL を ack に併走させる（拡張サイドパネルがそのまま表示できる）。
         // token は URL に埋め込まない（取得時に ?token= を付与）。raw は payload にある時だけ広告する。
+        // text-only(メモのみ同期; image.shot なし) push には画像が存在しないので URL を広告しない。
         // 注: index.js では WS と画像配信ルートが同一 token を共有するので、この URL は ?token= 付与で必ず到達できる。
-        const urls = token && saved?.id
+        const urls = token && saved?.id && msg.image?.shot
           ? {
               shotUrl: imageUrlFor(host, saved.id, 'shot'),
               ...(msg.image?.raw ? { rawUrl: imageUrlFor(host, saved.id, 'raw') } : {}),

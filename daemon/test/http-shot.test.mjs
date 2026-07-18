@@ -191,9 +191,10 @@ async function get(base, path) {
   });
 }
 
-// ---- URL 併走（純関数）: shotUrlFor を渡した時だけ shot_url/raw_url が出る ----
-test('buildEntryContext: shotUrlFor 有りで urls、無しで null', () => {
-  const entry = { id: 'abc__def', dir: '/tmp/x', storage: 'disk' };
+// ---- URL 併走（純関数）: shotUrlFor を渡し、かつ画像がある時だけ shot_url/raw_url が出る ----
+test('buildEntryContext: shotUrlFor 有りで urls、無しで null。text-only は常に null', () => {
+  // shotBuffer で entryHasImage=true にする（text-only entry には 404 になる URL を広告しない仕様）。
+  const entry = { id: 'abc__def', dir: '/tmp/x', storage: 'disk', shotBuffer: Buffer.from([1]) };
   const shotUrlFor = (id, kind) => `http://127.0.0.1:8765/${kind}/${id}.png?token=t`;
   const withUrl = buildEntryContext(entry, { shotUrlFor });
   assert.equal(withUrl.urls.shot, 'http://127.0.0.1:8765/shot/abc__def.png?token=t');
@@ -203,4 +204,8 @@ test('buildEntryContext: shotUrlFor 有りで urls、無しで null', () => {
   const without = buildEntryContext(entry);
   assert.equal(without.urls, null);
   assert.ok(!buildEntryContextText(without).includes('shot_url:'));
+
+  const textOnly = buildEntryContext({ id: 'abc__def', dir: '/tmp/x', storage: 'disk' }, { shotUrlFor });
+  assert.equal(textOnly.urls, null, 'text-only(画像なし) entry は shotUrlFor が有っても URL を出さない');
+  assert.equal(textOnly.hasImage, false);
 });

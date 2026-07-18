@@ -16,12 +16,14 @@ code_refs:
   - { path: "content/content-script.js", symbol: "collectPageFeedbackData" }
   - { path: "lib/page-feedback/compositor.js", symbol: "drawShape" }
   - { path: "offscreen/offscreen.js", symbol: "drawImage" }
+  - { path: "background/service-worker.js", symbol: "pushTextOnlyPageFeedback" }
+  - { path: "daemon/src/inbox.js", symbol: "entryHasImage" }
 api_refs:
   - { name: "MCP: get_latest_feedback_context", spec: "daemon/src/server.js" }
   - { name: "MCP: get_latest_feedback_image", spec: "daemon/src/server.js" }
 db_refs: []
 related: ["entry-store", "affordance"]
-last_verified: 2026-07-10
+last_verified: 2026-07-18
 confidence: high
 ---
 
@@ -37,6 +39,19 @@ Canvas 2D で注釈を合成 → daemon が有効なら WS push、無効なら `
 対象要素の矩形を bbox にして吹き出し＋番号バッジだけを焼き込む。daemon push と autoSync は既定 OFF
 なので、メモ/お描きは**サイドパネルの「画像でAIへ送る」を押す**（または Options で daemon+autoSync を ON）
 まで inbox には届かない。
+
+## メモのみ同期（text-only; 画像なし entry）
+
+autoSync ON のとき、送信対象が**メモのみ（お描き図形なし）なら画像を撮らない**: SW の
+`pushTextOnlyPageFeedback` が content の `COLLECT_PAGE_FEEDBACK`（UI 隠しなし）で収集し、
+`image` キーなしの WS payload（annotation/memo のみ）を push する。スクリーンショット不要なので
+**タブ非アクティブでも送信できる**（お描きを含む時だけ従来どおり active タブ + burn-in 必須）。
+daemon 側は `annotation` があれば `image.shot` なしを受理し（`writer.js writeEntry` /
+`store.js createMemoryEntry` の共通受理境界）、`inbox.js` は shot.png か annotation.json を持つ
+dir を entry とみなす。text-only entry は `entryHasImage`=false で、context/image ツールとも
+「画像は最初から存在しない（image ツールを呼ばない）」案内を返し、shot_url/file_path を広告しない。
+ack にも shotUrl を載せない。MCP の空 inbox 応答は「『メモを残す』だけでは chrome.storage.local に
+留まり inbox に届かない」事実と復旧手順（送信 or 自動同期 ON）を全分岐で案内する（AI 勘違い防止）。
 
 `lib/page-feedback/compositor.js` は **Canvas-2D 専用**(SVG/foreignObject/Image/drawImage 禁止。
 `drawImage` は背景描画のため `offscreen.js` でのみ許可)。banned-token スキャンがビルドを守る。

@@ -47,7 +47,10 @@ export function inlineFilename(mime) {
  */
 export function writeEntry(inboxDir, payload, { now, id } = {}) {
   const shot = decodeBase64(payload?.image?.shot);
-  if (!shot || !shot.length) throw new Error('image.shot (base64 PNG) が必要です。');
+  const hasShot = Boolean(shot && shot.length);
+  // 画像なし(text-only=メモのみ同期)は annotation 必須。annotation.json が entry 判定の
+  // 根拠になる（inbox.js listEntries は shot.png か annotation.json を entry とみなす）。
+  if (!hasShot && !payload?.annotation) throw new Error('image.shot または annotation が必要です。');
   const capturedAt = payload?.capturedAt || payload?.annotation?.capturedAt || now || new Date().toISOString();
   // フォルダー名は {日時}__{ホスト}__{タイトル}__{ID}。url/title はペイロード(または annotation)から取る。
   const url = payload?.url || payload?.annotation?.url || '';
@@ -60,8 +63,10 @@ export function writeEntry(inboxDir, payload, { now, id } = {}) {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const files = [];
   try {
-    writeAtomic(dir, 'shot.png', shot);
-    files.push('shot.png');
+    if (hasShot) {
+      writeAtomic(dir, 'shot.png', shot);
+      files.push('shot.png');
+    }
     // MCP inline 専用のコンパクト変種（WebP/JPEG）。disk/hybrid で daemon 再起動後も
     // Claude Code に小さい inline を返せるよう shot.png の隣に永続する（フル解像度は shot.png のまま）。
     const inline = decodeBase64(payload?.image?.inline);
