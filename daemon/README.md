@@ -17,6 +17,11 @@
 
 受信・公開・画像取得は**同一ポート**に同居（HTTP は `/mcp`・`/shot|/raw`、WebSocket upgrade は `/ws`）。
 
+- **text-only（メモのみ同期; 画像なし）**: 拡張の autoSync がメモのみ（お描きなし）を検知した時は
+  スクリーンショットを撮らず、`image` キーなしの payload（`annotation`+`memo`）を push する。
+  daemon は `annotation` があればこれを受理し、その entry は shot.png を持たない（`shot_url`/`file_path`
+  を広告せず、context/image ツールとも「画像は最初から存在しない」と案内する。ack にも `shotUrl` なし）。
+
 > 拡張側の WS push は無効化も可能で、その場合は従来どおり `chrome.downloads` に保存される。
 
 ## 何をするか

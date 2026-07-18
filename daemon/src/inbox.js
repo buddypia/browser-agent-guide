@@ -125,7 +125,24 @@ export function resolveInboxDir(p) {
   return isAbsolute(p) ? p : resolve(process.cwd(), p);
 }
 
-// inbox 配下の <slug>/（shot.png を持つもの）を新しい順に列挙する。done/ は除外。
+// <slug>/ ディレクトリを entry として読む共通判定。shot.png（画像あり）または annotation.json
+// （text-only=メモのみ同期; 画像なし）を持つものだけを entry とみなす。shot が無い entry の
+// shot は ''（存在しないパスを広告しない）。entry でなければ null。
+function readEntryDirent(dir, id) {
+  const shot = join(dir, SHOT);
+  const hasShot = existsSync(shot);
+  const annotationPath = join(dir, ANNOTATION);
+  if (!hasShot && !existsSync(annotationPath)) return null;
+  let mtime = 0;
+  try {
+    mtime = statSync(hasShot ? shot : annotationPath).mtimeMs;
+  } catch {
+    /* stat 失敗は 0 のまま */
+  }
+  return { id, dir, shot: hasShot ? shot : '', mtime };
+}
+
+// inbox 配下の <slug>/（shot.png か annotation.json を持つもの）を新しい順に列挙する。done/ は除外。
 export function listEntries(inboxDir, limit = 20) {
   if (!inboxDir || !existsSync(inboxDir)) return [];
   let dirents;
@@ -137,16 +154,8 @@ export function listEntries(inboxDir, limit = 20) {
   const entries = [];
   for (const d of dirents) {
     if (!d.isDirectory() || d.name === 'done') continue;
-    const dir = join(inboxDir, d.name);
-    const shot = join(dir, SHOT);
-    if (!existsSync(shot)) continue;
-    let mtime = 0;
-    try {
-      mtime = statSync(shot).mtimeMs;
-    } catch {
-      /* stat 失敗は 0 のまま */
-    }
-    entries.push({ id: d.name, dir, shot, mtime });
+    const entry = readEntryDirent(join(inboxDir, d.name), d.name);
+    if (entry) entries.push(entry);
   }
   entries.sort((a, b) => b.mtime - a.mtime || (a.id < b.id ? 1 : -1));
   return entries.slice(0, Math.max(1, limit));
@@ -159,16 +168,7 @@ export function findEntry(inboxDir, id, scan = 500) {
   // in-flight な contextId / /shot/<id>.png で取り戻せるように）。latest/list は
   // 引き続き done/ を除外する（listEntries/queryEntries は素のまま）。
   if (!inboxDir || !id || /[\\/]/.test(id) || id === '.' || id === '..') return null;
-  const dir = join(inboxDir, 'done', id);
-  const shot = join(dir, SHOT);
-  if (!existsSync(shot)) return null;
-  let mtime = 0;
-  try {
-    mtime = statSync(shot).mtimeMs;
-  } catch {
-    /* stat 失敗は 0 のまま */
-  }
-  return { id, dir, shot, mtime };
+  return readEntryDirent(join(inboxDir, 'done', id), id);
 }
 
 // annotation の url/title/tab が一致するか（複数プロジェクト・同一URL複数タブの絞り込み）。
@@ -294,8 +294,9 @@ export function readAnnotation(dir) {
 export function buildEntryContent(entry, { includeImage = true, shotUrlFor } = {}) {
   const annotation = readEntryAnnotation(entry);
   const content = [];
+  const hasImage = entryHasImage(entry);
   let imageOmitted = false;
-  if (includeImage) {
+  if (includeImage && hasImage) {
     const picked = pickInlineImageBytes(entry);
     if (picked && picked.buffer.length <= INLINE_MAX_BYTES) {
       content.push({ type: 'image', data: picked.buffer.toString('base64'), mimeType: picked.mime });
@@ -303,9 +304,19 @@ export function buildEntryContent(entry, { includeImage = true, shotUrlFor } = {
       imageOmitted = true; // 予算超過 or バイト無し → image を omit（file_path/shot_url で代替）。
     }
   }
-  content.push({ type: 'text', text: buildEntryText(entry, annotation, { shotUrlFor, imageOmitted }) });
+  content.push({ type: 'text', text: buildEntryText(entry, annotation, { shotUrlFor, imageOmitted, hasImage }) });
   return content;
 }
+
+// @term: page-feedback  (用語定義: glossary/daemon/page-feedback.md。text-only=メモのみ同期 entry の判別)
+// entry が画像バイトを持つか。text-only(メモのみ同期) entry は shot.png/shotBuffer を持たず false。
+// memory entry は RAM の shotBuffer、disk/materialize 済み entry は shot.png の実在で判定する。
+export function entryHasImage(entry) {
+  if (!entry) return false;
+  if (entry.shotBuffer && entry.shotBuffer.length) return true;
+  return Boolean(entry.shot && existsSync(entry.shot));
+}
+// @endterm: page-feedback
 
 // MCP inline に使うバイト列を選ぶ。コンパクト inline 変種を優先し、無ければフル解像度 PNG。
 // 破損/読み取り失敗時はフル PNG にフォールバック（image 要求を失わない）。{buffer, mime} | null。
@@ -346,14 +357,17 @@ export function buildEntryContext(entry, { shotUrlFor } = {}) {
   const materialized = storage === 'memory' ? Boolean(entry.materialized) : true;
   const files = entryFiles(entry, materialized);
   const items = Array.isArray(annotation.items) ? annotation.items : [];
+  const hasImage = entryHasImage(entry);
   return {
     id: entry.id,
     entryDir: entry.dir,
     storage,
     materialized,
+    hasImage,
     files,
     // ディスクパス非依存の取得先（loopback HTTP）。ブラウザの DL 先と inbox がズレても届く。
-    urls: shotUrlFor ? { shot: shotUrlFor(entry.id, 'shot'), raw: shotUrlFor(entry.id, 'raw') } : null,
+    // text-only(メモのみ同期) entry は画像が存在しないので URL を広告しない（404 を掴ませない）。
+    urls: shotUrlFor && hasImage ? { shot: shotUrlFor(entry.id, 'shot'), raw: shotUrlFor(entry.id, 'raw') } : null,
     url: annotation.url || entry.url || '',
     title: annotation.title || entry.title || '',
     capturedAt: annotation.capturedAt || '',
@@ -399,8 +413,11 @@ export function buildEntryContextText(context) {
   lines.push(`id: ${context.id}`);
   lines.push(`entry_dir: ${context.entryDir}`);
   lines.push(`storage: ${context.storage}${context.materialized ? ' (materialized)' : ' (memory; image request will materialize file_path)'}`);
+  if (context.hasImage === false) {
+    lines.push('image: none（text-only=メモのみ同期。スクリーンショットは最初から存在しないので image ツールを呼ばない）');
+  }
   if (context.files.shot) lines.push(`shot_path: ${context.files.shot}`);
-  else lines.push('shot_path: (not materialized yet)');
+  else if (context.hasImage !== false) lines.push('shot_path: (not materialized yet)');
   if (context.files.raw) lines.push(`raw_path: ${context.files.raw}`);
   if (context.files.annotation) lines.push(`annotation_path: ${context.files.annotation}`);
   if (context.files.memo) lines.push(`memo_path: ${context.files.memo}`);
@@ -464,12 +481,21 @@ export function buildEntryContextText(context) {
     }
   }
   lines.push('');
-  lines.push(
-    'まず dataAgentId(@agent:) を最優先し、属性名込み rg でソースを探してください。' +
-      '次に selector / testid / anchorLabel / targetCandidates を使います。' +
-      'それでも曖昧、または見た目の判断が必要な時だけ contextId と imageReason を渡して ' +
-      'get_feedback_image / get_latest_feedback_image で image を取得してください。'
-  );
+  if (context.hasImage === false) {
+    lines.push(
+      'まず dataAgentId(@agent:) を最優先し、属性名込み rg でソースを探してください。' +
+        '次に selector / testid / anchorLabel / targetCandidates を使います。' +
+        'この entry は text-only（メモのみ同期）で画像は存在しません。image ツールは呼ばず、' +
+        '上の memo / html / selector が全てです。'
+    );
+  } else {
+    lines.push(
+      'まず dataAgentId(@agent:) を最優先し、属性名込み rg でソースを探してください。' +
+        '次に selector / testid / anchorLabel / targetCandidates を使います。' +
+        'それでも曖昧、または見た目の判断が必要な時だけ contextId と imageReason を渡して ' +
+        'get_feedback_image / get_latest_feedback_image で image を取得してください。'
+    );
+  }
   return lines.join('\n');
 }
 
@@ -519,22 +545,28 @@ function entryFiles(entry, materialized) {
 // image と並走させるテキスト。先頭に絶対パス、続いて指示一覧（selector/intent）。
 // imageOmitted=true の時は inline 画像が（トークン上限対策で）付かないので、file_path/shot_url の
 // フル解像度 PNG を Read(file_path)/view_image で開くよう案内し、末尾の指示文も切り替える。
-export function buildEntryText(entry, annotation, { shotUrlFor, imageOmitted = false } = {}) {
+export function buildEntryText(entry, annotation, { shotUrlFor, imageOmitted = false, hasImage = true } = {}) {
   const lines = [];
   // file_path は実ファイルがある時だけ出す。memory-first の image 応答で disk materialize に失敗した時は
   // 存在しないパスを広告せず、shot_url(?token=) を fallback として案内する（image バイトは別途メモリから返る）。
   const shotPath = entry?.shot && existsSync(entry.shot) ? entry.shot : '';
   if (shotPath) lines.push(`file_path: ${shotPath}`);
   // file_path を解決できない（inbox がブラウザ DL 先とズレた / 未materialize）時の代替取得先。取得には ?token= を付与する。
-  if (shotUrlFor) lines.push(`shot_url: ${shotUrlFor(entry.id, 'shot')}  (append ?token=<daemon token>)`);
-  if (imageOmitted) {
+  // text-only entry には画像が存在しないので URL を広告しない（404 を掴ませない）。
+  if (shotUrlFor && hasImage) lines.push(`shot_url: ${shotUrlFor(entry.id, 'shot')}  (append ?token=<daemon token>)`);
+  if (!hasImage) {
+    lines.push(
+      'note: この entry は text-only（メモのみ同期）で、スクリーンショットは最初から存在しません。' +
+        'image ツールを再度呼ばず、下の annotations（メモ本文と selector / html）で対象を特定してください。'
+    );
+  } else if (imageOmitted) {
     lines.push(
       'note: inline image omitted（フル解像度 PNG が MCP 出力トークン上限を超えるため）。' +
         'Claude Code は file_path を Read、Codex は view_image(file_path) でフル解像度を開いてください' +
         '（file_path が無ければ shot_url に ?token= を付けて取得）。'
     );
   }
-  if (!shotPath) {
+  if (hasImage && !shotPath) {
     lines.push('note: file_path は未materialize（disk 未書き込み）。上の inline image、無ければ shot_url に ?token= を付けて取得してください。');
   }
   if (annotation?.url) lines.push(`url: ${annotation.url}`);
@@ -569,7 +601,12 @@ export function buildEntryText(entry, annotation, { shotUrlFor, imageOmitted = f
     }
   }
   lines.push('');
-  if (imageOmitted) {
+  if (!hasImage) {
+    lines.push(
+      'この entry は画像なしの text-only（メモのみ同期）です。上の annotations（メモ本文・selector・html）が' +
+        '手がかりの全てなので、そのままソース特定に進んでください（image の再取得は不要かつ不可能）。'
+    );
+  } else if (imageOmitted) {
     lines.push(
       'inline image は付いていません（上の note 参照）。file_path / shot_url のフル解像度 PNG を開いて、' +
         '各注釈（画像中の丸数字①②…）を絵として確認してください。'
