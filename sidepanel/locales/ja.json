@@ -284,7 +284,7 @@
   "opt.daemon.h2": "ページフィードバック デーモン",
   "opt.daemon.intro": "「画像でAIへ送る」を、ダウンロード保存ではなく常駐デーモンへ <code>WebSocket</code> で直接送ります（有効時）。デーモンを起動し（<code>cd daemon &amp;&amp; npm start</code>）、起動時に表示される <code>token</code> を下に貼ってください。無効時や未到達時は従来どおり <code>chrome.downloads</code> に保存します。",
   "opt.daemon.enable": "デーモンへ送る（WebSocket push を有効化）",
-  "opt.daemon.autoSync": "手がかり画像を自動同期（送信ボタン不要）",
+  "opt.daemon.autoSync": "手がかりを自動同期（送信ボタン不要）",
   "opt.daemon.token": "トークン",
   "opt.daemon.tokenPlaceholder": "デーモン起動時に表示される token",
   "opt.daemon.test": "接続テスト",
