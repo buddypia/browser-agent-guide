@@ -23,6 +23,13 @@ const els = {
   targetTabMeta: document.getElementById('target-tab-meta'),
   btnCopyTabId: document.getElementById('btn-copy-tab-id'),
   targetTabIdValue: document.getElementById('target-tab-id-value'),
+  workspaceTabs: document.getElementById('workspace-tabs'),
+  btnWorkspaceMemo: document.getElementById('btn-workspace-memo'),
+  btnWorkspaceWorkflow: document.getElementById('btn-workspace-workflow'),
+  memoWorkspace: document.getElementById('memo-workspace'),
+  workflowWorkspace: document.getElementById('workflow-workspace'),
+  memoWorkspaceCount: document.getElementById('memo-workspace-count'),
+  workflowWorkspaceCount: document.getElementById('workflow-workspace-count'),
   annoPanel: document.getElementById('anno-panel'),
   annoList: document.getElementById('anno-list'),
   annoFoot: document.getElementById('anno-foot'),
@@ -67,6 +74,7 @@ let state = {
   url: '',
   title: '',
   pageKey: '',
+  workspace: 'memo',
   language: DEFAULT_LOCALE,
   history: [],
   promptHistory: [],
@@ -120,6 +128,48 @@ function applyI18n() {
   document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
     el.setAttribute('placeholder', t(el.dataset.i18nPlaceholder));
   });
+}
+
+const WORKSPACES = ['memo', 'workflow'];
+
+function applyWorkspaceVisibility() {
+  const memoActive = state.workspace === 'memo';
+  const workflowActive = state.workspace === 'workflow';
+  const hasWorkflow = Boolean(
+    state.workflow?.recording ||
+      state.workflow?.steps?.length ||
+      state.workflow?.saved?.length
+  );
+
+  if (els.btnWorkspaceMemo) {
+    els.btnWorkspaceMemo.setAttribute('aria-selected', String(memoActive));
+    els.btnWorkspaceMemo.tabIndex = memoActive ? 0 : -1;
+  }
+  if (els.btnWorkspaceWorkflow) {
+    els.btnWorkspaceWorkflow.setAttribute('aria-selected', String(workflowActive));
+    els.btnWorkspaceWorkflow.tabIndex = workflowActive ? 0 : -1;
+  }
+  if (els.memoWorkspace) els.memoWorkspace.hidden = !memoActive;
+  if (els.workflowWorkspace) els.workflowWorkspace.hidden = !workflowActive;
+  if (els.annoPanel) els.annoPanel.hidden = !memoActive || !state.annotations.length;
+  if (els.workflowPanel) els.workflowPanel.hidden = !workflowActive || !hasWorkflow;
+}
+
+function setWorkspace(workspace, { focus = false } = {}) {
+  const next = WORKSPACES.includes(workspace) ? workspace : 'memo';
+  state.workspace = next;
+  applyWorkspaceVisibility();
+  if (focus) {
+    const button = next === 'workflow' ? els.btnWorkspaceWorkflow : els.btnWorkspaceMemo;
+    button?.focus();
+  }
+}
+
+function handleWorkspaceKeydown(event) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const next = event.key === 'Home' || event.key === 'ArrowLeft' ? 'memo' : 'workflow';
+  setWorkspace(next, { focus: true });
 }
 
 function rerenderLocalizedContent() {
@@ -766,6 +816,10 @@ async function runVerb(verb, args) {
 }
 
 // ---- イベント ----
+els.btnWorkspaceMemo?.addEventListener('click', () => setWorkspace('memo'));
+els.btnWorkspaceWorkflow?.addEventListener('click', () => setWorkspace('workflow'));
+els.workspaceTabs?.addEventListener('keydown', handleWorkspaceKeydown);
+
 els.composer.addEventListener('submit', (e) => {
   e.preventDefault();
   const text = els.input.value;
@@ -825,6 +879,7 @@ els.btnCopyTabId.addEventListener('click', async () => {
 
 // 「メモを残す」: ページ上で要素をクリックしてメモを残すモードを開始。
 els.btnPick.addEventListener('click', async () => {
+  setWorkspace('memo');
   if (state.tabId == null) await refreshState();
   try {
     await send({ type: 'START_PICKER', tabId: state.tabId });
@@ -837,6 +892,7 @@ els.btnPick.addEventListener('click', async () => {
 
 // 「描いて伝える」: ページ上で円/四角/矢印/ペンを使って対象を示す描画モードを開始。
 els.btnDraw.addEventListener('click', async () => {
+  setWorkspace('memo');
   if (state.tabId == null) await refreshState();
   try {
     await send({ type: 'START_DRAWING', tabId: state.tabId });
@@ -850,6 +906,7 @@ els.btnDraw.addEventListener('click', async () => {
 // 「画像でAIへ」: 手がかりをスクリーンショットに焼き込み(burn-in)、画像ファイルとして
 // ダウンロード保存する。AIにはその shot.png を vision で見せる(テキスト変換ではなく絵を見る)。
 els.btnCapture.addEventListener('click', async () => {
+  setWorkspace('memo');
   if (state.tabId == null) await refreshState();
   if (els.btnCapture.disabled) return;
   els.btnCapture.disabled = true;
@@ -899,6 +956,7 @@ els.btnCapture.addEventListener('click', async () => {
 
 // 「AI用にコピー」: 別のAIチャットに貼れる決定的なページ説明を生成してコピー。
 els.btnContext.addEventListener('click', async () => {
+  setWorkspace('memo');
   if (state.tabId == null) await refreshState();
   try {
     const res = await send({ type: 'EXPORT_CONTEXT', tabId: state.tabId });
@@ -911,6 +969,7 @@ els.btnContext.addEventListener('click', async () => {
 });
 
 els.btnAffordances.addEventListener('click', async () => {
+  setWorkspace('memo');
   const r = await runVerb('listAffordances', {});
   if (r?.ok) {
     const list = r.result?.affordances || [];
@@ -984,6 +1043,10 @@ function rememberScopeLabel(scope) {
 }
 
 function updateMemoCountBadge(list) {
+  if (els.memoWorkspaceCount) {
+    els.memoWorkspaceCount.hidden = list.length === 0;
+    els.memoWorkspaceCount.textContent = list.length ? String(list.length) : '';
+  }
   const drawings = list.filter((a) => a.kind === 'drawing');
   const count = drawings.length;
   const sendCount = drawings.filter((a) => a.forAI !== false).length;
@@ -1015,10 +1078,9 @@ function renderAnnotationList(list) {
   els.annoList.innerHTML = '';
   updateMemoCountBadge(state.annotations);
   if (!state.annotations.length) {
-    els.annoPanel.hidden = true;
+    applyWorkspaceVisibility();
     return;
   }
-  els.annoPanel.hidden = false;
   const drawings = state.annotations.filter((a) => a.kind === 'drawing');
   if (drawings.length) renderSendTray(drawings);
 
@@ -1033,6 +1095,7 @@ function renderAnnotationList(list) {
     supporting.forEach((a) => group.appendChild(renderSupportAnnotationItem(a)));
     els.annoList.appendChild(group);
   }
+  applyWorkspaceVisibility();
 }
 
 function renderSendTray(drawings) {
@@ -1336,13 +1399,17 @@ function renderWorkflow(wf) {
   state.workflow = wf = normalizeWorkflow(wf);
   const stepCount = wf.steps.length;
 
+  if (els.workflowWorkspaceCount) {
+    els.workflowWorkspaceCount.hidden = stepCount === 0;
+    els.workflowWorkspaceCount.textContent = stepCount ? String(stepCount) : '';
+  }
+
   if (els.btnWorkflow) els.btnWorkflow.setAttribute('aria-pressed', wf.recording ? 'true' : 'false');
   if (els.workflowCountBadge) {
     els.workflowCountBadge.hidden = stepCount === 0;
     els.workflowCountBadge.textContent = stepCount ? String(stepCount) : '';
   }
 
-  if (els.workflowPanel) els.workflowPanel.hidden = !(wf.recording || stepCount > 0 || wf.saved.length > 0);
   if (els.workflowHint) els.workflowHint.hidden = !wf.recording;
   if (els.btnWorkflowSave) els.btnWorkflowSave.disabled = stepCount === 0;
   if (els.btnWorkflowClear) els.btnWorkflowClear.hidden = stepCount === 0;
@@ -1352,6 +1419,7 @@ function renderWorkflow(wf) {
     wf.steps.forEach((s, i) => els.workflowSteps.appendChild(renderWorkflowStep(s, i + 1)));
   }
   renderSavedWorkflows(wf.saved);
+  applyWorkspaceVisibility();
   // 手順数が変わると自動実行ボタンの可否も変わるので追従させる。
   renderWorkflowRun(state.workflowRun);
 }
@@ -1511,7 +1579,10 @@ async function toggleWorkflowAutoRun() {
   await send({ type: 'START_WORKFLOW_AUTORUN', tabId: state.tabId });
 }
 
-if (els.btnWorkflow) els.btnWorkflow.addEventListener('click', () => toggleWorkflowRecording().catch(() => {}));
+if (els.btnWorkflow) els.btnWorkflow.addEventListener('click', () => {
+  setWorkspace('workflow');
+  toggleWorkflowRecording().catch(() => {});
+});
 if (els.btnWorkflowSave) els.btnWorkflowSave.addEventListener('click', () => saveCurrentWorkflow().catch(() => {}));
 if (els.btnWorkflowClear) els.btnWorkflowClear.addEventListener('click', () => clearWorkflowSteps().catch(() => {}));
 if (els.btnWorkflowAutorun) els.btnWorkflowAutorun.addEventListener('click', () => toggleWorkflowAutoRun().catch(() => {}));
