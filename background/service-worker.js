@@ -830,15 +830,61 @@ async function runAutoPageFeedback(tabId) {
   } catch {
     return;
   }
-  // captureVisibleTab captures the active tab in a window, so skip if the annotated tab is no longer active.
-  if (!tab?.active) return;
 
   autoSyncInFlight.add(tabId);
   try {
+    // 送信対象を先に見て、お描き(図形)が無い＝メモのみなら text-only 同期にする。
+    // スクリーンショット不要なのでタブが非アクティブでも送れる（「メモを残しただけでは
+    // 届かない」問題の恒久解消経路）。お描きを含む時だけ画像 burn-in が必要になる。
+    const data = await ensureContentAndSend(tabId, { type: 'COLLECT_PAGE_FEEDBACK' }).catch(() => null);
+    const items = Array.isArray(data?.items) ? data.items : [];
+    if (items.length === 0) return;
+    const hasDrawing = items.some((it) => Array.isArray(it.shapesFrac) && it.shapesFrac.length > 0);
+    if (!hasDrawing) {
+      await pushTextOnlyPageFeedback({ tabId, tab, data });
+      return;
+    }
+    // captureVisibleTab captures the active tab in a window, so skip if the annotated tab is no longer active.
+    if (!tab?.active) return;
     await capturePageFeedback({ tabId, autoSync: true });
   } finally {
     autoSyncInFlight.delete(tabId);
   }
+}
+
+// メモのみ(お描きなし)の text-only 同期。画像を撮らず annotation.json/memo.md 相当だけを
+// daemon へ push する。daemon 未到達時は throw（自動同期は勝手なダウンロード保存をしない、
+// という既存 autoSync 方針と同じ）。呼び出し元は autoSync 経路のみ。
+async function pushTextOnlyPageFeedback({ tabId, tab, data }) {
+  const settings = await getSettings();
+  const daemon = settings.daemon || {};
+  if (!settings.pageFeedback?.autoSync || !daemon.enabled || !daemon.url || !daemon.token) {
+    return { transport: 'skipped', reason: 'auto-sync-disabled' };
+  }
+  const tabMeta = buildTabMetadata(tab || (await chrome.tabs.get(tabId)));
+  const capturedAt = new Date().toISOString();
+  const annotation = buildAnnotationJson({ data, composite: null, capturedAt, tab: tabMeta });
+  const memo = buildMemoMarkdown({ data, composite: null, capturedAt, tab: tabMeta });
+  const knownDownloadsDir = await getKnownDownloadsDir();
+  const ack = await pushToDaemon({
+    url: daemon.url,
+    token: daemon.token,
+    payload: {
+      type: 'page_feedback',
+      capturedAt,
+      url: data.url,
+      title: data.title,
+      tab: tabMeta,
+      dpr: data.dpr,
+      viewport: data.viewport,
+      downloadsDir: (daemon.saveDir || '').trim() || knownDownloadsDir || undefined,
+      // image なし = text-only。daemon 側は annotation.json だけの entry として保存し、
+      // MCP context ツールがそのまま返す（image ツールは「画像なし」を案内する）。
+      annotation,
+      memo,
+    },
+  });
+  return { transport: 'daemon', textOnly: true, dir: ack.dir, id: ack.id, items: data.items.length };
 }
 
 async function capturePageFeedback({ tabId, autoSync = false }) {
@@ -1149,24 +1195,27 @@ function buildAnnotationJson({ data, composite, capturedAt, tab }) {
     tab,
     dpr: data.dpr,
     viewport: data.viewport,
-    image: {
-      file: 'shot.png',
-      raw: 'raw.png',
-      width: composite.width,
-      height: composite.height,
-      downscaled: composite.downscaled,
-      outputScale: composite.outputScale,
-      // MCP inline 専用コンパクト変種のメタ（skim 用。daemon は実ファイル/RAM を直接見るので非 load-bearing）。
-      ...(composite.inlineDataUrl
-        ? {
-            inline: true,
-            inlineMime: composite.inlineMime,
-            inlineWidth: composite.inlineWidth,
-            inlineHeight: composite.inlineHeight,
-            inlineBytes: composite.inlineByteLength,
-          }
-        : {}),
-    },
+    // composite なし = text-only(メモのみ同期)。画像ファイルが存在しないので image: null。
+    image: composite
+      ? {
+          file: 'shot.png',
+          raw: 'raw.png',
+          width: composite.width,
+          height: composite.height,
+          downscaled: composite.downscaled,
+          outputScale: composite.outputScale,
+          // MCP inline 専用コンパクト変種のメタ（skim 用。daemon は実ファイル/RAM を直接見るので非 load-bearing）。
+          ...(composite.inlineDataUrl
+            ? {
+                inline: true,
+                inlineMime: composite.inlineMime,
+                inlineWidth: composite.inlineWidth,
+                inlineHeight: composite.inlineHeight,
+                inlineBytes: composite.inlineByteLength,
+              }
+            : {}),
+        }
+      : null,
     items: (data.items || []).map((it, i) => ({
       n: i + 1,
       id: it.id,
@@ -1215,15 +1264,20 @@ function buildMemoMarkdown({ data, composite, capturedAt, tab }) {
       })
     );
   }
-  lines.push(
-    t('memo.imageLine', {
-      width: composite.width,
-      height: composite.height,
-      dpr: data.dpr,
-      downscaled: composite.downscaled ? t('memo.downscaledYes') : t('memo.downscaledNo'),
-    })
-  );
-  lines.push(t('memo.rawImage'));
+  if (composite) {
+    lines.push(
+      t('memo.imageLine', {
+        width: composite.width,
+        height: composite.height,
+        dpr: data.dpr,
+        downscaled: composite.downscaled ? t('memo.downscaledYes') : t('memo.downscaledNo'),
+      })
+    );
+    lines.push(t('memo.rawImage'));
+  } else {
+    // text-only(メモのみ同期): スクリーンショットは存在しない。
+    lines.push(t('memo.textOnlyLine'));
+  }
   lines.push('');
   lines.push(t('memo.instructions'));
   (data.items || []).forEach((it, i) => {
@@ -1241,12 +1295,15 @@ function buildMemoMarkdown({ data, composite, capturedAt, tab }) {
     lines.push(`${n}. ${body}${purpose} — ${where}${targetInfo}${it.selector ? ` \`${it.selector}\`` : ''}${flagStr}`);
   });
   lines.push('');
-  lines.push(t('memo.legacyHeading'));
-  lines.push(t('memo.legacyNote'));
-  (data.items || []).forEach((it, i) => {
-    lines.push(`- ${i + 1}: ${it.shapeText}`);
-  });
-  lines.push('');
+  // 旧形式の図形説明はお描き(composite あり)の時だけ意味を持つ（メモのみでは shapeText が全て空）。
+  if (composite) {
+    lines.push(t('memo.legacyHeading'));
+    lines.push(t('memo.legacyNote'));
+    (data.items || []).forEach((it, i) => {
+      lines.push(`- ${i + 1}: ${it.shapeText}`);
+    });
+    lines.push('');
+  }
   return lines.join('\n');
 }
 

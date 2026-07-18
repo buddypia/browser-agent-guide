@@ -594,11 +594,14 @@ async function withBridgeStatusClient(bridgeStatus, fn) {
   }
 }
 
-test('list_feedback: bridgeStatus 無し(既定)は従来どおりの空メッセージ', async () => {
+test('list_feedback: bridgeStatus 無し(既定)の空メッセージにも「メモはブラウザ内に留まる」案内が付く', async () => {
   await withBridgeStatusClient(undefined, async (client) => {
     const res = await client.callTool({ name: 'list_feedback', arguments: {} });
     const text = res.content.find((c) => c.type === 'text').text;
-    assert.match(text, /^inbox は空です。ブラウザ拡張の「お描き／メモをAIへ」で保存してください。$/);
+    assert.match(text, /^inbox は空です。/);
+    // AI 勘違い防止: どの空分岐でも「保存しただけでは届かない」仕組みと復旧手順を案内する。
+    assert.ok(text.includes('chrome.storage.local'));
+    assert.ok(text.includes('自動同期'));
   });
 });
 

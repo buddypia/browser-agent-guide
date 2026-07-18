@@ -91,7 +91,8 @@ function createMemoryBackedStore({ inboxDir, mode, memoryLimit }) {
       const root = mode === 'memory' ? memoryMaterializeRoot() : entry.inboxDir || currentInbox();
       const written = writeEntry(root, entry.payload, { id: entry.id });
       entry.dir = written.dir;
-      entry.shot = join(written.dir, 'shot.png');
+      // text-only(メモのみ同期) entry は shot.png を持たない。存在しないパスを広告しない。
+      entry.shot = written.files.includes('shot.png') ? join(written.dir, 'shot.png') : '';
       entry.files = written.files;
       entry.materialized = true;
       return entry;
@@ -120,7 +121,9 @@ export function normalizeStorageMode(value) {
 
 function createMemoryEntry({ inboxDir, payload, now, taken }) {
   const shotBuffer = decodeBase64(payload?.image?.shot);
-  if (!shotBuffer || !shotBuffer.length) throw new Error('image.shot (base64 PNG) が必要です。');
+  const hasShot = Boolean(shotBuffer && shotBuffer.length);
+  // 画像なし(text-only=メモのみ同期)は annotation 必須（writer.js writeEntry と同じ受理境界）。
+  if (!hasShot && !payload?.annotation) throw new Error('image.shot または annotation が必要です。');
   // MCP inline 専用のコンパクト変種を RAM 保持する（memory は既定モード。これが無いと
   // materialize 前の image 要求でフル PNG にフォールバック→omit され、既定で inline が出なくなる）。
   const inlineBuffer = decodeBase64(payload?.image?.inline);
@@ -137,13 +140,13 @@ function createMemoryEntry({ inboxDir, payload, now, taken }) {
     id,
     inboxDir,
     dir,
-    shot: join(dir, 'shot.png'),
+    shot: hasShot ? join(dir, 'shot.png') : '',
     mtime: Date.now(),
     capturedAt,
     storage: 'memory',
     materialized: false,
     payload,
-    shotBuffer,
+    shotBuffer: hasShot ? shotBuffer : null,
     inlineBuffer: hasInline ? inlineBuffer : null,
     inlineMime: hasInline ? payload?.image?.inlineMime || null : null,
     annotation: payload?.annotation || null,

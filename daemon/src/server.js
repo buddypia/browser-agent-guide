@@ -52,7 +52,11 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
         '@agent: / selector / testid / anchorLabel と outerHTML / a11y を最優先で対象特定する（画像トークン不要）。' +
         '@agent: がある時は data-agent-id="@agent:" を属性名込みでソース検索し、画像を呼ばない。' +
         '曖昧または見た目の判断が必要な時だけ contextId と imageReason を渡して ' +
-        'get_latest_feedback_image / get_feedback_image を呼び、返ってきた image を絵として解釈する。',
+        'get_latest_feedback_image / get_feedback_image を呼び、返ってきた image を絵として解釈する。' +
+        'hasImage=false の entry は text-only（メモのみ同期）で画像が最初から存在しない — image ツールを呼ばない。' +
+        '重要: inbox が空でも「ユーザーのメモが存在しない」とは限らない。「メモを残す」だけでは拡張内の ' +
+        'chrome.storage.local に留まり inbox には届かない仕組みなので、空応答の案内文（送信操作 or 自動同期 ON）を' +
+        'そのままユーザーへ伝えること。',
     }
   );
 
@@ -423,6 +427,17 @@ function entryTimeMs(entry) {
 // フィルタ有無で空時メッセージを出し分ける（誤って別プロジェクトのを掴ませない案内）。
 // bridgeStatus（拡張の WS 橋渡し状態）が分かる時は、「拡張が一度も繋がっていない」と
 // 「繋がってはいるが何も送られていない」を区別し、次に取るべき具体的な手順を案内する。
+//
+// AI 勘違い防止（このプロダクトの #1 混乱源）: 「メモを残す」「お描き」を保存しただけでは
+// データは拡張内の chrome.storage.local に留まり、この inbox には届かない。空応答 = 「メモが
+// 存在しない」ではないので、どの分岐でもその仕組みと復旧手順（送信操作 or 自動同期 ON）を
+// AI がそのままユーザーへ伝えられる形で返す。
+const NOTE_STAYS_IN_BROWSER =
+  '注意: 「メモを残す」「お描き」を保存しただけではブラウザ拡張内（chrome.storage.local）に留まり、' +
+  'この inbox には届きません（inbox が空 ≠ メモが存在しない）。ユーザーに次のどちらかを案内してください: ' +
+  '(a) 対象ページのサイドパネルから送信する、' +
+  '(b) Options → ページフィードバック で「自動同期」を ON にする（メモのみなら画像なしで自動送信されます）。';
+
 function filterEmptyMessage({ urlContains, titleContains, tabId, windowId } = {}, bridgeStatus = null) {
   const cond = [
     urlContains && `url に「${urlContains}」`,
@@ -433,21 +448,24 @@ function filterEmptyMessage({ urlContains, titleContains, tabId, windowId } = {}
     .filter(Boolean)
     .join(' かつ ');
   if (cond) {
-    return `${cond} を含むフィードバックは見つかりません。条件を外すか、list_feedback で一覧を確認してください。`;
+    return (
+      `${cond} を含むフィードバックは見つかりません。条件を外すか、list_feedback で一覧を確認してください。\n` +
+      NOTE_STAYS_IN_BROWSER
+    );
   }
   if (bridgeStatus && !bridgeStatus.everConnected) {
     return (
       'inbox は空です。ブラウザ拡張がこの daemon にまだ一度も接続していません。' +
       '拡張の Options → 「ページフィードバック デーモン」で有効化・URL（ws://127.0.0.1:8765/ws 等）・' +
-      'トークン（daemon 起動時のログに表示、または ~/.bag-pf/token）を設定してください。'
+      'トークン（daemon 起動時のログに表示、または ~/.bag-pf/token）を設定してください。\n' +
+      NOTE_STAYS_IN_BROWSER
     );
   }
   if (bridgeStatus && bridgeStatus.everConnected && !bridgeStatus.lastPushAt) {
     return (
-      'inbox は空です。拡張は daemon に接続済みですが、まだメモ／お描きが送信されていません。' +
-      'ページで「メモを残す」または「お描き」を保存した後、サイドパネルの送信操作を行うか、' +
-      'Options → ページフィードバック で「自動同期」を有効にしてください。'
+      'inbox は空です。拡張は daemon に接続済みですが、まだメモ／お描きが送信されていません。\n' +
+      NOTE_STAYS_IN_BROWSER
     );
   }
-  return 'inbox は空です。ブラウザ拡張の「お描き／メモをAIへ」で保存してください。';
+  return `inbox は空です。\n${NOTE_STAYS_IN_BROWSER}`;
 }

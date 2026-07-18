@@ -96,11 +96,29 @@ test('トークン無しも拒否', async () => {
   await assert.rejects(() => sendOnce(wsUrl, { type: 'page_feedback', image: { shot: PNG_B64 } }));
 });
 
-test('image.shot 無しは error 応答（ファイルは作らない）', async () => {
+test('image.shot も annotation も無い空 push は error 応答（ファイルは作らない）', async () => {
   const before = listEntries(inboxDir, 50).length;
-  const res = await sendOnce(`${wsUrl}?token=${TOKEN}`, { type: 'page_feedback', annotation: {} });
+  const res = await sendOnce(`${wsUrl}?token=${TOKEN}`, { type: 'page_feedback', memo: '# only memo\n' });
   assert.equal(res.type, 'error');
   assert.equal(listEntries(inboxDir, 50).length, before, 'エントリは増えない');
+});
+
+test('text-only(メモのみ同期): image 無し + annotation ありは ack（shot.png 無し・shotUrl 広告なし）', async () => {
+  const ack = await sendOnce(`${wsUrl}?token=${TOKEN}`, {
+    type: 'page_feedback',
+    capturedAt: '2026-06-18T02:03:04.005Z',
+    url: 'https://example.com/text-only',
+    title: 'TextOnly',
+    annotation: { url: 'https://example.com/text-only', items: [{ n: 1, note: 'メモだけ' }] },
+    memo: '# memo only\n',
+  });
+  assert.equal(ack.type, 'ack');
+  assert.deepEqual(ack.files.sort(), ['annotation.json', 'memo.md']);
+  assert.equal(ack.shotUrl, undefined, 'text-only は存在しない画像の URL を広告しない');
+  assert.ok(!existsSync(join(ack.dir, 'shot.png')), 'shot.png を作らない');
+  const hit = listEntries(inboxDir, 50).find((e) => e.id === ack.id);
+  assert.ok(hit, 'annotation.json だけでも listEntries で見える');
+  assert.equal(hit.shot, '', 'shot パスは空文字列（存在しないパスを広告しない）');
 });
 
 test('writeEntry: slug 衝突時は -2 で別ディレクトリ', () => {
