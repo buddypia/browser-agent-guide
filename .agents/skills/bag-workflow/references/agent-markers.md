@@ -1,7 +1,7 @@
 # @agent: マーカー規約 (v1.1) と現状
 
 「どこを直すか」を機械的に一意特定するための、コード側の安定アンカー規約。
-出典: `agent-markers-convention.html` (multi-llm-debate ×2 合議で採択)。
+正典: `docs/agent-markers.md` (機械検証は `scripts/check-agent-markers.mjs` = `npm run check:markers`)。
 
 ## 付与状況 — 主要UIに付与済み、それ以外は未付与
 
