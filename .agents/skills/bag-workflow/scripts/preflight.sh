@@ -36,13 +36,10 @@ fi
 bag_resolve_source_branch   # mcp/mcp_conn/capture → source_branch(MCP > FILE > NONE)
 
 echo "── bag-workflow preflight ──────────────────────────────"
-echo "daemon   : $daemon        (healthz: $DAEMON_HEALTHZ)"
-echo "extension: connected=$ext_connected everConnected=$ext_ever_connected lastPush=$ext_last_push"
-echo "           (everConnected=false なら拡張の Options で daemon 有効化・URL・token 未設定の疑い)"
-echo "inbox    : $INBOX"
+bag_print_daemon_extension_inbox   # daemon/extension/inbox 行は preflight-common.sh に集約
 echo "capture  : $capture${latest:+   最新: $latest}"
 echo "mcp      : $mcp / $mcp_conn   (Claude Code の bag_page_feedback 登録。registered は設定登録の"
 echo "           意味のみ —— いまの会話セッション自身が ToolSearch でツールを見つけられる保証ではない)"
 echo "browser  : $browser_detail"
 echo "─────────────────────────────────────────────────────────"
-echo "STATUS daemon=$daemon ext_connected=$ext_connected ext_ever_connected=$ext_ever_connected mcp=$mcp mcp_conn=$mcp_conn capture=$capture browser=$browser source_branch=$source_branch inbox=$INBOX latest=${latest:-none}"
+echo "STATUS $(bag_status_common) browser=$browser source_branch=$source_branch inbox=$INBOX latest=${latest:-none}"
