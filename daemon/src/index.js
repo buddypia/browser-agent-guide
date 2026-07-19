@@ -64,7 +64,13 @@ function sweep(dir) {
 // 度に inbox 全体を同期スキャンし直す必要はなく、次の定期 timer sweep でも同じ stale entry を
 // 安全に退避できる。起動時 sweep / 定期 timer sweep / downloadsDir 採用時の sweep は対象外
 // （頻度が低く意図的なタイミングのため、スロットルせず常に実行する）。
-const PUSH_SWEEP_THROTTLE_MS = 5000;
+//
+// 不変条件 throttle ≤ grace: grace 窓内では rapid push の旧世代はどのみち保護されて archive されない
+// ので throttle は無害だが、grace を「抜けた直後」の push で旧世代を即退避するのが onSaved sweep の
+// 役割であり、throttle がそれを食ってはならない（grace より長い throttle は、grace 経過後に archive
+// 可能になった旧世代の即時退避を次の定期 sweep まで遅らせてしまう）。既定 grace(30分) ≫ 5秒なので
+// 通常はそのまま 5秒。grace を極端に短く設定した場合のみ grace に切り詰める。
+const PUSH_SWEEP_THROTTLE_MS = Math.min(5000, retentionPolicy.graceWindowMs);
 let lastPushSweepAt = 0;
 function sweepAfterPush(dir) {
   const now = Date.now();
