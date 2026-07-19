@@ -82,10 +82,7 @@ fi
 bag_resolve_source_branch   # mcp/mcp_conn/capture → source_branch(MCP > FILE > NONE)
 
 echo "── bag-memo preflight ──────────────────────────────────"
-echo "daemon   : $daemon        (healthz: $DAEMON_HEALTHZ)"
-echo "extension: connected=$ext_connected everConnected=$ext_ever_connected lastPush=$ext_last_push"
-echo "           (everConnected=false なら拡張の Options で daemon 有効化・URL・token 未設定の疑い)"
-echo "inbox    : $INBOX"
+bag_print_daemon_extension_inbox   # daemon/extension/inbox 行は preflight-common.sh に集約
 echo "capture  : $capture${latest:+   最新: $latest}"
 echo "           (storage=memory はファイル無し→no でも MCP で取得可)"
 echo "mcp      : $mcp / $mcp_conn   (bag_page_feedback。registered は設定登録の意味のみ ——"
@@ -96,4 +93,5 @@ echo "arg      : kind=$arg_kind  tabId=$scope_tabId  url=$scope_url  instruction
 echo "browser  : $browser   (ライブ確認は任意・副次)"
 echo "─────────────────────────────────────────────────────────"
 # 自由文字列フィールド(scope_url/url/instruction)は空白混入でもトークン境界が壊れないよう引用する。
-echo "STATUS daemon=$daemon ext_connected=$ext_connected ext_ever_connected=$ext_ever_connected mcp=$mcp mcp_conn=$mcp_conn capture=$capture source_branch=$source_branch arg_kind=$arg_kind scope_tabId=$scope_tabId windowId=$m_windowId scope_url=\"$scope_url\" url=\"$m_url\" inbox=$INBOX latest=${latest:-none} instruction=\"$instruction\""
+# 先頭6フィールドは bag_status_common(preflight-common.sh)を正本とし、以降に bag-memo 固有フィールドを足す。
+echo "STATUS $(bag_status_common) source_branch=$source_branch arg_kind=$arg_kind scope_tabId=$scope_tabId windowId=$m_windowId scope_url=\"$scope_url\" url=\"$m_url\" inbox=$INBOX latest=${latest:-none} instruction=\"$instruction\""

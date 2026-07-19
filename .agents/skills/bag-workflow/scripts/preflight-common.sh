@@ -117,3 +117,20 @@ bag_resolve_source_branch() {
     source_branch="NONE"
   fi
 }
+
+# 人間向けサマリの daemon/extension/inbox 行(両 preflight で byte-identical だった箇所)を印字する。
+# capture 行と mcp 行はスキル固有の注記を伴うため各 preflight.sh 側に残す。
+bag_print_daemon_extension_inbox() {
+  echo "daemon   : $daemon        (healthz: $DAEMON_HEALTHZ)"
+  echo "extension: connected=$ext_connected everConnected=$ext_ever_connected lastPush=$ext_last_push"
+  echo "           (everConnected=false なら拡張の Options で daemon 有効化・URL・token 未設定の疑い)"
+  echo "inbox    : $INBOX"
+}
+
+# STATUS 行の共通プレフィックス(両 preflight で byte-identical な先頭6フィールド)を末尾スペース無しで返す。
+# 呼び出し側は  echo "STATUS $(bag_status_common) <skill固有フィールド>"  の形で繋ぐ。
+# ここを唯一の正本にすることで、フィールド名/順序が2ファイル間でドリフトするのを防ぐ。
+bag_status_common() {
+  printf 'daemon=%s ext_connected=%s ext_ever_connected=%s mcp=%s mcp_conn=%s capture=%s' \
+    "$daemon" "$ext_connected" "$ext_ever_connected" "$mcp" "$mcp_conn" "$capture"
+}
