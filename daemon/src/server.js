@@ -55,7 +55,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
         'get_latest_feedback_image / get_feedback_image を呼び、返ってきた image を絵として解釈する。' +
         'hasImage=false の entry は text-only（メモのみ同期）で画像が最初から存在しない — image ツールを呼ばない。' +
         '重要: inbox が空でも「ユーザーのメモが存在しない」とは限らない。「メモを残す」だけでは拡張内の ' +
-        'chrome.storage.local に留まり inbox には届かない仕組みなので、空応答の案内文（送信操作 or 自動同期 ON）を' +
+        'chrome.storage.local に留まり inbox には届かない仕組みなので、空応答の案内文（デーモン有効化＝自動送信 or 手動送信）を' +
         'そのままユーザーへ伝えること。',
     }
   );
@@ -430,13 +430,13 @@ function entryTimeMs(entry) {
 //
 // AI 勘違い防止（このプロダクトの #1 混乱源）: 「メモを残す」「お描き」を保存しただけでは
 // データは拡張内の chrome.storage.local に留まり、この inbox には届かない。空応答 = 「メモが
-// 存在しない」ではないので、どの分岐でもその仕組みと復旧手順（送信操作 or 自動同期 ON）を
+// 存在しない」ではないので、どの分岐でもその仕組みと復旧手順（デーモン有効化＝自動送信 or 手動送信）を
 // AI がそのままユーザーへ伝えられる形で返す。
 const NOTE_STAYS_IN_BROWSER =
   '注意: 「メモを残す」「お描き」を保存しただけではブラウザ拡張内（chrome.storage.local）に留まり、' +
   'この inbox には届きません（inbox が空 ≠ メモが存在しない）。ユーザーに次のどちらかを案内してください: ' +
-  '(a) 対象ページのサイドパネルから送信する、' +
-  '(b) Options → ページフィードバック で「自動同期」を ON にする（メモのみなら画像なしで自動送信されます）。';
+  '(a) Options → ページフィードバック でデーモンを有効化する（有効化すると、本文のあるメモ／お描きは自動送信されます。メモのみなら画像なしで送信）、' +
+  '(b) すぐ送りたい／デーモンを使わない場合は、対象ページのサイドパネルの送信ボタンで手動送信する（デーモン未設定時はダウンロードに保存）。';
 
 function filterEmptyMessage({ urlContains, titleContains, tabId, windowId } = {}, bridgeStatus = null) {
   const cond = [
@@ -457,14 +457,16 @@ function filterEmptyMessage({ urlContains, titleContains, tabId, windowId } = {}
     return (
       'inbox は空です。ブラウザ拡張がこの daemon にまだ一度も接続していません。' +
       '拡張の Options → 「ページフィードバック デーモン」で有効化・URL（ws://127.0.0.1:8765/ws 等）・' +
-      'トークン（daemon 起動時のログに表示、または ~/.bag-pf/token）を設定してください。\n' +
+      'トークン（daemon 起動時のログに表示、または ~/.bag-pf/token）を設定してください' +
+      '（有効化すると、以後メモは自動でAIへ送信されます）。\n' +
       NOTE_STAYS_IN_BROWSER
     );
   }
   if (bridgeStatus && bridgeStatus.everConnected && !bridgeStatus.lastPushAt) {
     return (
-      'inbox は空です。拡張は daemon に接続済みですが、まだメモ／お描きが送信されていません。\n' +
-      NOTE_STAYS_IN_BROWSER
+      'inbox は空です。拡張は daemon に接続済みですが、まだメモ／お描きが送信されていません。' +
+      '自動送信は有効なので、本文のあるメモやお描きを残せば自動で届きます（メモのみは画像なしで送信）。' +
+      'すぐ送りたい場合は対象ページのサイドパネルの送信ボタンを使ってください。'
     );
   }
   return `inbox は空です。\n${NOTE_STAYS_IN_BROWSER}`;
