@@ -406,6 +406,35 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         self.assertIn("REVIEW.md: 未作成", audit.stdout)
         self.assertIn("mark-worktree-reviewed.mjs", audit.stdout)
 
+    def test_resolve_guard_root_from_unregistered_worktree_returns_main_root(self) -> None:
+        # Regression: a linked worktree created OUTSIDE the guard (raw `git worktree add`)
+        # has no owner marker. resolve_guard_root run from inside it must return the MAIN
+        # repo root (where the ledger lives), NOT the worktree's own toplevel — otherwise a
+        # guard command run from inside such a worktree resolves the ledger to the worktree's
+        # own .tmp and fails with "Ledger does not exist". (git-common-dir fix.)
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("awtg_guard", CLI.with_name("guard.py"))
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+
+        os.environ.pop("AGENT_WORKTREE_GUARD_ROOT", None)  # env override must not shadow the test
+        wt = self.repo / "wt-unreg"
+        subprocess.run(
+            ["git", "worktree", "add", "-b", "fix/unreg", str(wt)],
+            cwd=self.repo,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertFalse((wt / ".tmp" / ".agent_worktree_owner.json").exists())  # unregistered
+
+        # the fix: both git_main_root and resolve_guard_root land on the MAIN repo
+        self.assertEqual(guard.git_main_root(wt).resolve(), self.repo.resolve())
+        self.assertEqual(guard.resolve_guard_root(wt).resolve(), self.repo.resolve())
+        # sanity — the pre-fix path (git_root) returns the WORKTREE, proving the fix matters
+        self.assertEqual(guard.git_root(wt).resolve(), wt.resolve())
+
 
 if __name__ == "__main__":
     unittest.main()
