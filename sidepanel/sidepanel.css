@@ -629,6 +629,19 @@ textarea:focus-visible {
   padding: 2px 8px 10px;
 }
 
+.anno-autosync-hint {
+  margin: 0 0 6px;
+  padding: 0 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted, #6b7280);
+  text-align: center;
+}
+
+.anno-autosync-hint[hidden] {
+  display: none;
+}
+
 .anno-capture {
   display: flex;
   align-items: center;

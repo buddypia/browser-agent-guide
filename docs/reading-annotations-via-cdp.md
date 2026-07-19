@@ -4,8 +4,8 @@
 
 「メモを残す」(**Add note**) はページ上の要素にメモを付ける操作だが、保存先は拡張機能自身の
 `chrome.storage.local` (キー `aiAdvisorAnnotations`) **だけ**で、daemon/MCP には自動送信されない。
-daemon に届くのは、サイドパネルの「画像でAIへ送る」を明示的に押した時 (または Options の
-`daemon` + `pageFeedback.autoSync`、いずれも既定 OFF、を有効化している時) だけである。
+daemon に届くのは、サイドパネルの「画像でAIへ送る」を明示的に押した時 (または Options で
+`daemon` を有効化している時。既定 OFF。有効化すればメモは自動送信) だけである。
 
 そのため、メモを書いただけで capture 操作をしていない場合、`bag_page_feedback` の MCP ツールは
 「0件」を返す。メモはページ上には確かに残っているのに daemon 経由では見えない、という状態になる。

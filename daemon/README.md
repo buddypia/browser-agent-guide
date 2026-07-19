@@ -17,7 +17,7 @@
 
 受信・公開・画像取得は**同一ポート**に同居（HTTP は `/mcp`・`/shot|/raw`、WebSocket upgrade は `/ws`）。
 
-- **text-only（メモのみ同期; 画像なし）**: 拡張の autoSync がメモのみ（お描きなし）を検知した時は
+- **text-only（メモのみ同期; 画像なし）**: 拡張が（デーモン有効時に）メモのみ（お描きなし）を検知した時は
   スクリーンショットを撮らず、`image` キーなしの payload（`annotation`+`memo`）を push する。
   daemon は `annotation` があればこれを受理し、その entry は shot.png を持たない（`shot_url`/`file_path`
   を広告せず、context/image ツールとも「画像は最初から存在しない」と案内する。ack にも `shotUrl` なし）。
@@ -190,8 +190,8 @@ curl -s http://127.0.0.1:8765/healthz   # {"ok":true,"inboxDir":"...","imageRout
 「daemon は起きているが拡張がまだ一度も繋がっていない」（`everConnected:false`）と
 「繋がってはいるが何もメモ/お描きが送信されていない」（`everConnected:true` かつ
 `lastPushAt:null`）を区別できる。MCP ツールが inbox 空を返す時のメッセージにも
-この状態を反映し、次に取るべき具体的な手順（拡張 Options での daemon 有効化・
-自動同期の有効化・手動送信）を案内する。
+この状態を反映し、次に取るべき具体的な手順（拡張 Options での daemon 有効化＝自動送信・
+手動送信）を案内する。
 
 環境変数でも設定可: `BAG_PF_INBOX`, `BAG_PF_PORT`, `BAG_PF_HOST`, `BAG_PF_STORAGE`,
 `BAG_PF_RETENTION`(on/off), `BAG_PF_RETENTION_MAX_AGE`, `BAG_PF_RETENTION_MAX_PER_FAMILY`,
