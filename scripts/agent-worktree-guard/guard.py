@@ -80,6 +80,24 @@ def git_root(cwd: Path | None = None) -> Path:
     return Path(result.stdout.strip()).resolve()
 
 
+def git_main_root(cwd: Path | None = None) -> Path:
+    """Main worktree root, even when ``cwd`` is inside a linked worktree.
+
+    The guard ledger always lives under the MAIN worktree's ``.tmp/``. ``git_root``
+    (``rev-parse --show-toplevel``) returns the *linked worktree's* toplevel, so a
+    guard command run from inside an unregistered worktree would otherwise resolve
+    the ledger to that worktree's own ``.tmp/`` and fail ("Ledger does not exist").
+    ``--git-common-dir`` resolves to ``<main>/.git`` from anywhere; its parent is
+    the main root. Resolve relative to ``base`` so both the relative form
+    (``.git`` / ``../.git`` from a main subdir) and the absolute form (from a
+    linked worktree) land on the main root.
+    """
+    base = cwd or Path.cwd()
+    result = git(["rev-parse", "--git-common-dir"], base)
+    common = Path(result.stdout.strip())
+    return (base / common).resolve().parent
+
+
 def safe_session_id(value: str | None) -> str:
     raw = (value or "manual").strip() or "manual"
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._-")
@@ -134,14 +152,23 @@ def resolve_guard_root(cwd: Path | None = None) -> Path:
     if os.environ.get("AGENT_WORKTREE_GUARD_ROOT"):
         return Path(os.environ["AGENT_WORKTREE_GUARD_ROOT"]).expanduser().resolve()
 
-    root = git_root(cwd or Path.cwd())
+    base = cwd or Path.cwd()
+    root = git_root(base)
+    # A registered worktree carries an owner marker whose ledger_root points at the
+    # main repo — honor it (unchanged behavior).
     marker = root / OWNER_REL
     if marker.exists():
         data = read_json(marker, {})
         ledger_root = data.get("ledger_root")
         if ledger_root:
             return Path(ledger_root).expanduser().resolve()
-    return root
+    # No owner marker (e.g. an unregistered worktree, or auto-registration never
+    # fired). The ledger always lives under the MAIN worktree, never a linked one,
+    # so resolve to the main root via git-common-dir instead of returning `root`
+    # (the linked worktree's toplevel) — otherwise a guard command run from inside
+    # such a worktree looks for the ledger in the worktree's own `.tmp/` and fails
+    # with "Ledger does not exist". From the main checkout this equals `root`.
+    return git_main_root(base)
 
 
 def ledger_path(root: Path, session_id: str) -> Path:
