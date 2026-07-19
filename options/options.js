@@ -73,7 +73,6 @@ async function changeLanguage(nextLanguage) {
 function fillDaemonForm() {
   const d = settings.daemon || {};
   $('daemon-enabled').checked = Boolean(d.enabled);
-  $('pf-auto-sync').checked = Boolean(settings.pageFeedback?.autoSync);
   $('daemon-url').value = d.url || DEFAULT_SETTINGS.daemon.url;
   $('daemon-token').value = d.token || '';
   $('daemon-save-dir').value = d.saveDir || '';
@@ -86,10 +85,6 @@ async function saveDaemon() {
     url: $('daemon-url').value.trim() || DEFAULT_SETTINGS.daemon.url,
     token: $('daemon-token').value.trim(),
     saveDir: $('daemon-save-dir').value.trim(),
-  };
-  settings.pageFeedback = {
-    ...(settings.pageFeedback || {}),
-    autoSync: $('pf-auto-sync').checked,
   };
   await saveSettings(settings);
   setStatus('daemon-status', t('opt.status.saved'), true);

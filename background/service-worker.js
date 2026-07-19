@@ -3,7 +3,7 @@
 // - ページ有効化時にコンテンツスクリプトへ動詞レシピを適用
 // - サイドパネルからのチャットを受けて、文脈収集 → AI呼び出し → 動詞実行 を行う
 
-import { getSettings as readSettingsRaw, saveSettings as saveSettingsRaw } from '../lib/storage.js';
+import { getSettings as readSettingsRaw, saveSettings as saveSettingsRaw, isAutoSyncReady } from '../lib/storage.js';
 import { findMatchingRules } from '../lib/site-matcher.js';
 import { callAI } from '../lib/ai-client.js';
 import { buildSystemPrompt } from '../lib/prompt.js';
@@ -785,8 +785,7 @@ async function scheduleAutoPageFeedback({ tabId, sendCount } = {}) {
   }
 
   const settings = await getSettings();
-  const daemon = settings.daemon || {};
-  if (!settings.pageFeedback?.autoSync || !daemon.enabled || !daemon.url || !daemon.token) {
+  if (!isAutoSyncReady(settings)) {
     clearAutoSyncTimer(tabId);
     return { scheduled: false, reason: 'disabled' };
   }
@@ -852,13 +851,13 @@ async function runAutoPageFeedback(tabId) {
   }
 }
 
-// メモのみ(お描きなし)の text-only 同期。画像を撮らず annotation.json/memo.md 相当だけを
-// daemon へ push する。daemon 未到達時は throw（自動同期は勝手なダウンロード保存をしない、
-// という既存 autoSync 方針と同じ）。呼び出し元は autoSync 経路のみ。
+// メモのみ(お描きなし)の text-only 送信。画像を撮らず annotation.json/memo.md 相当だけを
+// daemon へ push する。daemon 未到達時は throw（自動送信は勝手なダウンロード保存をしない
+// という方針）。呼び出し元は自動送信経路のみ。
 async function pushTextOnlyPageFeedback({ tabId, tab, data }) {
   const settings = await getSettings();
   const daemon = settings.daemon || {};
-  if (!settings.pageFeedback?.autoSync || !daemon.enabled || !daemon.url || !daemon.token) {
+  if (!isAutoSyncReady(settings)) {
     return { transport: 'skipped', reason: 'auto-sync-disabled' };
   }
   const tabMeta = buildTabMetadata(tab || (await chrome.tabs.get(tabId)));
@@ -891,7 +890,7 @@ async function capturePageFeedback({ tabId, autoSync = false }) {
   if (tabId == null) throw new Error(t('errors.targetTabMissing'));
   const settings = await getSettings();
   const daemon = settings.daemon || {};
-  if (autoSync && (!settings.pageFeedback?.autoSync || !daemon.enabled || !daemon.url || !daemon.token)) {
+  if (autoSync && !isAutoSyncReady(settings)) {
     return { transport: 'skipped', reason: 'auto-sync-disabled' };
   }
   const tab = await chrome.tabs.get(tabId);

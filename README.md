@@ -109,8 +109,8 @@ instructions land precisely. Saved drawings (kind: **Drawing**) are editable/rem
 ### Recovering a note you forgot to send (advanced)
 
 **Add note** only saves to the extension's own `chrome.storage.local` (key `aiAdvisorAnnotations`) —
-it is **not** sent to the daemon/MCP until you press **Send image to AI** (or enable `daemon` +
-`pageFeedback.autoSync` in Options, both off by default). If you left a note and closed the tab
+it is **not** sent to the daemon/MCP until you press **Send image to AI** (or enable the `daemon` in
+Options — off by default; once enabled, notes are auto-sent). If you left a note and closed the tab
 before sending it, `scripts/read-annotations-cdp.mjs` reads it back directly from the browser via the
 Chrome DevTools Protocol — no daemon, no re-capture, no lost work:
 

@@ -242,6 +242,7 @@
       </div>
       <div id="anno-list" class="anno-list"></div>
       <div id="anno-foot" class="anno-foot" hidden>
+        <p id="anno-autosync-hint" class="anno-autosync-hint" hidden data-i18n="annotations.autoSyncHint">Memos are sent to AI automatically</p>
         <button
           id="btn-capture"
           data-agent-id="@agent:sidepanel.capture"
@@ -255,7 +256,7 @@
             <path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L19 6h0a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z" />
             <path d="M12 16a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" />
           </svg>
-          <span data-i18n="annotations.capture">Send tray as image to AI</span>
+          <span id="capture-label">Send tray as image to AI</span>
           <span id="capture-count" class="capture-count" aria-hidden="true"></span>
         </button>
       </div>

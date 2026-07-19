@@ -23,7 +23,7 @@ api_refs:
   - { name: "MCP: get_latest_feedback_image", spec: "daemon/src/server.js" }
 db_refs: []
 related: ["entry-store", "affordance"]
-last_verified: 2026-07-18
+last_verified: 2026-07-19
 confidence: high
 ---
 
@@ -36,13 +36,13 @@ Canvas 2D で注釈を合成 → daemon が有効なら WS push、無効なら `
 
 `collectPageFeedbackData`(content-script)が capture 対象を集める。対象は **お描き(`kind:'drawing'`)
 ＋ メモを残す(`kind:'note'`、本文ありのみ)** の2種（marker/button は対象外）。メモは図形を持たないので
-対象要素の矩形を bbox にして吹き出し＋番号バッジだけを焼き込む。daemon push と autoSync は既定 OFF
-なので、メモ/お描きは**サイドパネルの「画像でAIへ送る」を押す**（または Options で daemon+autoSync を ON）
-まで inbox には届かない。
+対象要素の矩形を bbox にして吹き出し＋番号バッジだけを焼き込む。daemon は既定 OFF で、daemon が
+無効な間はメモ/お描きは**サイドパネルの「画像でAIへ送る」を押す**まで inbox に届かない。daemon を
+有効化すると（旧 autoSync トグルは廃止し `daemon.enabled` に一本化）、本文ありメモは残すだけで自動送信される。
 
 ## メモのみ同期（text-only; 画像なし entry）
 
-autoSync ON のとき、送信対象が**メモのみ（お描き図形なし）なら画像を撮らない**: SW の
+daemon 有効時、送信対象が**メモのみ（お描き図形なし）なら画像を撮らない**: SW の
 `pushTextOnlyPageFeedback` が content の `COLLECT_PAGE_FEEDBACK`（UI 隠しなし）で収集し、
 `image` キーなしの WS payload（annotation/memo のみ）を push する。スクリーンショット不要なので
 **タブ非アクティブでも送信できる**（お描きを含む時だけ従来どおり active タブ + burn-in 必須）。
@@ -51,7 +51,7 @@ daemon 側は `annotation` があれば `image.shot` なしを受理し（`write
 dir を entry とみなす。text-only entry は `entryHasImage`=false で、context/image ツールとも
 「画像は最初から存在しない（image ツールを呼ばない）」案内を返し、shot_url/file_path を広告しない。
 ack にも shotUrl を載せない。MCP の空 inbox 応答は「『メモを残す』だけでは chrome.storage.local に
-留まり inbox に届かない」事実と復旧手順（送信 or 自動同期 ON）を全分岐で案内する（AI 勘違い防止）。
+留まり inbox に届かない」事実と復旧手順（daemon 有効化＝自動送信 or 手動送信）を全分岐で案内する（AI 勘違い防止）。
 
 `lib/page-feedback/compositor.js` は **Canvas-2D 専用**(SVG/foreignObject/Image/drawImage 禁止。
 `drawImage` は背景描画のため `offscreen.js` でのみ許可)。banned-token スキャンがビルドを守る。

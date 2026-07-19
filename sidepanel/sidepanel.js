@@ -1,4 +1,4 @@
-import { getSettings, patchSettings } from '../lib/storage.js';
+import { getSettings, patchSettings, isAutoSyncReady } from '../lib/storage.js';
 import { WORKFLOW_KEY, RUN_KEY, normalizeWorkflow, normalizeRun } from '../lib/workflow.js';
 import { createI18n, DEFAULT_LOCALE, LANGUAGE_OPTIONS, languageName, localeToIntl, normalizeLocale, resolveLocale } from './i18n.js';
 
@@ -34,7 +34,9 @@ const els = {
   annoList: document.getElementById('anno-list'),
   annoFoot: document.getElementById('anno-foot'),
   btnCapture: document.getElementById('btn-capture'),
+  captureLabel: document.getElementById('capture-label'),
   captureCount: document.getElementById('capture-count'),
+  annoAutoSyncHint: document.getElementById('anno-autosync-hint'),
   btnAnnoRefresh: document.getElementById('btn-anno-refresh'),
   memoCountBadge: document.getElementById('memo-count-badge'),
   promptHistoryPanel: document.getElementById('prompt-history-panel'),
@@ -89,6 +91,9 @@ let state = {
   // メモ(picker)/描画(drawing)モードがページ側で有効か。両モードは content 側で
   // 排他なので 1 フラグで扱い、サイドパネルにフォーカスがある状態の ESC を拾うために使う。
   pickerActive: false,
+  // daemon 有効(enabled+url+token)か。メモのみを残した時に「自動送信されます」補助表示を
+  // 出すかの判定に使う。init と設定変更購読(handleSettingsChanged)で更新する。
+  daemonReady: false,
 };
 
 let copyTabIdResetTimer = null;
@@ -210,12 +215,15 @@ async function changeLanguage(nextLanguage) {
 
 async function handleSettingsChanged(settings) {
   if (!i18n) return;
+  state.daemonReady = isAutoSyncReady(settings);
   const nextLanguage = resolveLocale(settings?.ui?.language);
   if (nextLanguage !== state.language) {
     await i18n.setLocale(nextLanguage);
     state.language = i18n.locale;
     rerenderLocalizedContent();
   }
+  // daemon 有効/無効の切替でフッタの自動送信表示を追従させる（言語不変でも再描画）。
+  updateMemoCountBadge(state.annotations);
   await refreshState();
 }
 
@@ -1068,9 +1076,21 @@ function updateMemoCountBadge(list) {
     (a) => a.kind === 'note' && String(a.note || '').trim() && a.forAI !== false
   ).length;
   const totalSend = sendCount + noteSendCount;
-  // ページ手がかりを画像化するCTA。送る対象（お描き or メモ）が無ければ出さない。
+  const hasDrawing = sendCount > 0;
+  const noteOnly = !hasDrawing && noteSendCount > 0;
+  // 送信フッタ: 送る対象（お描き or メモ）が無ければ出さない。
   if (els.annoFoot) els.annoFoot.hidden = totalSend === 0;
   if (els.captureCount) els.captureCount.textContent = totalSend > 0 ? String(totalSend) : '';
+  // ラベルを文脈適応。お描きがある時は画像へ焼き込んで送るが、メモのみは画像を撮らないので
+  // 「画像で」の語を外す（annotations.capture=画像でAIへ送る / captureNoteOnly=AIへ送る）。
+  if (els.captureLabel) {
+    els.captureLabel.textContent = hasDrawing ? t('annotations.capture') : t('annotations.captureNoteOnly');
+  }
+  // daemon 有効 & メモのみ = 残すだけで自動送信される。手動ボタンは「今すぐ送る」用に残しつつ、
+  // 自動送信される旨を補助表示する（daemon 無効時やお描きがある時は出さない）。
+  if (els.annoAutoSyncHint) {
+    els.annoAutoSyncHint.hidden = !(noteOnly && state.daemonReady);
+  }
 }
 
 function renderAnnotationList(list) {
@@ -1630,6 +1650,7 @@ async function init() {
   const settings = await getSettings().catch(() => ({ ui: { language: '' } }));
   i18n = await createI18n(resolveLocale(settings.ui?.language));
   state.language = i18n.locale;
+  state.daemonReady = isAutoSyncReady(settings);
   renderLanguageOptions();
   applyI18n();
   // ローカライズ済みの空ヒントを即描画し、入力も即フォーカスして、開いた瞬間に
