@@ -262,7 +262,7 @@ export function renderTemplate(opts = {}) {
     '',
     '### 承認後の Cleanup 手順 / Post-approval cleanup',
     '> 「進行」承認 + ship 完了後にこの順で後始末する（参考・固定手順）。',
-    '1. `gh pr merge --squash` で PR を merge（`--delete-branch` を付ければ remote も即削除）。',
+    '1. `gh pr merge --squash` で PR を merge。**worktree からは `--delete-branch` を付けない** —— main が別 worktree で使用中だとマージ後のローカル checkout が "failed to run git" で失敗し（exit 0 でもリモートは未削除・マージ自体は成功）、AI がマージ失敗と誤認しうる。リモートブランチ削除は次の cleanup が行う。',
     '2. `agent-worktree-guard cleanup --confirmed` を実行 — 次を一括で片付ける:',
     '   - [ ] ローカル worktree 削除（`git worktree remove`）',
     '   - [ ] ローカルブランチ削除（`git branch -D`、`main`/`master` は除外）',
