@@ -215,6 +215,8 @@ async function handleMessage(msg, sender) {
       return ensureContentAndSend(msg.tabId, { type: 'REMOVE_ANNOTATION', id: msg.id });
     case 'EXPORT_CONTEXT':
       return ensureContentAndSend(msg.tabId, { type: 'EXPORT_CONTEXT' });
+    case 'DOWNLOAD_CHAT':
+      return downloadChatHistory({ markdown: msg.markdown, filename: msg.filename });
     case 'CAPTURE_PAGE_FEEDBACK':
       return capturePageFeedback({ tabId: msg.tabId });
     case 'PAGE_FEEDBACK_CHANGED':
@@ -1162,6 +1164,15 @@ async function sendToOffscreen(message, retried = false) {
 
 async function saveDownload(filename, url) {
   return chrome.downloads.download({ url, filename, saveAs: false, conflictAction: 'uniquify' });
+}
+
+// サイドパネルからのチャット履歴ダウンロード委譲。特権 API(chrome.downloads)は
+// SW 側でのみ実行する(AGENTS.md の設計境界)。saveAs:true で保存先を確認させる。
+async function downloadChatHistory({ markdown, filename }) {
+  const url = textToDataUrl(String(markdown ?? ''), 'text/markdown');
+  const safeName = typeof filename === 'string' && filename ? filename : 'chat.md';
+  const downloadId = await chrome.downloads.download({ url, filename: safeName, saveAs: true });
+  return { downloadId };
 }
 
 // UTF-8 を安全に base64 data URL 化する（日本語メモ対応）。

@@ -1020,7 +1020,14 @@ textarea:focus-visible {
   color: var(--muted);
 }
 
-.msg-delete {
+.msg-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.msg-delete,
+.msg-copy {
   display: inline-grid;
   place-items: center;
   width: 28px;
@@ -1034,7 +1041,10 @@ textarea:focus-visible {
 }
 
 .msg:focus-within .msg-delete,
-.msg:hover .msg-delete {
+.msg:hover .msg-delete,
+.msg:focus-within .msg-delete,
+.msg:hover .msg-copy,
+.msg:focus-within .msg-copy {
   opacity: 1;
 }
 
@@ -1043,12 +1053,19 @@ textarea:focus-visible {
   color: #fca5a5;
 }
 
-.msg-delete:disabled {
+.msg-copy:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.msg-delete:disabled,
+.msg-copy:disabled {
   cursor: default;
   opacity: 0.35;
 }
 
-.msg-delete .action-icon {
+.msg-delete .action-icon,
+.msg-copy .action-icon {
   width: 15px;
   height: 15px;
 }
