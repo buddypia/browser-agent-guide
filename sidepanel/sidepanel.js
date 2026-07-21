@@ -43,6 +43,7 @@ const els = {
   promptHistoryList: document.getElementById('prompt-history-list'),
   btnHistoryClear: document.getElementById('btn-history-clear'),
   btnClearChat: document.getElementById('btn-clear-chat'),
+  btnDownloadChat: document.getElementById('btn-download-chat'),
   btnWorkflow: document.getElementById('btn-workflow'),
   workflowCountBadge: document.getElementById('workflow-count-badge'),
   workflowPanel: document.getElementById('workflow-panel'),
@@ -491,6 +492,7 @@ async function clearPromptHistory() {
 }
 
 function renderChatHistory() {
+  updateDownloadAvailability();
   if (!state.history.length) {
     // 空状態: 同一言語のリッチな空ヒントが既に描画済みなら作り直さない。
     // init の即時描画 → 履歴ロード(空)で同じ空状態が二度描かれるときの
@@ -635,7 +637,13 @@ function addMessage(role, content, options = {}) {
   roleEl.className = 'role';
   roleEl.textContent = roleLabel(role);
   head.appendChild(roleEl);
+
+  const headActions = document.createElement('div');
+  headActions.className = 'msg-head-actions';
+  head.appendChild(headActions);
+
   wrap.appendChild(head);
+  setMessageCopyButton(wrap, content);
   setMessageDeleteButton(wrap, options.messageIndex);
 
   const bubble = document.createElement('div');
@@ -654,10 +662,10 @@ function roleLabel(role) {
 }
 
 function setMessageDeleteButton(wrap, messageIndex) {
-  const head = wrap?.querySelector('.msg-head');
-  if (!head || !Number.isInteger(messageIndex) || messageIndex < 0) return;
-  head.querySelector('.msg-delete')?.remove();
-  head.appendChild(buildMessageDeleteButton(messageIndex));
+  const actions = wrap?.querySelector('.msg-head-actions');
+  if (!actions || !Number.isInteger(messageIndex) || messageIndex < 0) return;
+  actions.querySelector('.msg-delete')?.remove();
+  actions.appendChild(buildMessageDeleteButton(messageIndex));
 }
 
 function buildMessageDeleteButton(messageIndex) {
@@ -675,6 +683,48 @@ function buildMessageDeleteButton(messageIndex) {
       <path d="M10 11v5M14 11v5" />
     </svg>`;
   btn.addEventListener('click', () => deleteChatTurn(messageIndex));
+  return btn;
+}
+
+function setMessageCopyButton(wrap, content) {
+  const actions = wrap?.querySelector('.msg-head-actions');
+  if (!actions) return;
+  actions.querySelector('.msg-copy')?.remove();
+  actions.appendChild(buildMessageCopyButton(content));
+}
+
+function buildMessageCopyButton(content) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'msg-copy';
+  btn.title = t('chat.copyMessageTitle');
+  btn.setAttribute('aria-label', t('chat.copyMessageAria'));
+  btn.disabled = state.busy;
+  btn.innerHTML = `
+    <svg class="action-icon copy-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+    <svg class="action-icon copied-icon" viewBox="0 0 24 24" aria-hidden="true" style="display:none; stroke:var(--ok)">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>`;
+  btn.addEventListener('click', async () => {
+    try {
+      await copyTextToClipboard(content);
+      const copyIcon = btn.querySelector('.copy-icon');
+      const copiedIcon = btn.querySelector('.copied-icon');
+      if (copyIcon && copiedIcon) {
+        copyIcon.style.display = 'none';
+        copiedIcon.style.display = 'inline-block';
+        setTimeout(() => {
+          copyIcon.style.display = 'inline-block';
+          copiedIcon.style.display = 'none';
+        }, 1500);
+      }
+    } catch (e) {
+      console.error('Failed to copy message:', e);
+    }
+  });
   return btn;
 }
 
@@ -805,7 +855,11 @@ function setBusy(b) {
   els.send.disabled = b;
   els.input.disabled = b;
   els.btnClearChat.disabled = b;
+  updateDownloadAvailability();
   document.querySelectorAll('.msg-delete').forEach((btn) => {
+    btn.disabled = b;
+  });
+  document.querySelectorAll('.msg-copy').forEach((btn) => {
     btn.disabled = b;
   });
   if (!b) els.input.focus();
@@ -1016,6 +1070,9 @@ els.btnHistoryClear.addEventListener('click', clearPromptHistory);
 els.btnClearChat.addEventListener('click', () => {
   clearChat();
 });
+els.btnDownloadChat.addEventListener('click', () => {
+  downloadChat();
+});
 
 async function clearChat() {
   if (state.busy) return;
@@ -1025,6 +1082,77 @@ async function clearChat() {
   renderChatHistory();
   els.input.value = '';
   els.input.focus();
+}
+
+async function downloadChat() {
+  // \u7a7a\u5c65\u6b74/\u9001\u4fe1\u4e2d\u306f\u30dc\u30bf\u30f3\u3092 disabled \u5316\u3057\u3066\u5230\u9054\u3055\u305b\u306a\u3044(updateDownloadAvailability)\u3002
+  // \u3053\u3053\u3078\u6765\u305f\u5834\u5408\u306f\u7121\u5bb3\u306b\u63e1\u308a\u3064\u3076\u3059 \u2014 \u30e2\u30fc\u30c0\u30eb(alert)\u306f\u4ed6\u306e\u60c5\u5831\u901a\u77e5\u3068\u4e0d\u6574\u5408\u306a\u305f\u3081\u4f7f\u308f\u306a\u3044\u3002
+  if (state.busy || !state.history?.length) return;
+  try {
+    const mdText = formatChatHistoryToMarkdown();
+    const filename = buildChatDownloadFilename();
+
+    if (chrome?.runtime?.id) {
+      // \u7279\u6a29 API(chrome.downloads)\u306f service worker \u5074\u3067\u5b9f\u884c\u3059\u308b(AGENTS.md \u306e\u8a2d\u8a08\u5883\u754c)\u3002
+      await send({ type: 'DOWNLOAD_CHAT', markdown: mdText, filename });
+    } else {
+      // \u62e1\u5f35\u5916(dev/test)\u3067\u306f\u30a2\u30f3\u30ab\u30fc\u3067\u30d5\u30a9\u30fc\u30eb\u30d0\u30c3\u30af\u3059\u308b\u3002
+      const dataUrl = textToDataUrl(mdText, 'text/markdown');
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+  } catch (e) {
+    addMessage('error', t('errors.downloadFailed', { message: e.message }));
+  }
+}
+
+// \u65e5\u4ed8\u3068\u30da\u30fc\u30b8\u30bf\u30a4\u30c8\u30eb\u304b\u3089\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u30d5\u30a1\u30a4\u30eb\u540d\u3092\u7d44\u307f\u7acb\u3066\u308b\u3002
+function buildChatDownloadFilename() {
+  const sanitize = (s) => s.replace(/[^a-zA-Z0-9_\u4e00-\u9faf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7a3-]/g, '_').substring(0, 30);
+  const dateStr = new Date().toISOString().replace(/T/, '_').replace(/:/g, '-').split('.')[0];
+  const pageTitle = sanitize(state.title || 'chat');
+  return `chat_${pageTitle}_${dateStr}.md`;
+}
+
+// \u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u30dc\u30bf\u30f3\u306e\u6d3b\u6027\u72b6\u614b\u3092\u5c65\u6b74/busy \u306b\u8ffd\u5f93\u3055\u305b\u308b(\u7a7a\u5c65\u6b74\u3067\u306f\u62bc\u305b\u306a\u3044)\u3002
+function updateDownloadAvailability() {
+  if (els.btnDownloadChat) els.btnDownloadChat.disabled = state.busy || !state.history?.length;
+}
+
+function formatChatHistoryToMarkdown() {
+  if (!state.history || state.history.length === 0) return '';
+  let md = `# Chat History - ${state.title || 'Browser Agent'}\n`;
+  md += `URL: ${state.url || 'Unknown'}\n`;
+  md += `Date: ${new Date().toLocaleString()}\n\n`;
+
+  state.history.forEach((msg) => {
+    const roleName = msg.role === 'user' ? 'User' : msg.role === 'assistant' ? 'AI' : 'Error';
+    md += `## ${roleName}\n\n${msg.content}\n\n`;
+    if (msg.actions && msg.actions.length > 0) {
+      md += `### Executed Actions\n\n`;
+      msg.actions.forEach((act, idx) => {
+        const res = msg.results?.[idx];
+        const status = res ? (res.ok ? '✓ OK' : `✗ Fail: ${res.error}`) : 'Not Run';
+        md += `- **${act.verb}** (${status}): ${act.reason || ''}\n`;
+      });
+      md += `\n`;
+    }
+  });
+  return md;
+}
+
+function textToDataUrl(text, mime) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return `data:${mime};charset=utf-8;base64,${btoa(bin)}`;
 }
 
 // ---- 保存済み手がかりの一覧 ----

@@ -362,6 +362,67 @@ test.describe('UI quality gates', () => {
     await expect(page.locator('#messages').getByText('Reply to: Second change')).toHaveCount(0);
   });
 
+  test('side panel can copy chat messages and trigger download', async ({ page }) => {
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+
+    await page.getByRole('textbox', { name: 'Instruction for AI' }).fill('First change');
+    await page.getByRole('button', { name: 'Send' }).click();
+    await expect(page.locator('#messages').getByText('Reply to: First change')).toBeVisible();
+
+    // Check that copy message buttons exist
+    await expect(page.getByRole('button', { name: 'Copy message' }).first()).toBeVisible();
+
+    // Set up download listener
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download chat history' }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toContain('.md');
+  });
+
+  test('side panel disables chat download until there is history', async ({ page }) => {
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+
+    // Empty history: the download control is disabled (no modal alert path is reachable).
+    const download = page.getByRole('button', { name: 'Download chat history' });
+    await expect(download).toBeDisabled();
+
+    await page.getByRole('textbox', { name: 'Instruction for AI' }).fill('First change');
+    await page.getByRole('button', { name: 'Send' }).click();
+    await expect(page.locator('#messages').getByText('Reply to: First change')).toBeVisible();
+
+    await expect(download).toBeEnabled();
+  });
+
+  test('side panel delegates chat download to the service worker in the extension', async ({ page }) => {
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+
+    await page.getByRole('textbox', { name: 'Instruction for AI' }).fill('First change');
+    await page.getByRole('button', { name: 'Send' }).click();
+    await expect(page.locator('#messages').getByText('Reply to: First change')).toBeVisible();
+
+    // Emulate a real extension page: chrome.runtime.id present → the privileged
+    // chrome.downloads call is delegated to the service worker via DOWNLOAD_CHAT.
+    await page.evaluate(() => {
+      window.__downloadMessages = [];
+      window.chrome.runtime.id = 'test-extension-id';
+      const orig = window.chrome.runtime.sendMessage;
+      window.chrome.runtime.sendMessage = (message, callback) => {
+        if (message?.type === 'DOWNLOAD_CHAT') {
+          window.__downloadMessages.push(message);
+          callback?.({ ok: true, result: { downloadId: 1 } });
+          return;
+        }
+        return orig(message, callback);
+      };
+    });
+
+    await page.getByRole('button', { name: 'Download chat history' }).click();
+    await page.waitForFunction(() => (window.__downloadMessages?.length || 0) > 0);
+    const msg = await page.evaluate(() => window.__downloadMessages[0]);
+    expect(msg.filename).toContain('.md');
+    expect(msg.markdown).toContain('Reply to: First change');
+  });
+
   test('options page passes axe on the default settings state', async ({ page }) => {
     await page.goto(pageUrl('options/options.html'));
 
