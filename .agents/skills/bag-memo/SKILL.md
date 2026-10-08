@@ -13,7 +13,7 @@ when_to_use: >-
   fetch and fix memo, fix this annotation, repair UI from memo.
 argument-hint: "[tabId(推奨/数値) もしくは urlContains] [補足(任意) 例: 赤いボタン]"
 disable-model-invocation: true
-allowed-tools: Read Grep Glob Replace Write Bash(curl *) Bash(rg *) Bash(ls *) Bash(playwright-cli *)
+allowed-tools: Read Grep Glob Edit Write Bash(curl *) Bash(rg *) Bash(ls *) Bash(playwright-cli *)
 disallowed-tools: Bash(rm *)
 ---
 
