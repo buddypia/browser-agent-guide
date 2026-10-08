@@ -17,7 +17,7 @@ import { pathToFileURL } from 'node:url';
 export const MAX_FILES = 15;
 export const MAX_LINES = 400;
 // Changes here alter the agents' own guardrails, permissions, or this script — always a human call.
-export const PROTECTED = [/^\.claude\//, /^\.codex\//, /^\.agents\/hooks\.json$/, /^\.github\//, /^scripts\/agent-worktree-guard\//, /^scripts\/auto-ship\.mjs$/, /^manifest\.json$/, /^Makefile$/];
+export const PROTECTED = [/^\.claude\//, /^\.codex\//, /^\.agents\/hooks\.json$/, /^\.github\//, /^scripts\/agent-worktree-guard\//, /^scripts\/auto-ship\.mjs$/, /^test\/auto-ship\.test\.mjs$/, /^manifest\.json$/, /^Makefile$/];
 const MAX_DIFF_CHARS = 150_000;
 
 /** Pure merge decision. Returns the reasons a human must decide; empty = auto-merge. */
@@ -67,11 +67,12 @@ function main(dryRun) {
   const branch = sh('git', ['branch', '--show-current'], wt);
   if (wt === mainRoot || !branch || branch === 'main') stop('FAILED', 'run this from a feature worktree, not main');
   if (sh('git', ['status', '--porcelain'], wt)) stop('FAILED', 'worktree has uncommitted changes; commit first');
+  const head = sh('git', ['rev-parse', 'HEAD'], wt);
 
   sh('git', ['fetch', '-q', 'origin', 'main'], wt);
   const range = 'origin/main...HEAD';
   if (sh('git', ['rev-list', '--count', 'origin/main..HEAD'], wt) === '0') stop('FAILED', 'no commits ahead of origin/main');
-  const numstat = sh('git', ['diff', '--numstat', range], wt).split('\n').filter(Boolean).map((l) => l.split('\t'));
+  const numstat = sh('git', ['diff', '--numstat', '--no-renames', range], wt).split('\n').filter(Boolean).map((l) => l.split('\t'));
   const files = numstat.map((c) => c[2]);
   const lines = numstat.reduce((n, c) => n + (Number(c[0]) || 0) + (Number(c[1]) || 0), 0);
   log(`${files.length} files, ${lines} lines changed`);
@@ -121,7 +122,8 @@ ${diff}
   if (reasons.length) stop('NEEDS_HUMAN', `${pr.url} — ${reasons.join('; ')}`);
 
   // Merge (no --delete-branch: cleanup deletes the remote branch), verify, clean up.
-  run('gh', ['pr', 'merge', String(pr.number), '--squash'], wt);
+  // --match-head-commit: refuse if the branch moved after the tested/reviewed HEAD.
+  run('gh', ['pr', 'merge', String(pr.number), '--squash', '--match-head-commit', head], wt);
   if (JSON.parse(sh('gh', ['pr', 'view', String(pr.number), '--json', 'state'], wt)).state !== 'MERGED') stop('FAILED', `merge did not complete: ${pr.url}`);
   if (!existsSync(join(wt, '.tmp/.agent_worktree_owner.json'))) stop('MERGED', `${pr.url} (worktree not guard-registered; clean it up manually)`);
   const cleaned = run(guard, ['mark-merged', wt, '--pr', String(pr.number)], wt) && run(guard, ['--repo', mainRoot, 'cleanup', '--confirmed', '--path', wt], mainRoot);

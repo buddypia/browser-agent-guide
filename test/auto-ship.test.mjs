@@ -15,7 +15,7 @@ test('size thresholds send to human', () => {
 });
 
 test('protected paths send to human', () => {
-  for (const f of ['.claude/hooks/x.mjs', '.codex/hooks.json', '.agents/hooks.json', '.github/workflows/a.yml', 'scripts/agent-worktree-guard/guard.py', 'scripts/auto-ship.mjs', 'manifest.json', 'Makefile']) {
+  for (const f of ['.claude/hooks/x.mjs', '.codex/hooks.json', '.agents/hooks.json', '.github/workflows/a.yml', 'scripts/agent-worktree-guard/guard.py', 'scripts/auto-ship.mjs', 'test/auto-ship.test.mjs', 'manifest.json', 'Makefile']) {
     assert.match(decide({ files: [f], lines: 1, review: ok }).join(), /protected paths/, f);
   }
   assert.deepEqual(decide({ files: ['.agents/skills/bag-memo/SKILL.md'], lines: 1, review: ok }), []);
