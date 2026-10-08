@@ -2125,6 +2125,7 @@
     // 編集中だった補足フォームと選択中の一時赤枠(pick)は前画面のものなので畳む
     // (startPicker/startDrawing と同様。残すと新画面に旧要素を指す赤枠が居座る)。
     closeAuthoring();
+    attachNavCheck(location.href); // 記録中: 直前のクリックで遷移したなら URL 確認を付ける
     try {
       // SWが眠っていても次のDOM変化/イベントで再送されるため、失敗は握りつぶす。
       chrome.runtime.sendMessage({ type: 'SPA_NAVIGATED', url: location.href }, () => void chrome.runtime.lastError);
@@ -4389,6 +4390,520 @@
     return results;
   }
 
+  // @term: workflow-step  (用語定義: glossary/extension/workflow-step.md。この領域を変えたら last_verified を更新)
+  // ===========================================================================
+  // 決定的ワークフロー: 操作の観察記録 / リスト(繰り返し項目)の自動判定 / 手順の解決・実行
+  // 「どの候補を選ぶか・URL照合・変数」の判断は lib/workflow.js の純関数として SW が持つ。
+  // content は「要素の解決・候補の列挙・操作の実行・事後確認」というプリミティブだけを担う
+  // (非モジュールのため lib を import できず、判断ロジックを二重に持たないための分担)。
+  // ===========================================================================
+  let wfCache = null; // aiAdvisorWorkflow の最新値(イベント内で await せず同期的に書くためのキャッシュ)
+  let runnerActing = false; // 実行器が操作中(自前の click/change を記録しない)
+  let lastObserved = { key: '', at: 0 };
+  let stepCandidates = { token: '', items: [] }; // 直近に列挙した候補(SW が choiceKey で指名する)
+  const NAV_CHECK_WINDOW_MS = 8000; // クリック直後この時間内の遷移は「このクリックで遷移した」とみなす
+
+  function wfRecording() {
+    return wfCache?.recording === true;
+  }
+
+  async function loadWorkflowCache() {
+    try {
+      const all = await chrome.storage.local.get(WF_KEY);
+      wfCache = all[WF_KEY] || {};
+    } catch {
+      wfCache = {};
+    }
+  }
+
+  // ページ遷移やタブを跨いでも衝突しない手順ID(doneStepIds の照合キーになるため一意必須)。
+  function stepId() {
+    return `wfs-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  // キャッシュを元に同期的に書き込む(クリック直後にページが遷移しても書込IPCが先に出るように)。
+  function writeWorkflowSync(mutate) {
+    const wf = { ...(wfCache || {}) };
+    wf.steps = Array.isArray(wf.steps) ? wf.steps.slice() : [];
+    if (mutate(wf) === false) return;
+    wfCache = wf;
+    try {
+      chrome.storage.local.set({ [WF_KEY]: wf });
+    } catch {
+      /* 拡張コンテキスト無効化などは無視 */
+    }
+  }
+
+  function recordingBlocked(el) {
+    return !wfRecording() || runnerActing || picking || drawing.active || !el || isOwnUi(el);
+  }
+
+  function normalizeItemText(el) {
+    return truncate((el.innerText || el.textContent || '').trim().replace(/\s+/g, ' '), 160);
+  }
+
+  function fieldLabelOf(el) {
+    const viaLabel = el.labels && el.labels[0] ? (el.labels[0].innerText || '').trim() : '';
+    const raw =
+      el.getAttribute('aria-label') ||
+      viaLabel ||
+      el.getAttribute('placeholder') ||
+      el.getAttribute('title') ||
+      el.getAttribute('name') ||
+      el.tagName.toLowerCase();
+    return truncate(raw.replace(/\s+/g, ' ').trim(), 60);
+  }
+
+  // ---- リスト(繰り返し項目)の判定 ----
+  const ITEM_ROLES = new Set(['listitem', 'option', 'row', 'menuitem', 'menuitemradio', 'gridcell', 'tab', 'treeitem', 'radio']);
+  const ITEM_TAGS = new Set(['li', 'tr', 'article', 'option', 'dt', 'dd']);
+
+  function itemSignature(el) {
+    return {
+      tag: el.tagName.toLowerCase(),
+      role: el.getAttribute('role') || '',
+      // 連番/ハッシュ入りクラス(css-1a2b3c 等)は項目ごとに変わり得るので署名に使わない。
+      classes: Array.from(el.classList).filter((c) => !/\d{3,}|[A-Za-z0-9]{6,}_[A-Za-z0-9]{4,}/.test(c)).sort(),
+    };
+  }
+
+  function matchesItemSignature(el, sig) {
+    if (!el || el.nodeType !== 1 || el.tagName.toLowerCase() !== sig.tag) return false;
+    if ((el.getAttribute('role') || '') !== (sig.role || '')) return false;
+    return (sig.classes || []).every((c) => el.classList.contains(c));
+  }
+
+  function looksLikeItem(el, sig, siblings) {
+    if (ITEM_TAGS.has(sig.tag) || ITEM_ROLES.has(sig.role)) return true;
+    if (sig.classes.some((c) => /(item|row|card|option|result|cell|tile|entry|choice)/i.test(c))) return true;
+    // 汎用 div の並びでも、先頭3つがそれぞれ操作可能なら「選択肢の並び」とみなす。
+    return siblings.slice(0, 3).every((s) => s.matches(INTERACTIVE_SELECTOR) || s.querySelector(INTERACTIVE_SELECTOR));
+  }
+
+  // el を含み「同じ形の兄弟が3つ以上並ぶ」最も近い祖先(= リスト項目)を返す。無ければ null。
+  function repeatedItemOf(el) {
+    let cur = el;
+    let depth = 0;
+    while (cur && cur.parentElement && cur !== document.body && depth < 8) {
+      const parent = cur.parentElement;
+      const sig0 = itemSignature(cur);
+      const siblings = Array.from(parent.children).filter(
+        (c) => c.tagName === cur.tagName && (c.getAttribute('role') || '') === sig0.role && !isOwnUi(c)
+      );
+      if (siblings.length >= 3) {
+        // 兄弟全員が共有するクラスだけを署名にする(選択中 .active 等の状態クラスを除くため)。
+        const sig = { ...sig0, classes: sig0.classes.filter((c) => siblings.every((s) => s.classList.contains(c))) };
+        const items = siblings.filter((s) => matchesItemSignature(s, sig));
+        if (items.length >= 3 && looksLikeItem(cur, sig, items)) {
+          return { item: cur, container: parent, sig, index: items.indexOf(cur), count: items.length };
+        }
+      }
+      cur = parent;
+      depth += 1;
+    }
+    return null;
+  }
+
+  // 項目→実際に操作した要素への相対パス(各項目で同じ位置の要素を指すため)。
+  function relativePath(item, el) {
+    if (!item || item === el) return '';
+    const parts = [];
+    let cur = el;
+    while (cur && cur !== item && cur.nodeType === 1) {
+      const parent = cur.parentElement;
+      if (!parent) return '';
+      let part = cur.tagName.toLowerCase();
+      const same = Array.from(parent.children).filter((c) => c.tagName === cur.tagName);
+      if (same.length > 1) part += `:nth-of-type(${same.indexOf(cur) + 1})`;
+      parts.unshift(part);
+      cur = parent;
+    }
+    return cur === item ? `:scope > ${parts.join(' > ')}` : '';
+  }
+
+  function listLabelOf(container, item) {
+    const aria = container.getAttribute('aria-label') || '';
+    if (aria.trim()) return truncate(aria.trim(), 60);
+    const lb = container.getAttribute('aria-labelledby');
+    if (lb) {
+      const s = lb.split(/\s+/).map((id) => document.getElementById(id)?.textContent || '').join(' ').trim();
+      if (s) return truncate(s.replace(/\s+/g, ' '), 60);
+    }
+    const heading = headingContextCandidate(container);
+    if (heading) return truncate(labelOf(heading), 60);
+    return truncate(normalizeItemText(item), 60);
+  }
+
+  // 要素が「単独で一意に再特定できる」なら繰り返し項目の中でも固定対象として扱う。
+  function hasUniqueOwnIdentity(el) {
+    if (el.getAttribute('data-agent-id')) return true;
+    const attr = stableAttrSelector(el);
+    if (!attr) return false;
+    try {
+      return document.querySelectorAll(attr).length === 1;
+    } catch {
+      return false;
+    }
+  }
+
+  // ---- 観察記録(記録ON中のクリック/入力/選択をそのまま手順にする) ----
+  function baseObservedStep(el, verb, label) {
+    return {
+      id: stepId(),
+      annoId: '',
+      url: location.href,
+      matchType: 'page',
+      pattern: annotationScopeKey(location.href),
+      kind: 'action',
+      text: '',
+      target: label,
+      createdAt: new Date().toISOString(),
+      action: { verb, value: '' },
+      locator: { kind: 'fixed', anchor: buildAnchor(el) },
+      choice: null,
+      check: { type: 'none', value: '' },
+      gate: false,
+      needsReview: false,
+    };
+  }
+
+  function appendObservedStep(step, { mergeFillKey = '' } = {}) {
+    writeWorkflowSync((wf) => {
+      if (wf.recording !== true) return false;
+      const last = wf.steps[wf.steps.length - 1];
+      if (
+        mergeFillKey &&
+        last?.action?.verb === 'fill' &&
+        last.url === step.url &&
+        last.locator?.anchor?.selector === mergeFillKey
+      ) {
+        wf.steps[wf.steps.length - 1] = { ...last, action: { ...last.action, value: step.action.value } };
+        return true;
+      }
+      wf.steps.push(step);
+      return true;
+    });
+  }
+
+  function onRecordClick(e) {
+    if (!e.isTrusted) return;
+    const raw = e.target instanceof Element ? e.target : null;
+    if (recordingBlocked(raw)) return;
+    // 入力系は change 側で記録する(クリックはフォーカス操作にすぎない)。ボタン型 input は除く。
+    const field = raw.closest('input,textarea,select,[contenteditable="true"],[contenteditable=""]');
+    if (field) {
+      const type = (field.getAttribute('type') || '').toLowerCase();
+      if (field.tagName !== 'INPUT' || !['button', 'submit', 'reset', 'image'].includes(type)) return;
+    }
+    const lbl = raw.closest('label');
+    if (lbl && lbl.control) return; // ラベル経由のチェック切替は change 側で記録される
+    const interactive = raw.closest(INTERACTIVE_SELECTOR);
+    const rep = repeatedItemOf(interactive || raw);
+    // 操作可能要素でもリスト項目でもない所(見出し・余白等)のクリックは手順にしない(フォーカス外し等のノイズ)。
+    const el = interactive || rep?.item || null;
+    if (!el || el === document.body || el === document.documentElement) return;
+
+    const key = `${location.href}\n${cssPath(el)}`;
+    if (lastObserved.key === key && Date.now() - lastObserved.at < 500) return; // ダブルクリック等の重複
+    lastObserved = { key, at: Date.now() };
+
+    const label = truncate(guardLabelOf(el) || normalizeItemText(el), 60);
+    let step;
+    if (rep && !hasUniqueOwnIdentity(el)) {
+      // 同じ形の項目が並ぶリスト内のクリック → 「どの項目を選ぶか」を後から選べる pick 手順にする。
+      // 既定は「この項目と同じテキスト」(位置より再描画/並べ替えに強い)。ユーザーが選び方を確定する。
+      step = baseObservedStep(el, 'click', listLabelOf(rep.container, rep.item));
+      step.locator = {
+        kind: 'pick',
+        anchor: buildAnchor(el),
+        scope: buildAnchor(rep.container),
+        item: rep.sig,
+        inner: relativePath(rep.item, el),
+      };
+      step.choice = { by: 'text', value: truncate(normalizeItemText(rep.item), 80) };
+      step.needsReview = true;
+      step.gate = isIrreversibleLabel(label);
+    } else {
+      step = baseObservedStep(el, 'click', label);
+      step.gate = isIrreversibleLabel(label);
+    }
+    appendObservedStep(step);
+    watchNavAfterClick();
+  }
+
+  // SPA は DOM 監視が動いていない画面でも pushState だけで遷移するため、記録したクリック直後は
+  // URL を短時間ポーリングして遷移を拾う(フル遷移は遷移先の init が attachNavCheck する)。
+  let navWatchTimer = null;
+  function watchNavAfterClick() {
+    clearInterval(navWatchTimer);
+    const from = location.href;
+    const until = Date.now() + NAV_CHECK_WINDOW_MS;
+    navWatchTimer = setInterval(() => {
+      if (location.href !== from) {
+        clearInterval(navWatchTimer);
+        attachNavCheck(location.href);
+      } else if (Date.now() > until) {
+        clearInterval(navWatchTimer);
+      }
+    }, 250);
+  }
+
+  function onRecordChange(e) {
+    // change は isTrusted を問わない(独自セレクト等がネイティブ select へ合成 change を流す実装を拾うため)。
+    // 実行器自身の操作は runnerActing で除外する。
+    const el = e.target instanceof Element ? e.target : null;
+    if (recordingBlocked(el)) return;
+    const tag = el.tagName;
+    const type = (el.getAttribute('type') || 'text').toLowerCase();
+    const label = fieldLabelOf(el);
+    if (tag === 'SELECT') {
+      const opt = el.selectedOptions?.[0];
+      const text = truncate((opt?.text || '').trim(), 80);
+      const step = baseObservedStep(el, 'select', label);
+      step.action.value = text;
+      step.choice = { by: 'text', value: text };
+      appendObservedStep(step);
+      return;
+    }
+    if (tag === 'INPUT' && (type === 'checkbox' || type === 'radio')) {
+      const step = baseObservedStep(el, 'check', label);
+      step.action.value = el.checked ? 'on' : 'off';
+      appendObservedStep(step);
+      return;
+    }
+    if (tag === 'TEXTAREA' || tag === 'INPUT') {
+      if (['button', 'submit', 'reset', 'image', 'file', 'hidden', 'range', 'color'].includes(type)) return;
+      const step = baseObservedStep(el, 'fill', label);
+      // パスワードは値を保存しない。実行時に入力させる変数へ置き換える。
+      if (type === 'password') {
+        step.action.value = '{password}';
+        step.needsReview = true;
+      } else {
+        step.action.value = String(el.value ?? '');
+      }
+      appendObservedStep(step, { mergeFillKey: step.locator.anchor.selector });
+    }
+  }
+
+  // 直前に記録したクリックの後で URL が変わったら、そのクリックに「URL がこの形になる」確認を自動で付ける。
+  function attachNavCheck(href) {
+    if (!wfRecording()) return;
+    writeWorkflowSync((wf) => {
+      const last = wf.steps[wf.steps.length - 1];
+      if (!last || last.action?.verb !== 'click') return false;
+      if (last.check && last.check.type && last.check.type !== 'none') return false;
+      if (Date.now() - Date.parse(last.createdAt || 0) > NAV_CHECK_WINDOW_MS) return false;
+      if (annotationScopeKey(last.url) === annotationScopeKey(href)) return false;
+      wf.steps[wf.steps.length - 1] = { ...last, check: { type: 'url', value: href } };
+      return true;
+    });
+  }
+
+  document.addEventListener('click', onRecordClick, true);
+  document.addEventListener('change', onRecordChange, true);
+
+  // ---- 手順の解決と実行(SW の決定的ランナーから RUN_STEP で呼ばれる) ----
+  function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  async function waitUntil(fn, timeoutMs) {
+    const end = Date.now() + Math.max(0, timeoutMs);
+    for (;;) {
+      let v = null;
+      try {
+        v = fn();
+      } catch {
+        v = null;
+      }
+      if (v) return v;
+      if (Date.now() >= end) return null;
+      await sleep(150);
+    }
+  }
+
+  function pickItemsOf(locator) {
+    const sig = locator.item || { tag: 'li', classes: [], role: '' };
+    const container = locator.scope ? resolveAnchor(locator.scope) : null;
+    let items = container ? Array.from(container.children).filter((c) => matchesItemSignature(c, sig)) : [];
+    if (!items.length) {
+      // 容器が作り直されて解決できない場合は、同じ署名の項目をページ全体から拾う(最初のまとまり)。
+      const sel = sig.tag + (sig.role ? `[role="${cssAttr(sig.role)}"]` : '') + sig.classes.map((c) => `.${cssIdent(c)}`).join('');
+      try {
+        const all = Array.from(document.querySelectorAll(sel)).filter((x) => !isOwnUi(x));
+        const parent = all[0]?.parentElement;
+        items = parent ? all.filter((x) => x.parentElement === parent) : [];
+      } catch {
+        items = [];
+      }
+    }
+    return items.filter((x) => isVisible(x));
+  }
+
+  function innerTargetOf(item, inner) {
+    if (!inner) return item;
+    try {
+      return item.querySelector(inner) || item;
+    } catch {
+      return item;
+    }
+  }
+
+  // 記録した要素が見つからない時の代替候補: 同じ役割の可視の操作可能要素(文書順、上限60)。
+  function fallbackCandidatesFor(anchor) {
+    const role = anchor?.role || '';
+    const els = Array.from(document.querySelectorAll(INTERACTIVE_SELECTOR)).filter((x) => isVisible(x) && !isOwnUi(x));
+    const same = els.filter((x) => roleOf(x) === role);
+    return (same.length ? same : els).slice(0, 60).map((el) => ({ el, text: truncate(guardLabelOf(el) || normalizeItemText(el), 120) }));
+  }
+
+  function publishCandidates(items) {
+    stepCandidates = { token: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, items };
+    return {
+      token: stepCandidates.token,
+      candidates: items.map((c, i) => ({ key: `c${i}`, text: c.text })),
+    };
+  }
+
+  function flashTarget(el, tone) {
+    try {
+      el.scrollIntoView({ block: 'center', inline: 'nearest' });
+    } catch {
+      /* noop */
+    }
+    const r = el.getBoundingClientRect();
+    const box = document.createElement('div');
+    box.setAttribute(ATTR.ui, '1');
+    box.className = `bag-step-flash${tone === 'warn' ? ' bag-step-flash--warn' : ''}`;
+    Object.assign(box.style, {
+      left: `${Math.max(0, r.left - 4)}px`,
+      top: `${Math.max(0, r.top - 4)}px`,
+      width: `${r.width + 8}px`,
+      height: `${r.height + 8}px`,
+    });
+    getUiParent().appendChild(box);
+    setTimeout(() => box.remove(), 1600);
+  }
+
+  function valueOf(el) {
+    return el.isContentEditable ? (el.textContent || '') : String(el.value ?? '');
+  }
+
+  async function runStep(msg) {
+    const step = msg.step || {};
+    const opts = msg.options || {};
+    const verb = step.action?.verb;
+    const locator = step.locator;
+    if (!verb || !locator?.anchor) return { status: 'failed', error: t('cs.err.stepNotStructured') };
+    const timeoutMs = Number(opts.timeoutMs) || 6000;
+    const isPick = locator.kind === 'pick';
+
+    // 1) 対象の解決。候補選択が要る手順は、まず候補を列挙して SW に返す(選択ルールは SW の純関数が評価)。
+    let target = null;
+    let option = null;
+    let chosenText = '';
+    let viaFallback = false;
+    if (opts.choiceKey) {
+      if (opts.token !== stepCandidates.token) return { status: 'stale' };
+      const c = stepCandidates.items[Number(String(opts.choiceKey).slice(1))];
+      if (!c || !c.el?.isConnected) return { status: 'stale' };
+      target = c.el;
+      option = c.option || null;
+      chosenText = c.text;
+      viaFallback = Boolean(c.fallback);
+    } else if (isPick) {
+      const items = await waitUntil(() => {
+        const list = pickItemsOf(locator);
+        return list.length ? list : null;
+      }, timeoutMs);
+      if (!items) return { status: 'failed', error: t('cs.err.stepListMissing', { label: step.target || '' }) };
+      return { status: 'choose', ...publishCandidates(items.map((item) => ({ el: innerTargetOf(item, locator.inner), text: normalizeItemText(item) }))) };
+    } else {
+      target = await waitUntil(() => resolveAnchor(locator.anchor), timeoutMs);
+      if (!target) {
+        const items = fallbackCandidatesFor(locator.anchor).map((c) => ({ ...c, fallback: true }));
+        if (!items.length) return { status: 'failed', error: t('cs.err.stepTargetMissing', { label: step.target || '' }) };
+        return { status: 'missing', ...publishCandidates(items) };
+      }
+      if (verb === 'select') {
+        if (target.tagName !== 'SELECT') return { status: 'failed', error: t('cs.err.stepNotSelect') };
+        const opts2 = Array.from(target.options).filter((o) => !o.disabled);
+        return {
+          status: 'choose',
+          ...publishCandidates(opts2.map((o) => ({ el: target, option: o, text: truncate(o.text.trim().replace(/\s+/g, ' '), 120) }))),
+        };
+      }
+    }
+
+    const label = truncate(guardLabelOf(target) || chosenText || normalizeItemText(target), 60);
+    const anchorOut = viaFallback ? buildAnchor(target) : undefined;
+
+    // 2) 試走: 実際には操作せず、対象を光らせて「何が選ばれるか」だけを返す。
+    if (opts.dryRun) {
+      flashTarget(target);
+      return { status: 'ok', dry: true, label, chosenText, anchor: anchorOut };
+    }
+
+    // 3) 承認ゲート: 手順単位のゲート、または実行時に確定系ラベルへ変わったクリックは人間の承認まで止める。
+    if (verb === 'click' && !opts.approved) {
+      const changedToRisky =
+        !opts.allowIrreversibleClicks && isIrreversibleLabel(label) && !isIrreversibleLabel(step.target || '');
+      if (step.gate || changedToRisky) {
+        flashTarget(target, 'warn');
+        return { status: 'held', label };
+      }
+    }
+
+    // 4) 操作 + 組み込みの事後確認(入力値/選択/チェック状態が意図どおりか)。
+    runnerActing = true;
+    try {
+      try {
+        target.scrollIntoView({ block: 'center', inline: 'nearest' });
+      } catch {
+        /* noop */
+      }
+      const value = String(step.action.value ?? '');
+      if (verb === 'click') {
+        target.click();
+      } else if (verb === 'fill') {
+        fillValue(target, value);
+        if (valueOf(target) !== value) return { status: 'failed', label, error: t('cs.err.stepVerifyValue', { label }) };
+      } else if (verb === 'select') {
+        if (!option) return { status: 'failed', label, error: t('cs.err.stepNotSelect') };
+        target.value = option.value;
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+        if (target.value !== option.value) return { status: 'failed', label, error: t('cs.err.stepVerifyValue', { label }) };
+      } else if (verb === 'check') {
+        const want = value !== 'off';
+        if (Boolean(target.checked) !== want) target.click();
+        if (Boolean(target.checked) !== want) return { status: 'failed', label, error: t('cs.err.stepVerifyValue', { label }) };
+      }
+    } catch (e) {
+      return { status: 'failed', label, error: String(e?.message || e) };
+    } finally {
+      runnerActing = false;
+    }
+
+    // 5) 手順に付けた確認(URL は SW がタブの URL で検証する)。
+    const check = step.check || {};
+    if (check.type === 'text' && check.value) {
+      const okText = await waitUntil(() => (document.body?.innerText || '').includes(check.value), timeoutMs);
+      if (!okText) return { status: 'failed', label, chosenText, error: t('cs.err.stepCheckText', { text: check.value }) };
+    } else if (check.type === 'appears' && check.value) {
+      const okEl = await waitUntil(() => {
+        try {
+          return document.querySelector(check.value);
+        } catch {
+          return null;
+        }
+      }, timeoutMs);
+      if (!okEl) return { status: 'failed', label, chosenText, error: t('cs.err.stepCheckAppears', { selector: check.value }) };
+    }
+    return { status: 'ok', label, chosenText, anchor: anchorOut };
+  }
+  // @endterm: workflow-step
+
   function getCatalog() {
     return Object.entries(AI_VERBS)
       .filter(([, v]) => v.exposeToAI !== false)
@@ -4422,6 +4937,8 @@
           };
         case 'RUN_ACTIONS':
           return { results: await runActions(msg.actions, msg.source || 'manual', msg.options || {}) };
+        case 'RUN_STEP':
+          return await runStep(msg);
         case 'START_PICKER':
           await loadAnnotations();
           return startPicker();
@@ -4517,6 +5034,7 @@
         i18nLoaded = false;
         loadI18n({ force: true }).then(() => renderAnnotations());
       }
+      if (area === 'local' && changes[WF_KEY]) wfCache = changes[WF_KEY].newValue || {};
     });
   } catch {
     /* storage 監視不可環境は無視 */
@@ -4525,6 +5043,8 @@
   // ---- 初期化: ロケール辞書を読み込み、保存済みの注釈を復元する ----
   (async () => {
     await loadI18n();
+    await loadWorkflowCache();
+    attachNavCheck(location.href); // 記録中: 直前のクリックでこのページへ遷移したなら URL 確認を付ける
     await loadAnnotations();
     renderAnnotations();
   })();
