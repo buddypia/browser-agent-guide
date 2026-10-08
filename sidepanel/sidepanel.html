@@ -283,8 +283,16 @@
         <button id="btn-workflow-clear" title="Clear recorded steps" class="link danger-link" data-i18n-title="workflow.clearTitle" data-i18n="common.clear">Clear</button>
       </div>
       <p id="workflow-hint" class="workflow-hint" data-i18n="workflow.hint">Recording on: every note you leave is added as a step with its page URL. The AI runs them in URL order.</p>
+      <div id="workflow-held" class="workflow-held" role="status" hidden>
+        <span id="workflow-held-text" class="workflow-held-text"></span>
+        <button id="btn-workflow-approve" type="button" class="workflow-approve-btn" data-i18n="workflow.approve">Approve and continue</button>
+      </div>
       <div id="workflow-steps" class="anno-list workflow-steps"></div>
       <div class="anno-foot workflow-foot">
+        <div id="workflow-vars" class="workflow-vars" hidden>
+          <p class="workflow-vars-title" data-i18n="workflow.varsTitle">Values for this run</p>
+          <div id="workflow-vars-fields" class="workflow-vars-fields"></div>
+        </div>
         <div class="workflow-autorun">
           <button
             id="btn-workflow-autorun"
@@ -296,6 +304,16 @@
             data-i18n="workflow.autorun"
           >
             Auto-run
+          </button>
+          <button
+            id="btn-workflow-dryrun"
+            type="button"
+            class="workflow-dryrun-btn"
+            title="Highlight what each step on this page would act on, without clicking or typing"
+            data-i18n-title="workflow.dryRunTitle"
+            data-i18n="workflow.dryRun"
+          >
+            Dry run this page
           </button>
           <span id="workflow-autorun-state" class="workflow-autorun-state" aria-live="polite"></span>
         </div>

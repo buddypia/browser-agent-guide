@@ -5,7 +5,7 @@
 
 import { getSettings as readSettingsRaw, saveSettings as saveSettingsRaw, isAutoSyncReady } from '../lib/storage.js';
 import { findMatchingRules } from '../lib/site-matcher.js';
-import { callAI } from '../lib/ai-client.js';
+import { callAI, callAIChoice } from '../lib/ai-client.js';
 import { buildSystemPrompt } from '../lib/prompt.js';
 import { slugFromCapture } from '../lib/slug.js';
 import { mergeRecipeActions } from '../lib/recipe-merge.js';
@@ -15,10 +15,19 @@ import {
   crossPageWorkflowForPrompt,
   normalizeWorkflow,
   normalizeRun,
-  pendingStepsForUrl,
   actionableSteps,
-  isAutoRunNavLoop,
   AUTORUN_ALLOWED_VERBS,
+  nextPendingStep,
+  isStructuredStep,
+  stepMatchesUrl,
+  isLiteralPattern,
+  urlMatchesPattern,
+  applyVars,
+  stepVariables,
+  resolveStepVars,
+  pickCandidate,
+  buildChoiceMessages,
+  formatStepTitle,
 } from '../lib/workflow.js';
 import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18n.js';
 
@@ -159,7 +168,7 @@ async function syncTab(tabId, url) {
 async function syncTabAutoRun(tabId, url) {
   if (tabId == null || !url || !/^https?:/.test(url)) return;
   try {
-    await maybeAutoRunWorkflow(tabId, url);
+    await maybeAutoRunWorkflow(tabId);
   } catch (e) {
     console.warn('[autorun] skipped:', e?.message || e);
   }
@@ -196,9 +205,15 @@ async function handleMessage(msg, sender) {
       syncTabAutoRun(sender?.tab?.id, msg.url);
       return syncTab(sender?.tab?.id, msg.url);
     case 'START_WORKFLOW_AUTORUN':
-      return startWorkflowAutoRun(msg.tabId);
+      return startWorkflowAutoRun(msg.tabId, msg.vars);
     case 'STOP_WORKFLOW_AUTORUN':
       return stopWorkflowAutoRun();
+    case 'APPROVE_WORKFLOW_STEP':
+      return approveWorkflowStep(msg.tabId);
+    case 'DRY_RUN_WORKFLOW':
+      return dryRunWorkflow(msg.tabId, msg.vars);
+    case 'TEST_WORKFLOW_STEP':
+      return testWorkflowStep(msg.tabId, msg.stepId, msg.vars);
     case 'START_PICKER':
       return ensureContentAndSend(msg.tabId, { type: 'START_PICKER' });
     case 'STOP_PICKER':
@@ -363,10 +378,24 @@ async function loadCrossPageWorkflow() {
 }
 
 // ---- ワークフロー自動実行(セッション) ----
-// 記録した手順を「ページ遷移ごとに」自動実行する。SWが次URLへ決定的にナビゲートし、各ページで
-// その手順をAI→verbs化して実行する。不可逆操作(購入確定等)は content 側で保留される(自動では押さない)。
+// 記録した手順を「1手ずつ」決定的に実行する。
+//   - 構造化手順(観察記録): content の RUN_STEP で要素解決→操作→事後確認。AI は呼ばない。
+//     候補選択が要る手順は lib/workflow.js の pickCandidate(純関数)で選び、ルールで決まらない時/
+//     choice.by==='ai' の時だけ AI に「候補キーの enum から1つ」を選ばせる(閉じた選択)。
+//   - 旧来手順(メモだけ): 従来どおり AI がメモ文を verbs 化して実行する(後方互換)。
+//   - ページ合わせ: 手順の URL パターンに一致するまで待つ(クリックによる遷移)。一致しない時に
+//     SW が開いてよいのは、可変セグメントの無い固定ページ or 最初の手順の記録URLだけ。
+//   - 承認ゲート/確定系ラベルは held で停止し、人間の「承認して続行」で1手だけ通す。
+// @term: workflow-step  (用語定義: glossary/extension/workflow-step.md。この領域を変えたら last_verified を更新)
 const autoRunInFlight = new Set(); // 実行中タブ(同一タブ多重起動の防止)
-const autoRunLastNav = new Map(); // tabId -> 直近にナビゲートしたURL(URL不一致での無限遷移を防ぐ)
+const WF_NAV_WAIT_MS = 10000; // クリック後に次ページ(URL一致)を待つ上限
+const WF_LOAD_WAIT_MS = 20000; // SW 主導の遷移で読込完了を待つ上限
+const WF_STEP_TIMEOUT_MS = 6000; // 対象の出現待ち(content 側)
+const WF_DRY_TIMEOUT_MS = 1500; // 試走は前手順の結果を待てないので短く
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 async function readWorkflow() {
   try {
@@ -389,6 +418,20 @@ async function writeWorkflowRun(run) {
   await chrome.storage.local.set({ [RUN_KEY]: next });
   return next;
 }
+// 実行中に AI が補った解決結果を、その手順の「学習候補」として残す(採用は人間がサイドパネルで決める)。
+async function setStepSuggestion(stepId, suggestion) {
+  try {
+    const all = await chrome.storage.local.get(WORKFLOW_KEY);
+    const raw = all[WORKFLOW_KEY] || {};
+    const steps = Array.isArray(raw.steps) ? raw.steps : [];
+    const i = steps.findIndex((s) => s && s.id === stepId);
+    if (i < 0) return;
+    steps[i] = { ...steps[i], suggestion: { ...suggestion, at: new Date().toISOString() } };
+    await chrome.storage.local.set({ [WORKFLOW_KEY]: { ...raw, steps } });
+  } catch {
+    /* 学習候補の保存失敗は実行結果に影響させない */
+  }
+}
 function notifyAutoRun(payload) {
   // サイドパネル等へブロードキャスト(未起動なら無視)。SW自身には届かない。
   try {
@@ -398,139 +441,329 @@ function notifyAutoRun(payload) {
   }
 }
 
-/** 自動実行セッションを開始し、現在ページの手順を即実行する(opt-in)。 */
-async function startWorkflowAutoRun(tabId) {
+async function getTab(tabId) {
+  try {
+    return await chrome.tabs.get(tabId);
+  } catch {
+    return null;
+  }
+}
+
+// タブが条件を満たすまで待つ。時間切れなら最後に観測したタブ(または null)を返す。
+async function waitForTab(tabId, pred, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  for (;;) {
+    const tab = await getTab(tabId);
+    if (!tab) return null;
+    if (pred(tab)) return tab;
+    if (Date.now() >= end) return tab;
+    await sleep(200);
+  }
+}
+
+/** 自動実行セッションを開始する(opt-in)。変数が足りない/AIキーが要るのに無い場合は開始しない。 */
+async function startWorkflowAutoRun(tabId, vars) {
   const workflow = await readWorkflow();
-  const total = actionableSteps(workflow).length;
-  if (!total) {
+  const steps = actionableSteps(workflow);
+  if (!steps.length) {
     notifyAutoRun({ phase: 'empty', text: t('sw.autorun.empty') });
     return { active: false, reason: 'empty' };
   }
+  const given = vars && typeof vars === 'object' ? vars : {};
+  const missing = stepVariables(steps).filter((name) => !String(given[name] ?? '').length);
+  if (missing.length) {
+    notifyAutoRun({ phase: 'error', text: t('sw.wf.missingVars', { names: missing.join(', ') }) });
+    return { active: false, reason: 'vars', missing };
+  }
   const settings = await getSettings();
-  if (!settings.ai.apiKey) {
+  // 構造化手順だけなら AI キー無しでも走る(決定的)。メモだけの旧来手順を含む場合のみキー必須。
+  if (steps.some((s) => !isStructuredStep(s)) && !settings.ai.apiKey) {
     notifyAutoRun({ phase: 'error', text: t('sw.err.apiKeyMissing') });
     return { active: false, reason: 'no-key' };
   }
-  autoRunLastNav.delete(tabId);
   // 所有タブ(tabId)を記録し、他タブの遷移で同一セッションが乗っ取られないようにする。
-  await writeWorkflowRun({ active: true, doneStepIds: [], tabId, navCount: 0 });
-  notifyAutoRun({ phase: 'start', text: t('sw.autorun.started', { count: total }) });
-  let url = '';
-  try {
-    url = (await chrome.tabs.get(tabId)).url || '';
-  } catch {
-    /* タブ取得不可 */
-  }
-  if (url) await maybeAutoRunWorkflow(tabId, url);
+  await writeWorkflowRun({
+    active: true,
+    doneStepIds: [],
+    tabId,
+    navCount: 0,
+    vars: given,
+    startedAt: new Date().toISOString(),
+  });
+  notifyAutoRun({ phase: 'start', text: t('sw.autorun.started', { count: steps.length }) });
+  maybeAutoRunWorkflow(tabId).catch((e) => console.warn('[autorun]', e?.message || e));
   return { active: true };
 }
 
 /** 自動実行セッションを停止する。 */
 async function stopWorkflowAutoRun() {
-  await writeWorkflowRun({ active: false, doneStepIds: [] });
+  const run = await readWorkflowRun();
+  await writeWorkflowRun({ ...run, active: false, doneStepIds: [], heldStepId: '', approvedStepId: '' });
   notifyAutoRun({ phase: 'stopped', text: t('sw.autorun.stopped') });
   return { active: false };
 }
 
-/** セッション中、現在URLに一致する未実行手順を実行し、次の手順URLへ自動遷移する。 */
-async function maybeAutoRunWorkflow(tabId, url) {
+/** 承認ゲートで止まった手順を人間が承認 → その1手だけゲートを通して再開する。 */
+async function approveWorkflowStep(tabId) {
+  const run = await readWorkflowRun();
+  if (!run.heldStepId) return { active: run.active, reason: 'nothing-held' };
+  await writeWorkflowRun({ ...run, active: true, approvedStepId: run.heldStepId, heldStepId: '', tabId: run.tabId ?? tabId });
+  notifyAutoRun({ phase: 'start', text: t('sw.wf.approved') });
+  maybeAutoRunWorkflow(run.tabId ?? tabId).catch((e) => console.warn('[autorun]', e?.message || e));
+  return { active: true };
+}
+
+/** セッション中なら、所有タブで次の手順から1手ずつ実行する(ページ読込完了/SPA遷移/開始/承認から呼ばれる)。 */
+async function maybeAutoRunWorkflow(tabId) {
   if (tabId == null || autoRunInFlight.has(tabId)) return;
   const run = await readWorkflowRun();
   if (!run.active) return;
   // セッション所有タブ以外の遷移では動かさない(別タブの乗っ取り/二重実行を防ぐ)。
   if (run.tabId != null && run.tabId !== tabId) return;
-
-  const workflow = await readWorkflow();
-  const totalActionable = actionableSteps(workflow).length;
-  // 暴走/不一致ループの上限(SW再起動を跨いでも navCount は storage 由来で有効)。
-  const navCap = totalActionable * 2 + 5;
-  if (run.navCount > navCap) {
-    await writeWorkflowRun({ ...run, active: false });
-    notifyAutoRun({ phase: 'mismatch', text: t('sw.autorun.mismatch', { url }) });
-    return;
-  }
-
-  let nextUrl = null;
   autoRunInFlight.add(tabId);
   try {
-    const pending = pendingStepsForUrl(workflow, run, url);
-    let doneStepIds = run.doneStepIds.slice();
-    // このページで1件でも手順を done にできたか(=正常に到達して前進できたか)。
-    // 前進できたら、直前の遷移先メモ(autoRunLastNav)は役目を終えるのでクリアし、
-    // 次ページの遷移を「ループ」と誤判定して止めないようにする。
-    let madeProgress = false;
-
-    if (pending.length) {
-      const settings = await getSettings();
-      if (!settings.ai.apiKey) {
-        await writeWorkflowRun({ ...run, active: false, doneStepIds });
-        notifyAutoRun({ phase: 'error', text: t('sw.err.apiKeyMissing') });
-        return;
-      }
-      const outcome = await autoRunExecuteSteps(tabId, url, pending, settings);
-      if (outcome.held) {
-        // 不可逆操作を保留 → セッション停止(人間が判断)。done には入れない。
-        await writeWorkflowRun({ ...run, active: false, doneStepIds });
-        notifyAutoRun({ phase: 'held', text: t('sw.autorun.held', { label: outcome.heldLabel || '' }) });
-        return;
-      }
-      if (!outcome.ranOk) {
-        // 試して全失敗(取りこぼし) → 黙って先へ進めず停止。
-        // 注: このページに打つ手が無い(空アクション/noopのみ)場合は ranOk=true で前進する
-        // (autoRunExecuteSteps 側で「実行すべき操作が無い」を成功扱いにしている)。
-        await writeWorkflowRun({ ...run, active: false, doneStepIds });
-        notifyAutoRun({ phase: 'failed', text: t('sw.autorun.failed') });
-        return;
-      }
-      doneStepIds = Array.from(new Set([...doneStepIds, ...pending.map((s) => s.id)]));
-      madeProgress = true;
-      autoRunLastNav.delete(tabId);
-      await writeWorkflowRun({ ...run, active: true, doneStepIds });
-      notifyAutoRun({ phase: 'step', text: outcome.reply || t('sw.autorun.ranStep') });
-    }
-
-    const doneSet = new Set(doneStepIds);
-    const remaining = actionableSteps(workflow).filter((s) => !doneSet.has(s.id));
-    if (!remaining.length) {
-      await writeWorkflowRun({ ...run, active: false, doneStepIds });
-      notifyAutoRun({ phase: 'done', text: t('sw.autorun.complete') });
-      return;
-    }
-    // 次の手順は別ページ(同ページ分は実行済み)。
-    // 「今回このページで1件も前進していないのに、直近の遷移先へ再び遷移しようとしている」時だけ
-    // 不一致ループとみなして止める(=前進できているなら、たとえ同一URLでも正当な遷移として進める)。
-    const candidate = remaining[0].url;
-    if (isAutoRunNavLoop({ candidateUrl: candidate, lastNavUrl: autoRunLastNav.get(tabId), madeProgress })) {
-      await writeWorkflowRun({ ...run, active: false, doneStepIds });
-      notifyAutoRun({ phase: 'mismatch', text: t('sw.autorun.mismatch', { url: candidate }) });
-      return;
-    }
-    // navCount を進めて保存(再起動を跨いだ上限判定のため)。
-    await writeWorkflowRun({ ...run, active: true, doneStepIds, navCount: run.navCount + 1 });
-    nextUrl = candidate;
+    await driveWorkflow(tabId);
+  } catch (e) {
+    const latest = await readWorkflowRun();
+    await writeWorkflowRun({ ...latest, active: false });
+    notifyAutoRun({ phase: 'failed', text: t('sw.wf.failed', { n: '?', error: String(e?.message || e) }) });
   } finally {
     autoRunInFlight.delete(tabId);
   }
+}
 
-  if (nextUrl) {
-    autoRunLastNav.set(tabId, nextUrl);
-    notifyAutoRun({ phase: 'navigate', text: t('sw.autorun.navigate', { url: nextUrl }) });
-    try {
-      await chrome.tabs.update(tabId, { url: nextUrl });
-    } catch {
-      /* タブ更新不可は無視(次の手動遷移で再開しうる) */
+// 手順のページに今いない時、SW が開いてよい URL(無ければ null = 遷移は手順側のクリックに任せる)。
+function navigationTargetFor(step, run) {
+  if (!step.url) return null;
+  if (!step.urlPattern) return step.url; // 旧来手順は従来どおり記録URLへ遷移
+  if (isLiteralPattern(step.urlPattern)) return step.url; // 可変セグメントの無い固定ページ
+  return run.doneStepIds.length === 0 ? step.url : null; // 最初の手順だけは記録した開始ページを開く
+}
+
+async function driveWorkflow(tabId) {
+  const settings = await getSettings();
+  let lastMayNavigate = false; // 直前の手順がクリック(=遷移しうる)か
+  let navigatedFor = ''; // この駆動で既に遷移を試みた手順(同じ手順で2度遷移しない=ループ防止)
+  for (let guard = 0; guard < 1000; guard++) {
+    const workflow = await readWorkflow();
+    let run = await readWorkflowRun();
+    if (!run.active || (run.tabId != null && run.tabId !== tabId)) return;
+    const all = actionableSteps(workflow);
+    const step = nextPendingStep(workflow, run);
+    if (!step) {
+      await writeWorkflowRun({ ...run, active: false });
+      notifyAutoRun({ phase: 'done', text: t('sw.autorun.complete') });
+      return;
     }
+    const n = all.findIndex((s) => s.id === step.id) + 1;
+    const stop = async (phase, text, extra = {}) => {
+      const latest = await readWorkflowRun();
+      await writeWorkflowRun({ ...latest, active: false, ...extra });
+      notifyAutoRun({ phase, text, stepId: step.id });
+    };
+
+    // 1) ページ合わせ
+    let tab = await getTab(tabId);
+    if (!tab) return stop('failed', t('sw.wf.tabGone'));
+    if (!stepMatchesUrl(step, tab.url) && lastMayNavigate) {
+      tab = await waitForTab(tabId, (tb) => stepMatchesUrl(step, tb.url), WF_NAV_WAIT_MS);
+      if (!tab) return stop('failed', t('sw.wf.tabGone'));
+    }
+    if (!stepMatchesUrl(step, tab.url)) {
+      const navUrl = navigationTargetFor(step, run);
+      const navCap = all.length * 2 + 5;
+      if (!navUrl || navigatedFor === step.id || run.navCount > navCap) {
+        return stop('mismatch', t('sw.wf.mismatch', { n, url: step.urlPattern || step.url }));
+      }
+      navigatedFor = step.id;
+      run = await writeWorkflowRun({ ...run, navCount: run.navCount + 1 });
+      notifyAutoRun({ phase: 'navigate', text: t('sw.autorun.navigate', { url: navUrl }) });
+      try {
+        await chrome.tabs.update(tabId, { url: navUrl });
+      } catch {
+        return stop('mismatch', t('sw.wf.mismatch', { n, url: navUrl }));
+      }
+      // tabs.update 直後は旧URLのまま complete のことがあるので、URL一致 + 完了の両方を待つ。
+      tab = await waitForTab(tabId, (tb) => tb.status === 'complete' && stepMatchesUrl(step, tb.url), WF_LOAD_WAIT_MS);
+      if (!tab || !stepMatchesUrl(step, tab.url)) {
+        return stop('mismatch', t('sw.wf.mismatch', { n, url: step.urlPattern || navUrl }));
+      }
+    }
+    tab = (await waitForTab(tabId, (tb) => tb.status === 'complete', WF_LOAD_WAIT_MS)) || tab;
+
+    // 2) 実行
+    const structured = isStructuredStep(step);
+    const outcome = structured
+      ? await runStructuredStep(tabId, step, run, settings, { title: tab.title, url: tab.url })
+      : await runLegacyStep(tabId, tab.url, step, run, settings);
+    if (outcome.status === 'held') {
+      return stop('held', t('sw.wf.held', { n, label: outcome.label || step.target || '' }), {
+        heldStepId: step.id,
+        approvedStepId: '',
+      });
+    }
+    if (outcome.status !== 'ok') {
+      return stop('failed', t('sw.wf.failed', { n, error: outcome.error || t('sw.autorun.failed') }));
+    }
+
+    // 3) URL 確認(タブの URL で検証。SPA でもフル遷移でも同じ)
+    if (structured && step.check.type === 'url' && step.check.value) {
+      const pattern = applyVars(step.check.value, run.vars);
+      const tb = await waitForTab(tabId, (x) => urlMatchesPattern(x.url, pattern), WF_NAV_WAIT_MS);
+      if (!tb || !urlMatchesPattern(tb.url, pattern)) {
+        return stop('failed', t('sw.wf.failed', { n, error: t('sw.wf.checkUrl', { url: pattern }) }));
+      }
+    }
+
+    // 4) 前進(途中で停止されていたら記録しない)
+    const latest = await readWorkflowRun();
+    if (!latest.active) return;
+    await writeWorkflowRun({
+      ...latest,
+      doneStepIds: Array.from(new Set([...latest.doneStepIds, step.id])),
+      approvedStepId: latest.approvedStepId === step.id ? '' : latest.approvedStepId,
+      heldStepId: '',
+    });
+    const what = formatStepTitle(step, t);
+    const via = outcome.via === 'ai' ? ` ${t('sw.wf.viaAi', { text: outcome.chosenText || outcome.label || '', reason: outcome.aiReason || '' })}` : '';
+    notifyAutoRun({ phase: 'step', stepId: step.id, text: `${t('sw.wf.stepDone', { n, total: all.length, text: what })}${via}` });
+    lastMayNavigate = structured ? step.action.verb === 'click' : true;
   }
 }
+
+// AI に候補キーを1つ選ばせる(閉じた選択)。キー未設定なら選べない(none)。
+async function chooseCandidateWithAI({ settings, step, candidates, reason, url, title }) {
+  if (!settings.ai.apiKey) return { choice: 'none', reason: t('sw.wf.noKeyForChoice') };
+  const messages = buildChoiceMessages({ step, candidates, reason, url, title });
+  return callAIChoice({ ai: settings.ai, messages, keys: candidates.map((c) => c.key), t });
+}
+
+/**
+ * 構造化手順を1つ実行する(dryRun なら対象を示すだけ)。
+ * @returns {{status:'ok'|'held'|'failed'|'needs-ai'|'missing', label?, chosenText?, via?, aiReason?, error?}}
+ */
+async function runStructuredStep(tabId, rawStep, run, settings, { title = '', url = '', dryRun = false, allowAI = true, suggest = true } = {}) {
+  const step = resolveStepVars(rawStep, run.vars);
+  const options = {
+    allowIrreversibleClicks: Boolean(settings.workflow?.allowIrreversibleClicks),
+    approved: run.approvedStepId === rawStep.id,
+    dryRun,
+    timeoutMs: dryRun ? WF_DRY_TIMEOUT_MS : WF_STEP_TIMEOUT_MS,
+  };
+  const send = (extra = {}) => ensureContentAndSend(tabId, { type: 'RUN_STEP', step, options: { ...options, ...extra } });
+  let res = await send();
+  let via = 'rule';
+  let aiReason = '';
+  let suggestion = null;
+  for (let attempt = 0; attempt < 3 && ['choose', 'missing', 'stale'].includes(res?.status); attempt++) {
+    if (res.status === 'stale') {
+      res = await send(); // 候補が再描画で無効になった → 列挙し直す
+      continue;
+    }
+    let key = null;
+    if (res.status === 'choose') {
+      const pick = pickCandidate(res.candidates, step.choice);
+      if (pick.status === 'ok') {
+        key = res.candidates[pick.index].key;
+      } else {
+        if (!allowAI) return { status: 'needs-ai', error: t(`sw.wf.pick.${pick.status}`) };
+        const pool = pick.status === 'ambiguous' ? pick.indices.map((i) => res.candidates[i]) : res.candidates;
+        const r = await chooseCandidateWithAI({ settings, step, candidates: pool, reason: pick.status, url, title });
+        if (r.choice === 'none') return { status: 'failed', error: `${t(`sw.wf.pick.${pick.status}`)} ${r.reason}`.trim() };
+        key = r.choice;
+        via = 'ai';
+        aiReason = r.reason;
+        // ルールで決まらず AI が補った → 「次回からこの項目に固定」を学習候補にする(choice.by==='ai' は毎回AIが本来の設計)。
+        if (step.choice?.by !== 'ai') suggestion = { kind: 'choice' };
+      }
+    } else {
+      // missing: 記録した要素が見つからない → 同じ役割の候補から AI が選ぶ。
+      if (!allowAI) return { status: 'missing', error: t('sw.wf.pick.missing') };
+      const r = await chooseCandidateWithAI({ settings, step, candidates: res.candidates, reason: 'missing', url, title });
+      if (r.choice === 'none') return { status: 'failed', error: `${t('sw.wf.pick.missing')} ${r.reason}`.trim() };
+      key = r.choice;
+      via = 'ai';
+      aiReason = r.reason;
+      suggestion = { kind: 'anchor' };
+    }
+    res = await send({ choiceKey: key, token: res.token });
+  }
+  if (!res || !res.status) return { status: 'failed', error: t('sw.autorun.failed') };
+  if (res.status === 'ok' && suggestion && suggest && !dryRun) {
+    await setStepSuggestion(rawStep.id, {
+      kind: suggestion.kind,
+      anchor: suggestion.kind === 'anchor' ? res.anchor || null : null,
+      label: suggestion.kind === 'choice' ? res.chosenText || res.label || '' : res.label || '',
+      reason: aiReason,
+    });
+  }
+  return { ...res, via, aiReason };
+}
+
+/** 旧来手順(メモだけ)を1つ、従来どおり AI に verbs 化させて実行する。 */
+async function runLegacyStep(tabId, url, step, run, settings) {
+  if (!settings.ai.apiKey) return { status: 'failed', error: t('sw.err.apiKeyMissing') };
+  const outcome = await autoRunExecuteSteps(tabId, url, [step], settings, {
+    allowIrreversibleClicks: run.approvedStepId === step.id ? true : undefined,
+  });
+  if (outcome.held) return { status: 'held', label: outcome.heldLabel };
+  if (!outcome.ranOk) return { status: 'failed', error: t('sw.autorun.failed') };
+  return { status: 'ok', label: step.target || step.text, via: 'ai' };
+}
+
+/** このページの構造化手順を「操作せずに」解決だけして、何が選ばれるかを返す(AI は呼ばない)。 */
+async function dryRunWorkflow(tabId, vars) {
+  const settings = await getSettings();
+  const workflow = await readWorkflow();
+  const tab = await getTab(tabId);
+  if (!tab) throw new Error(t('sw.wf.tabGone'));
+  const run = normalizeRun({ vars });
+  const results = [];
+  for (const step of actionableSteps(workflow)) {
+    if (!stepMatchesUrl(step, tab.url)) {
+      results.push({ id: step.id, status: 'other-page' });
+      continue;
+    }
+    if (!isStructuredStep(step)) {
+      results.push({ id: step.id, status: 'legacy' });
+      continue;
+    }
+    const r = await runStructuredStep(tabId, step, run, settings, { dryRun: true, allowAI: false, title: tab.title, url: tab.url });
+    const status = ['ok', 'needs-ai', 'missing'].includes(r.status) ? r.status : 'failed';
+    results.push({ id: step.id, status, label: r.label || '', chosenText: r.chosenText || '', error: r.error || '' });
+    await sleep(500); // 光らせた枠が順に見えるように
+  }
+  return { results };
+}
+
+/** 1手順だけを試す(「文脈で選ぶ」条件の確認用。AI 判断も実際に行うが、操作はしない)。 */
+async function testWorkflowStep(tabId, stepId, vars) {
+  const settings = await getSettings();
+  const workflow = await readWorkflow();
+  const step = workflow.steps.find((s) => s.id === stepId);
+  if (!step || !isStructuredStep(step)) throw new Error(t('sw.wf.notStructured'));
+  const tab = await getTab(tabId);
+  if (!tab) throw new Error(t('sw.wf.tabGone'));
+  if (!stepMatchesUrl(step, tab.url)) return { status: 'other-page' };
+  const r = await runStructuredStep(tabId, step, normalizeRun({ vars }), settings, {
+    dryRun: true,
+    suggest: false,
+    title: tab.title,
+    url: tab.url,
+  });
+  return { status: r.status, label: r.label || '', chosenText: r.chosenText || '', via: r.via || '', aiReason: r.aiReason || '', error: r.error || '' };
+}
+// @endterm: workflow-step
 
 /**
  * 指定手順群の本文をAIへ渡し、autorun ソースでこのページを実行する(遷移はSWが担当)。
  * 安全のため、AIに提示する動詞を allow-list に絞る(navigateTo/submitForm/inject* 等は提示すらしない)。
  */
-async function autoRunExecuteSteps(tabId, url, steps, settings) {
+async function autoRunExecuteSteps(tabId, url, steps, settings, overrides = {}) {
   const context = await collectContext(tabId);
   context.crossPageWorkflow = await loadCrossPageWorkflow();
-  const allowIrreversibleClicks = Boolean(settings.workflow?.allowIrreversibleClicks);
+  const allowIrreversibleClicks =
+    overrides.allowIrreversibleClicks ?? Boolean(settings.workflow?.allowIrreversibleClicks);
   // deny-by-default: スキーマに乗せる動詞を安全集合へ絞る(構造的にナビ/送信/注入を不可能にする)。
   const verbNames = (context.verbs || []).map((v) => v.name).filter((n) => AUTORUN_ALLOWED_VERBS.includes(n));
   // autorun モード: プロンプトの「別URLへは navigateTo で進め」案内を出さない(allow-list で除外済みのため

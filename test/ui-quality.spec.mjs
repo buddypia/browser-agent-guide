@@ -248,6 +248,78 @@ test.describe('UI quality gates', () => {
     await expect(page.locator('#btn-workspace-memo')).toBeFocused();
   });
 
+  test('side panel shows structured workflow steps at side-panel width and passes axe', async ({ page }, testInfo) => {
+    const anchor = (selector, text) => ({ selector, tag: 'button', role: 'button', text });
+    const base = { kind: 'action', url: 'https://example.com/app', matchType: 'page', pattern: 'https://example.com/app', text: '' };
+    await installChromeMock(page, {
+      aiAdvisorWorkflow: {
+        recording: false,
+        saved: [],
+        steps: [
+          {
+            ...base,
+            id: 's1',
+            target: 'Shipping method',
+            action: { verb: 'click', value: '' },
+            locator: { kind: 'pick', anchor: anchor('#ship li:nth-child(3) button', 'Choose'), scope: { selector: '#ship', tag: 'ul' }, item: { tag: 'li', classes: ['opt'], role: '' }, inner: ':scope > button' },
+            choice: { by: 'text', value: 'Charter ¥6,800' },
+            needsReview: true,
+          },
+          {
+            ...base,
+            id: 's2',
+            target: 'Quantity',
+            action: { verb: 'fill', value: '{qty}' },
+            locator: { kind: 'fixed', anchor: { selector: '#qty', tag: 'input' } },
+            suggestion: { kind: 'anchor', anchor: { selector: '#amount', tag: 'input' }, label: 'Amount', reason: 'same field, renamed', at: '2026-10-08T00:00:00Z' },
+          },
+          {
+            ...base,
+            id: 's3',
+            target: 'Place order',
+            action: { verb: 'click', value: '' },
+            locator: { kind: 'fixed', anchor: anchor('#confirm', 'Place order') },
+            check: { type: 'url', value: 'https://example.com/orders/:id' },
+            gate: true,
+          },
+        ],
+      },
+      aiAdvisorWorkflowRun: { active: false, tabId: 1, doneStepIds: ['s1', 's2'], heldStepId: 's3', vars: { qty: '5' } },
+    });
+    await page.setViewportSize({ width: 360, height: 900 });
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+    await page.locator('#btn-workspace-workflow').click();
+
+    const panel = page.locator('#workflow-panel');
+    await expect(panel).toContainText('In “Shipping method”, click the item “Charter ¥6,800”');
+    await expect(panel).toContainText('Type “{qty}” into “Quantity”');
+    await expect(panel).toContainText('You picked from a list. How should it be chosen next time?');
+    await expect(panel).toContainText('so AI used “Amount”');
+    await expect(panel).toContainText('Needs approval');
+    await expect(page.locator('#workflow-vars')).toBeVisible();
+    await expect(page.locator('#workflow-vars-fields input')).toHaveCount(1);
+    await expect(page.locator('#workflow-held')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Approve and continue' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Dry run this page' })).toBeVisible();
+
+    // 手順設定を開くと、選び方(閉じた選択肢)と確認・承認ゲートを編集できる。
+    // 完了済みは ✓、確認待ち(リスト選択)の手順は設定が最初から開いている。
+    await expect(page.locator('#workflow-steps .wf-num')).toHaveText(['✓', '✓', '3']);
+    const editors = page.locator('#workflow-steps .wf-edit');
+    await expect(editors.nth(0)).toHaveAttribute('open', '');
+    await expect(editors.nth(0).locator('select').first()).toHaveValue('text');
+    await editors.nth(2).locator('.wf-edit-summary').click();
+    await expect(editors.nth(2).getByRole('checkbox', { name: 'Stop and ask me before clicking' })).toBeChecked();
+    // 手順一覧をスクロールしても「承認して続行」はパネル上端に残る。
+    await expect(page.getByRole('button', { name: 'Approve and continue' })).toBeInViewport();
+
+    // サイドパネル幅で横スクロールが出ないこと。
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    await page.screenshot({ path: testInfo.outputPath('sidepanel-workflow-360.png') });
+    await expectNoAxeViolations(page);
+  });
+
   test('side panel copies the current tab ID from the target chip', async ({ page }) => {
     await page.goto(pageUrl('sidepanel/sidepanel.html'));
 

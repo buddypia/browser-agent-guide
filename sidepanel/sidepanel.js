@@ -1,5 +1,5 @@
 import { getSettings, patchSettings, isAutoSyncReady } from '../lib/storage.js';
-import { WORKFLOW_KEY, RUN_KEY, normalizeWorkflow, normalizeRun } from '../lib/workflow.js';
+import { WORKFLOW_KEY, RUN_KEY, normalizeWorkflow, normalizeRun, stepVariables, formatStepTitle } from '../lib/workflow.js';
 import { createI18n, DEFAULT_LOCALE, LANGUAGE_OPTIONS, languageName, localeToIntl, normalizeLocale, resolveLocale } from './i18n.js';
 
 // サイドパネルのチャットUI。background経由でAI呼び出しと動詞実行を行う。
@@ -55,6 +55,12 @@ const els = {
   workflowSaved: document.getElementById('workflow-saved'),
   btnWorkflowAutorun: document.getElementById('btn-workflow-autorun'),
   workflowAutorunState: document.getElementById('workflow-autorun-state'),
+  btnWorkflowDryRun: document.getElementById('btn-workflow-dryrun'),
+  workflowVars: document.getElementById('workflow-vars'),
+  workflowVarsFields: document.getElementById('workflow-vars-fields'),
+  workflowHeld: document.getElementById('workflow-held'),
+  workflowHeldText: document.getElementById('workflow-held-text'),
+  btnWorkflowApprove: document.getElementById('btn-workflow-approve'),
 };
 
 const CHAT_HISTORY_KEY = 'aiAdvisorChatHistoryByPage';
@@ -86,7 +92,12 @@ let state = {
   activeTabState: null,
   annotations: [],
   workflow: { recording: false, steps: [], saved: [] },
-  workflowRun: { active: false, doneStepIds: [] },
+  workflowRun: { active: false, doneStepIds: [], heldStepId: '' },
+  // 決定的ワークフローの編集/試走 UI 用(サイドパネルのセッション内だけ保持)
+  workflowVars: {},
+  openSteps: new Set(),
+  dryResults: {},
+  testResults: {},
   busy: false,
   copiedTabId: null,
   // メモ(picker)/描画(drawing)モードがページ側で有効か。両モードは content 側で
@@ -1529,7 +1540,26 @@ function renderWorkflowRun(run) {
   btn.textContent = run.active ? t('workflow.autorunStop') : t('workflow.autorun');
   btn.disabled = !run.active && stepCount === 0;
   if (els.workflowAutorunState) {
-    els.workflowAutorunState.textContent = run.active ? t('workflow.autorunActive') : '';
+    const total = (state.workflow?.steps || []).length;
+    els.workflowAutorunState.textContent = run.active
+      ? t('workflow.autorunProgress', { done: run.doneStepIds.length, total })
+      : '';
+  }
+  // 承認ゲートで止まっている時だけ「承認して続行」を出す。
+  const held = !run.active && run.heldStepId ? (state.workflow?.steps || []).find((s) => s.id === run.heldStepId) : null;
+  if (els.workflowHeld) els.workflowHeld.hidden = !held;
+  if (held && els.workflowHeldText) els.workflowHeldText.textContent = t('workflow.heldText', { text: stepTitle(held) });
+  if (els.btnWorkflowDryRun) els.btnWorkflowDryRun.disabled = run.active || !(state.workflow?.steps || []).length;
+  // 実行状況(完了/保留)を手順の行にも反映する。
+  if (els.workflowSteps && state.workflow?.steps?.length) {
+    els.workflowSteps.querySelectorAll('.workflow-step').forEach((row, i) => {
+      const id = row.dataset.stepId;
+      const done = run.doneStepIds.includes(id);
+      row.classList.toggle('is-done', done);
+      row.classList.toggle('is-held', run.heldStepId === id);
+      const num = row.querySelector('.wf-num');
+      if (num) num.textContent = done ? '✓' : String(i + 1);
+    });
   }
 }
 
@@ -1567,35 +1597,75 @@ function renderWorkflow(wf) {
     wf.steps.forEach((s, i) => els.workflowSteps.appendChild(renderWorkflowStep(s, i + 1)));
   }
   renderSavedWorkflows(wf.saved);
+  renderWorkflowVars(wf);
   applyWorkspaceVisibility();
   // 手順数が変わると自動実行ボタンの可否も変わるので追従させる。
   renderWorkflowRun(state.workflowRun);
 }
 
+// 手順の一行タイトル(lib の formatStepTitle をこのパネルの言語で使う)。
+function stepTitle(s) {
+  return formatStepTitle(s, t);
+}
+
+function createEl(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function badge(text, tone) {
+  return createEl('span', `wf-badge${tone ? ` wf-badge--${tone}` : ''}`, text);
+}
+
+// 手順を部分更新して保存する(サイドパネルの編集 UI 用)。
+async function updateWorkflowStep(stepId, patch) {
+  renderWorkflow(
+    await mutateWorkflow((w) => {
+      w.steps = w.steps.map((s) => (s.id === stepId ? { ...s, ...(typeof patch === 'function' ? patch(s) : patch) } : s));
+      return w;
+    })
+  );
+}
+
 function renderWorkflowStep(s, num) {
-  const row = document.createElement('div');
-  row.className = 'workflow-step';
+  const run = state.workflowRun;
+  const structured = Boolean(s.action?.verb);
+  const row = createEl('div', 'workflow-step');
+  row.dataset.stepId = s.id;
+  if (run.doneStepIds.includes(s.id)) row.classList.add('is-done');
+  if (run.heldStepId === s.id) row.classList.add('is-held');
+  if (s.needsReview) row.classList.add('needs-review');
 
-  const n = document.createElement('span');
-  n.className = 'wf-num';
-  n.textContent = String(num);
+  const n = createEl('span', 'wf-num', run.doneStepIds.includes(s.id) ? '✓' : String(num));
+  const body = createEl('div', 'wf-body');
+  body.appendChild(createEl('div', 'wf-text', stepTitle(s)));
+  if (structured && s.text) body.appendChild(createEl('div', 'wf-note', s.text));
 
-  const body = document.createElement('div');
-  body.className = 'wf-body';
-  const text = document.createElement('div');
-  text.className = 'wf-text';
-  text.textContent = s.text || s.target || t('workflow.emptyStep');
-  const url = document.createElement('div');
-  url.className = 'wf-url';
-  url.textContent = shortUrl(s.url);
-  url.title = s.url || '';
-  body.appendChild(text);
-  body.appendChild(url);
+  const meta = createEl('div', 'wf-meta');
+  const url = createEl('span', 'wf-url', shortUrl(s.urlPattern || s.url));
+  url.title = s.urlPattern || s.url || '';
+  meta.appendChild(url);
+  if (!structured) meta.appendChild(badge(t('wf.badge.legacy'), 'ai'));
+  if (s.choice?.by === 'ai') meta.appendChild(badge(t('wf.badge.aiChoice'), 'ai'));
+  if (s.gate) meta.appendChild(badge(t('wf.badge.gate'), 'gate'));
+  if (s.check?.type && s.check.type !== 'none') meta.appendChild(badge(t(`wf.badge.check.${s.check.type}`)));
+  body.appendChild(meta);
 
-  const del = document.createElement('button');
+  const dry = state.dryResults[s.id];
+  if (dry && dry.status !== 'other-page') {
+    const tone = dry.status === 'ok' ? 'ok' : dry.status === 'legacy' ? 'ai' : 'warn';
+    const line = createEl('div', `wf-dry wf-dry--${tone}`, t(`wf.dry.${dry.status}`, { text: dry.chosenText || dry.label || '', error: dry.error || '' }));
+    body.appendChild(line);
+  }
+
+  if (s.needsReview) body.appendChild(renderReviewPrompt(s));
+  if (s.suggestion) body.appendChild(renderSuggestion(s));
+  if (structured) body.appendChild(renderStepEditor(s));
+
+  const del = createEl('button', 'wf-del', '×');
   del.type = 'button';
-  del.className = 'wf-del';
-  del.textContent = '×';
   del.title = t('workflow.removeStep');
   del.setAttribute('aria-label', t('workflow.removeStep'));
   del.addEventListener('click', () => removeWorkflowStep(s.id));
@@ -1604,6 +1674,216 @@ function renderWorkflowStep(s, num) {
   row.appendChild(body);
   row.appendChild(del);
   return row;
+}
+
+// リストから選んだ手順は「どう選ぶか」を人が決めるまで目立たせる。
+function renderReviewPrompt(s) {
+  const box = createEl('div', 'wf-review');
+  box.appendChild(createEl('span', '', s.action?.value === '{password}' ? t('wf.review.password') : t('wf.review.pick')));
+  const okBtn = createEl('button', 'wf-mini', t('wf.review.keep'));
+  okBtn.type = 'button';
+  okBtn.addEventListener('click', () => updateWorkflowStep(s.id, { needsReview: false }));
+  box.appendChild(okBtn);
+  return box;
+}
+
+// 実行中に AI が補った解決を「次回から固定する？」と提案する(採用は人間が決める)。
+function renderSuggestion(s) {
+  const sg = s.suggestion;
+  const box = createEl('div', 'wf-suggest');
+  const text = sg.kind === 'anchor' ? t('wf.suggest.anchor', { label: sg.label }) : t('wf.suggest.choice', { label: sg.label });
+  box.appendChild(createEl('span', 'wf-suggest-text', sg.reason ? `${text} (${sg.reason})` : text));
+  const adopt = createEl('button', 'wf-mini', t('wf.suggest.adopt'));
+  adopt.type = 'button';
+  adopt.addEventListener('click', () =>
+    updateWorkflowStep(s.id, (cur) =>
+      cur.suggestion?.kind === 'anchor' && cur.suggestion.anchor
+        ? { locator: { ...cur.locator, anchor: cur.suggestion.anchor }, suggestion: null }
+        : { choice: { by: 'text', value: cur.suggestion?.label || '' }, suggestion: null, needsReview: false }
+    )
+  );
+  const dismiss = createEl('button', 'wf-mini wf-mini--ghost', t('wf.suggest.dismiss'));
+  dismiss.type = 'button';
+  dismiss.addEventListener('click', () => updateWorkflowStep(s.id, { suggestion: null }));
+  box.appendChild(adopt);
+  box.appendChild(dismiss);
+  return box;
+}
+
+const CHOICE_ORDER = ['text', 'index', 'first', 'last', 'min', 'max', 'ai'];
+const CHECK_ORDER = ['none', 'url', 'text', 'appears'];
+
+function labeled(labelText, control) {
+  const wrap = createEl('label', 'wf-field');
+  wrap.appendChild(createEl('span', 'wf-field-label', labelText));
+  wrap.appendChild(control);
+  return wrap;
+}
+
+function renderStepEditor(s) {
+  const details = createEl('details', 'wf-edit');
+  details.open = state.openSteps.has(s.id) || Boolean(s.needsReview);
+  details.addEventListener('toggle', () => {
+    if (details.open) state.openSteps.add(s.id);
+    else state.openSteps.delete(s.id);
+  });
+  details.appendChild(createEl('summary', 'wf-edit-summary', t('wf.edit.summary')));
+  const form = createEl('div', 'wf-edit-body');
+
+  // 選び方(リストの項目 / セレクトの選択肢)
+  if (s.locator?.kind === 'pick' || s.action.verb === 'select') {
+    const choice = s.choice || { by: 'text', value: s.action.value || '' };
+    const sel = createEl('select', 'wf-input');
+    CHOICE_ORDER.forEach((by) => {
+      const o = createEl('option', '', t(`wf.rule.${by}`));
+      o.value = by;
+      sel.appendChild(o);
+    });
+    sel.value = choice.by;
+    const valueInput = createEl('input', 'wf-input');
+    valueInput.type = 'text';
+    valueInput.value = choice.value;
+    valueInput.placeholder = t(`wf.rule.${choice.by}.placeholder`);
+    valueInput.hidden = ['first', 'last', 'min', 'max'].includes(choice.by);
+    sel.addEventListener('change', () => {
+      const by = sel.value;
+      const value = by === 'index' && !/^\d+$/.test(valueInput.value) ? '1' : valueInput.value;
+      updateWorkflowStep(s.id, { choice: { by, value }, needsReview: false });
+    });
+    valueInput.addEventListener('change', () =>
+      updateWorkflowStep(s.id, { choice: { by: sel.value, value: valueInput.value }, needsReview: false })
+    );
+    form.appendChild(labeled(t('wf.edit.choice'), sel));
+    form.appendChild(valueInput);
+    form.appendChild(createEl('p', 'wf-hint', t(`wf.rule.${choice.by}.hint`)));
+
+    const testRow = createEl('div', 'wf-test-row');
+    const testBtn = createEl('button', 'wf-mini', t('wf.edit.test'));
+    testBtn.type = 'button';
+    const result = createEl('span', 'wf-test-result');
+    const prev = state.testResults[s.id];
+    if (prev) result.textContent = prev;
+    testBtn.addEventListener('click', () => testWorkflowStepNow(s.id, result, testBtn));
+    testRow.appendChild(testBtn);
+    testRow.appendChild(result);
+    form.appendChild(testRow);
+  }
+
+  // 入力値({名前} で実行時に入力)
+  if (s.action.verb === 'fill') {
+    const input = createEl('input', 'wf-input');
+    input.type = 'text';
+    input.value = s.action.value;
+    input.addEventListener('change', () =>
+      updateWorkflowStep(s.id, (cur) => ({ action: { ...cur.action, value: input.value }, needsReview: false }))
+    );
+    form.appendChild(labeled(t('wf.edit.value'), input));
+    form.appendChild(createEl('p', 'wf-hint', t('wf.edit.valueHint')));
+  }
+
+  // 確認(この手順の後に満たされるべき状態)
+  const checkSel = createEl('select', 'wf-input');
+  CHECK_ORDER.forEach((type) => {
+    const o = createEl('option', '', t(`wf.check.${type}`));
+    o.value = type;
+    checkSel.appendChild(o);
+  });
+  checkSel.value = s.check?.type || 'none';
+  const checkVal = createEl('input', 'wf-input');
+  checkVal.type = 'text';
+  checkVal.value = s.check?.value || '';
+  checkVal.placeholder = t(`wf.check.${checkSel.value}.placeholder`);
+  checkVal.hidden = checkSel.value === 'none';
+  const saveCheck = () => updateWorkflowStep(s.id, { check: { type: checkSel.value, value: checkVal.value } });
+  checkSel.addEventListener('change', saveCheck);
+  checkVal.addEventListener('change', saveCheck);
+  form.appendChild(labeled(t('wf.edit.check'), checkSel));
+  form.appendChild(checkVal);
+
+  // 承認ゲート(クリックのみ)
+  if (s.action.verb === 'click') {
+    const gate = createEl('input');
+    gate.type = 'checkbox';
+    gate.checked = Boolean(s.gate);
+    gate.addEventListener('change', () => updateWorkflowStep(s.id, { gate: gate.checked }));
+    const wrap = createEl('label', 'wf-check');
+    wrap.appendChild(gate);
+    wrap.appendChild(createEl('span', '', t('wf.edit.gate')));
+    form.appendChild(wrap);
+  }
+
+  // メモ(人間/AI への補足。決定的実行には使わない)
+  const note = createEl('input', 'wf-input');
+  note.type = 'text';
+  note.value = s.text || '';
+  note.placeholder = t('wf.edit.notePlaceholder');
+  note.addEventListener('change', () => updateWorkflowStep(s.id, { text: note.value }));
+  form.appendChild(labeled(t('wf.edit.note'), note));
+
+  details.appendChild(form);
+  return details;
+}
+
+// 実行時に入力する変数({名前})の入力欄。値はこのサイドパネルのセッション中だけ保持する。
+function renderWorkflowVars(wf) {
+  if (!els.workflowVars || !els.workflowVarsFields) return;
+  const names = stepVariables(wf.steps);
+  els.workflowVars.hidden = names.length === 0;
+  els.workflowVarsFields.innerHTML = '';
+  names.forEach((name) => {
+    const input = createEl('input', 'wf-input');
+    input.type = /pass|パスワード/i.test(name) ? 'password' : 'text';
+    input.value = state.workflowVars[name] ?? '';
+    input.autocomplete = 'off';
+    input.addEventListener('input', () => {
+      state.workflowVars[name] = input.value;
+    });
+    els.workflowVarsFields.appendChild(labeled(`{${name}}`, input));
+  });
+}
+
+async function testWorkflowStepNow(stepId, resultEl, button) {
+  if (state.tabId == null) await refreshState();
+  button.disabled = true;
+  resultEl.textContent = t('wf.edit.testing');
+  try {
+    const r = await send({ type: 'TEST_WORKFLOW_STEP', tabId: state.tabId, stepId, vars: state.workflowVars });
+    const text =
+      r.status === 'ok'
+        ? t(r.via === 'ai' ? 'wf.test.okAi' : 'wf.test.ok', { text: r.chosenText || r.label, reason: r.aiReason })
+        : r.status === 'other-page'
+          ? t('wf.test.otherPage')
+          : t('wf.test.fail', { error: r.error || r.status });
+    state.testResults[stepId] = text;
+    resultEl.textContent = text;
+  } catch (e) {
+    resultEl.textContent = t('wf.test.fail', { error: e.message });
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function dryRunWorkflowNow() {
+  if (state.tabId == null) await refreshState();
+  if (state.tabId == null) return;
+  if (els.btnWorkflowDryRun) els.btnWorkflowDryRun.disabled = true;
+  try {
+    const { results } = await send({ type: 'DRY_RUN_WORKFLOW', tabId: state.tabId, vars: state.workflowVars });
+    state.dryResults = Object.fromEntries(results.map((r) => [r.id, r]));
+    renderWorkflow(state.workflow);
+    const here = results.filter((r) => r.status !== 'other-page');
+    const ok = here.filter((r) => r.status === 'ok').length;
+    addMessage('assistant', here.length ? t('wf.dry.summary', { ok, total: here.length }) : t('wf.dry.none'));
+  } catch (e) {
+    addMessage('assistant', t('wf.test.fail', { error: e.message }));
+  } finally {
+    if (els.btnWorkflowDryRun) els.btnWorkflowDryRun.disabled = false;
+  }
+}
+
+async function approveWorkflowStepNow() {
+  if (state.tabId == null) await refreshState();
+  await send({ type: 'APPROVE_WORKFLOW_STEP', tabId: state.tabId });
 }
 
 function renderSavedWorkflows(saved) {
@@ -1723,8 +2003,9 @@ async function toggleWorkflowAutoRun() {
     return;
   }
   if (!confirm(t('workflow.autorunConfirm'))) return;
+  state.dryResults = {};
   showBanner(escapeHtml(t('workflow.autorunStartBanner')), true);
-  await send({ type: 'START_WORKFLOW_AUTORUN', tabId: state.tabId });
+  await send({ type: 'START_WORKFLOW_AUTORUN', tabId: state.tabId, vars: state.workflowVars });
 }
 
 if (els.btnWorkflow) els.btnWorkflow.addEventListener('click', () => {
@@ -1734,6 +2015,8 @@ if (els.btnWorkflow) els.btnWorkflow.addEventListener('click', () => {
 if (els.btnWorkflowSave) els.btnWorkflowSave.addEventListener('click', () => saveCurrentWorkflow().catch(() => {}));
 if (els.btnWorkflowClear) els.btnWorkflowClear.addEventListener('click', () => clearWorkflowSteps().catch(() => {}));
 if (els.btnWorkflowAutorun) els.btnWorkflowAutorun.addEventListener('click', () => toggleWorkflowAutoRun().catch(() => {}));
+if (els.btnWorkflowDryRun) els.btnWorkflowDryRun.addEventListener('click', () => dryRunWorkflowNow().catch(() => {}));
+if (els.btnWorkflowApprove) els.btnWorkflowApprove.addEventListener('click', () => approveWorkflowStepNow().catch(() => {}));
 
 // SW からの自動実行イベント(各手順の結果・保留・完了)をチャットに表示する。
 // onMessage が無い環境(テストスタブ等)では何もしない。

@@ -817,3 +817,22 @@ html.bag-drawing .bag-draw-overlay {
 html.bag-capturing .bag-anno-outline-box {
   visibility: visible !important;
 }
+
+/* 決定的ワークフロー: 試走/承認待ちで対象を一時的に示す枠(操作はしない) */
+.bag-step-flash {
+  position: fixed;
+  z-index: 2147483646;
+  pointer-events: none;
+  border: 2px solid #1c1a17;
+  border-radius: 6px;
+  box-shadow: 0 0 0 4px rgba(28, 26, 23, 0.16);
+  animation: bag-step-flash 1.6s ease-out forwards;
+}
+.bag-step-flash--warn {
+  border-color: #c8361d;
+  box-shadow: 0 0 0 4px rgba(200, 54, 29, 0.2);
+}
+@keyframes bag-step-flash {
+  0%, 70% { opacity: 1; }
+  100% { opacity: 0; }
+}

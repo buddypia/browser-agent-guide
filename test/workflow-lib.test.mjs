@@ -22,6 +22,19 @@ import {
   IRREVERSIBLE_KEYWORDS,
   AUTORUN_ALLOWED_VERBS,
   isAutoRunVerbAllowed,
+  isStructuredStep,
+  inferUrlPattern,
+  urlMatchesPattern,
+  isLiteralPattern,
+  stepMatchesUrl,
+  applyVars,
+  stepVariables,
+  resolveStepVars,
+  firstNumber,
+  pickCandidate,
+  describeStepAction,
+  buildChoiceMessages,
+  nextPendingStep,
 } from '../lib/workflow.js';
 
 let passed = 0;
@@ -116,7 +129,9 @@ const ok = (name) => {
 // (7) RUN_KEY 固定 + normalizeRun が壊れた入力を吸収。
 {
   assert.equal(RUN_KEY, 'aiAdvisorWorkflowRun');
-  assert.deepEqual(normalizeRun(null), { active: false, doneStepIds: [], tabId: null, navCount: 0, startedAt: '' });
+  assert.deepEqual(normalizeRun(null), {
+    active: false, doneStepIds: [], tabId: null, navCount: 0, startedAt: '', vars: {}, heldStepId: '', approvedStepId: '',
+  });
   const r = normalizeRun({ active: true, doneStepIds: ['a', 1, 'b'], tabId: 7, navCount: 3, startedAt: 't' });
   assert.equal(r.active, true);
   assert.deepEqual(r.doneStepIds, ['a', 'b']); // 非文字列は落とす
@@ -252,6 +267,132 @@ const ok = (name) => {
   assert.deepEqual(extract('const IRREVERSIBLE_KEYWORDS'), IRREVERSIBLE_KEYWORDS, 'keyword リスト一致');
   assert.deepEqual(extract('const AUTORUN_ALLOWED_VERBS'), AUTORUN_ALLOWED_VERBS, 'allow-list 一致');
   ok('content と lib の autorun 定義はパリティが取れている');
+}
+
+
+// ===== 決定的ワークフロー(構造化ステップ) =====
+
+// (15) 構造化ステップの正規化: 不正値は既定へ、urlPattern は記録URLから導出、旧来ステップは非構造化のまま。
+{
+  const s = normalizeStep({
+    kind: 'action', url: 'https://shop.test/orders/8812/edit?tab=2',
+    action: { verb: 'click' },
+    locator: { kind: 'pick', anchor: { selector: 'li' }, scope: { selector: 'ul' }, item: { tag: 'li', classes: ['row'] }, inner: 'button' },
+    choice: { by: 'text', value: 'チャーター便' },
+    check: { type: 'url', value: 'https://shop.test/orders/8812/confirm' },
+    gate: true,
+  });
+  assert.equal(s.kind, 'action');
+  assert.equal(s.action.verb, 'click');
+  assert.equal(s.urlPattern, 'https://shop.test/orders/:id/edit');
+  assert.equal(s.locator.kind, 'pick');
+  assert.equal(s.locator.inner, 'button');
+  assert.deepEqual(s.choice, { by: 'text', value: 'チャーター便' });
+  assert.deepEqual(s.check, { type: 'url', value: 'https://shop.test/orders/:id/confirm' }); // 生URL→パターン
+  assert.equal(s.gate, true);
+  assert.equal(isStructuredStep(s), true);
+  const bad = normalizeStep({ action: { verb: 'rm -rf' }, choice: { by: 'eval' }, check: { type: 'js', value: 'x' }, locator: { kind: 'pick' } });
+  assert.equal(bad.action.verb, '');
+  assert.equal(bad.choice, null);
+  assert.deepEqual(bad.check, { type: 'none', value: '' });
+  assert.equal(bad.locator, null); // anchor 無しは null
+  assert.equal(isStructuredStep({ kind: 'note', text: 'メモ' }), false);
+  assert.equal(normalizeStep({ kind: 'note', url: 'https://x/1/2' }).urlPattern, ''); // 旧来は導出しない
+  ok('構造化ステップは対象/操作/確認に分けて正規化される');
+}
+
+// (16) URL パターン: 動的IDを :id へ汎化し、別IDのページにも一致する。
+{
+  assert.equal(inferUrlPattern('https://a.test/orders/8812/edit'), 'https://a.test/orders/:id/edit');
+  assert.equal(inferUrlPattern('https://a.test/u/550e8400-e29b-41d4-a716-446655440000/'), 'https://a.test/u/:id');
+  assert.equal(inferUrlPattern('https://a.test/dp/B0ABCDE123/ref=x'), 'https://a.test/dp/:id/ref=x');
+  assert.equal(inferUrlPattern('https://a.test/a/1/b/2'), 'https://a.test/a/:id/b/:id2');
+  assert.equal(inferUrlPattern('https://a.test/api/v2/page2'), 'https://a.test/api/v2/page2'); // 短語は汎化しない
+  assert.equal(inferUrlPattern(inferUrlPattern('https://a.test/o/1')), 'https://a.test/o/:id'); // 冪等
+  assert.equal(urlMatchesPattern('https://a.test/orders/9/edit?x=1#h', 'https://a.test/orders/:id/edit'), true);
+  assert.equal(urlMatchesPattern('https://a.test/orders/9/edit/', 'https://a.test/orders/:id/edit'), true);
+  assert.equal(urlMatchesPattern('https://a.test/orders/9', 'https://a.test/orders/:id/edit'), false);
+  assert.equal(urlMatchesPattern('https://b.test/orders/9/edit', 'https://a.test/orders/:id/edit'), false);
+  assert.equal(isLiteralPattern('https://a.test/cart'), true);
+  assert.equal(isLiteralPattern('https://a.test/o/:id'), false);
+  assert.equal(stepMatchesUrl({ action: { verb: 'click' }, url: 'https://a.test/o/1' }, 'https://a.test/o/77'), true);
+  assert.equal(stepMatchesUrl({ text: 'memo', url: 'https://a.test/o/1' }, 'https://a.test/o/77'), false); // 旧来は厳密
+  ok('URL パターンは動的IDを吸収して照合する');
+}
+
+// (17) 変数: {name} を抽出・置換し、元データは変えない。
+{
+  const steps = [
+    { action: { verb: 'fill', value: '{qty}' } },
+    { action: { verb: 'select' }, choice: { by: 'text', value: '{便}' } },
+    { action: { verb: 'click' }, check: { type: 'text', value: '{qty}個' } },
+  ];
+  assert.deepEqual(stepVariables(steps), ['qty', '便']);
+  assert.equal(applyVars('合計 {qty} 個 {none}', { qty: 12 }), '合計 12 個 {none}');
+  const r = resolveStepVars(steps[1], { 便: 'チャーター便' });
+  assert.equal(r.choice.value, 'チャーター便');
+  assert.equal(steps[1].choice.value, '{便}');
+  ok('変数は実行時に置換される');
+}
+
+// (18) pickCandidate: ルールで候補から決定的に1つ選び、決まらなければ ambiguous/none/needs-ai を返す。
+{
+  const c = [
+    { key: 'c0', text: 'ヤマト通常 ¥1,200' },
+    { key: 'c1', text: '佐川急便 ¥1,450' },
+    { key: 'c2', text: 'チャーター便 ¥6,800' },
+    { key: 'c3', text: '日本郵便 ¥1,100' },
+  ];
+  assert.deepEqual(pickCandidate(c, { by: 'text', value: 'チャーター' }), { status: 'ok', index: 2 });
+  assert.deepEqual(pickCandidate(c, { by: 'text', value: '便' }), { status: 'ambiguous', indices: [1, 2, 3] });
+  assert.deepEqual(pickCandidate(c, { by: 'text', value: '日本郵便 ¥1,100' }), { status: 'ok', index: 3 }); // 完全一致優先
+  assert.deepEqual(pickCandidate(c, { by: 'text', value: 'ＦｅｄＥｘ' }), { status: 'none' });
+  assert.deepEqual(pickCandidate(c, { by: 'min' }), { status: 'ok', index: 3 });
+  assert.deepEqual(pickCandidate(c, { by: 'max' }), { status: 'ok', index: 2 });
+  assert.deepEqual(pickCandidate(c, { by: 'index', value: '2' }), { status: 'ok', index: 1 });
+  assert.deepEqual(pickCandidate(c, { by: 'index', value: '9' }), { status: 'none' });
+  assert.deepEqual(pickCandidate(c, { by: 'first' }), { status: 'ok', index: 0 });
+  assert.deepEqual(pickCandidate(c, { by: 'last' }), { status: 'ok', index: 3 });
+  assert.deepEqual(pickCandidate(c, { by: 'ai', value: '一番速い便' }), { status: 'needs-ai' });
+  assert.deepEqual(pickCandidate([], { by: 'first' }), { status: 'none' });
+  assert.equal(pickCandidate([{ text: 'a 1' }, { text: 'b 1' }], { by: 'min' }).status, 'ambiguous'); // 同値は曖昧
+  assert.deepEqual(pickCandidate([{ text: 'only' }], null), { status: 'ok', index: 0 });
+  assert.equal(firstNumber('合計 ￥48,200 (税込)'), 48200);
+  assert.equal(firstNumber('no number'), null);
+  ok('pickCandidate はルールで決定的に選ぶ');
+}
+
+// (19) 候補選択プロンプトは閉じた選択と信頼できない入力を明示し、手順を説明する。
+{
+  const msgs = buildChoiceMessages({
+    step: { action: { verb: 'click' }, target: '配送方法', locator: { kind: 'pick', anchor: {} }, choice: { by: 'ai', value: '20kg以上ならチャーター便' } },
+    candidates: [{ key: 'c0', text: 'ヤマト' }, { key: 'c1', text: 'チャーター便' }],
+    reason: 'needs-ai', url: 'https://a.test/o/1', title: '注文',
+  });
+  assert.equal(msgs[0].role, 'system');
+  assert.match(msgs[0].content, /none/);
+  assert.match(msgs[0].content, /信頼できない/);
+  assert.match(msgs[1].content, /c1: チャーター便/);
+  assert.match(msgs[1].content, /20kg以上ならチャーター便/);
+  assert.equal(describeStepAction({ action: { verb: 'fill', value: '12' }, target: '数量' }), '「数量」に「12」を入力');
+  ok('buildChoiceMessages は閉じた選択の指示を組み立てる');
+}
+
+// (20) nextPendingStep は記録順で最初の未実行手順を返す(1手ずつ進める基準)。actionable に構造化手順を含む。
+{
+  const wf = { steps: [
+    { id: 'a', action: { verb: 'click' }, url: 'https://a.test/1' },
+    { id: 'b', text: 'メモ', url: 'https://a.test/2' },
+    { id: 'c', text: '', target: '' },
+  ] };
+  assert.deepEqual(actionableSteps(wf).map((s) => s.id), ['a', 'b']);
+  assert.equal(nextPendingStep(wf, { doneStepIds: [] }).id, 'a');
+  assert.equal(nextPendingStep(wf, { doneStepIds: ['a'] }).id, 'b');
+  assert.equal(nextPendingStep(wf, { doneStepIds: ['a', 'b'] }), null);
+  const prompt = crossPageWorkflowForPrompt(wf);
+  assert.equal(prompt.count, 2);
+  assert.match(prompt.steps[0].action, /クリック/);
+  ok('nextPendingStep は記録順に1手ずつ返す');
 }
 
 console.log(`\n${passed} passed`);
