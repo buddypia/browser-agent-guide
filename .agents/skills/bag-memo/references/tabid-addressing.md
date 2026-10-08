@@ -75,7 +75,7 @@ CDP(Chrome DevTools Protocol)が公開するのは **`targetId`** であって `
 3. **target を `windowId + index + url` の一致で選ぶ**(tabId は照合の“正本の識別子”として突き合わせる対象であって、attach の鍵ではない)。
 4. 読み取り前に `--raw eval "location.href"` で host/URL がキャプチャの `url` と一致するか**必ず確認**。
 5. **使い捨て/重複タブは開かない**。一致 target が見つからない/Chrome に繋げない場合は、**ライブ確認をスキップ**して
-   静的特定(メモ＋HTML/a11y＋ソース grep)で票を出す —— このスキルは読み取り専用なので静的で十分。
+   静的特定(メモ＋HTML/a11y＋ソース grep)で修正へ進む —— 対象の特定は静的で十分。
 
 ### staleness(セッション再起動の注意)
 `tabId` は Chrome 再起動で振り直される。**古いキャプチャ/古いコピー値**の tabId は、いまのライブタブとは
