@@ -11,9 +11,9 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { buildEntryContent, buildEntryContext, buildEntryContextText, entryHasImage, peekDistinctRecent, readEntryImageBuffer, tabSummary } from './inbox.js';
+import { buildEntryContent, buildEntryContext, buildEntryContextText, entryHasImage, peekDistinctRecent, readEntryImageBuffer, readEntryInline, tabSummary } from './inbox.js';
 import { createDiskEntryStore } from './store.js';
-import { evaluateGoalWithEg2, DEFAULT_EG2_URL } from './eg2.js';
+import { evaluateGoalWithEg2, validateEg2Url, DEFAULT_EG2_URL } from './eg2.js';
 
 // 引数なし latest が曖昧（直近に複数プロジェクト）と判定する時間窓（既定90分、capturedAt 基準）。
 const DEFAULT_LATEST_WINDOW_MS = 90 * 60 * 1000;
@@ -216,17 +216,28 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
         '外部 Vision LLM トークンを使わず、修正後の画面が目的の状態（モーダルが閉じたか、意図したUIが表示されているか等）になっているかを高速に判定する。',
       inputSchema: {
         id: z.string().min(1).optional().describe('判定対象の entry ID。省略時は最新 entry を使用。'),
-        goal: z.string().min(1).describe('判定したいゴール（例: "モーダルが閉じ、通常画面に戻っている"）。'),
+        goal: z.string().min(1).max(2000).describe('判定したいゴール（例: "モーダルが閉じ、通常画面に戻っている"）。'),
         choices: z
-          .record(z.string())
+          .record(z.string().max(500))
           .optional()
-          .describe('選択肢の辞書（省略時は success / failure の二値判定）。'),
+          .describe('選択肢の辞書（最大20件。省略時は success / failure の二値判定）。'),
         model: z.string().optional().describe('使用モデル（既定: "440m"）。'),
-        eg2Url: z.string().url().optional().describe('eg2 サーバーの URL（既定: http://127.0.0.1:8765）。'),
+        eg2Url: z.string().url().optional().describe('eg2 サーバーの URL（既定: http://127.0.0.1:8765。loopback のみ許可）。'),
         ...FILTER_SCHEMA,
       },
     },
     async ({ id, goal, choices, model, eg2Url, urlContains, titleContains, tabId, windowId }) => {
+      // 1. SSRF 早期バリデーション（loopback 以外への不正リクエスト遮断）
+      const effectiveEg2Url = eg2Url || DEFAULT_EG2_URL;
+      const urlCheck = validateEg2Url(effectiveEg2Url);
+      if (!urlCheck.valid) {
+        return {
+          content: [{ type: 'text', text: `セキュリティエラー: ${urlCheck.error}` }],
+          isError: true,
+        };
+      }
+
+      // 2. 対象 entry の探索
       let entry = null;
       if (id) {
         entry = entryStore.findEntry(id);
@@ -241,6 +252,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
         entry = rows[0];
       }
 
+      // 3. text-only（画像なし）ガード
       if (entryHasImage(entry) === false) {
         return {
           content: [
@@ -253,7 +265,11 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
         };
       }
 
-      const imgBuf = readEntryImageBuffer(entry, 'shot');
+      // 4. 画像バッファの最適取得（軽量な inline webp/jpg を優先し、転送量とGPUメモリを劇的に削減）
+      const safeEntry = materializeForImage(entryStore, entry);
+      const inlineVariant = readEntryInline(safeEntry);
+      const imgBuf = inlineVariant?.buffer || readEntryImageBuffer(safeEntry, 'shot');
+
       if (!imgBuf || !imgBuf.length) {
         return {
           content: [{ type: 'text', text: `entry id=${entry.id} の画像バッファを取得できませんでした。` }],
@@ -261,13 +277,14 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
         };
       }
 
+      // 5. eg2 ゼロデコーディング判定実行（503自動リトライ + LRUキャッシュ付き）
       const imageBase64 = imgBuf.toString('base64');
       const evalResult = await evaluateGoalWithEg2({
         imageBase64,
         goal,
         choices,
         model: model || '440m',
-        eg2Url: eg2Url || DEFAULT_EG2_URL,
+        eg2Url: urlCheck.url,
       });
 
       if (!evalResult.ok) {
@@ -286,6 +303,9 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
           lines.push(`  - ${k}: ${typeof v === 'number' ? v.toFixed(3) : v}`);
         }
       }
+      if (evalResult.cached) {
+        lines.push('（インメモリ評価キャッシュから返却）');
+      }
       lines.push(`対象 entry: id=${entry.id}  url=${entry.url || '(不明)'}`);
 
       return {
@@ -294,6 +314,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
           choice: evalResult.choice,
           score: evalResult.score,
           scores: evalResult.scores,
+          cached: Boolean(evalResult.cached),
           entryId: entry.id,
           goal,
         },
