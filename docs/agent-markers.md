@@ -73,7 +73,7 @@ document.querySelectorAll('[data-agent-id^="@agent:login-form."]')    //    前�
 | ファイル | マーカー |
 |---|---|
 | `sidepanel/sidepanel.html` | `@agent:sidepanel.composer` / `.composer.input` / `.composer.send` / `@agent:sidepanel.draw` / `@agent:sidepanel.capture` |
-| `options/options.html` | `@agent:options.ai.save` / `.memory.save` / `.daemon.save` / `.daemon.test` / `.rules.add` / `.recipe.save` / `@agent:options.export` / `@agent:options.import` |
+| `options/options.html` | `@agent:options.ai.save` / `.memory.save` / `.daemon.save` / `.daemon.test` / `.eg2.save` / `.eg2.test` / `.rules.add` / `.recipe.save` / `@agent:options.export` / `@agent:options.import` |
 
 > 追加・変更時は `rg -n 'data-agent-id="@agent:' -g '!*.md' -g '!.claude'` で**形式違反と重複**を確認すること。
 

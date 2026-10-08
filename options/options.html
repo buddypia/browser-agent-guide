@@ -156,6 +156,40 @@
         </p>
       </section>
 
+      <!-- ローカル推論 (EmbeddingGemma 2) -->
+      <section class="card">
+        <h2 data-i18n="opt.eg2.h2">ローカル推論 (EmbeddingGemma 2)</h2>
+        <p class="hint" data-i18n-html="opt.eg2.intro">
+          ローカルで起動した <code>eg2-cli</code> (EmbeddingGemma 2) を利用して、自然言語の指示からページ上のボタンやリンクなどの要素を数十ミリ秒で特定・即時実行します（System 1 Fast Path）。外部LLMのAPIキー消費や待ち時間を削減できます。
+        </p>
+        <div class="grid">
+          <label class="checkbox-row">
+            <input id="eg2-enabled" type="checkbox" />
+            <span data-i18n="opt.eg2.enable">EmbeddingGemma 2 高速マッチングを有効化</span>
+          </label>
+          <label>
+            <span data-i18n="opt.eg2.url">eg2 URL</span>
+            <input id="eg2-url" type="text" placeholder="http://127.0.0.1:8765" />
+          </label>
+          <label>
+            <span data-i18n="opt.eg2.model">モデル</span>
+            <select id="eg2-model">
+              <option value="270m">270m (超高速・省メモリ)</option>
+              <option value="440m">440m (標準・マルチモーダル対応)</option>
+              <option value="740m">740m (高精度)</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <button id="save-eg2" class="primary" data-agent-id="@agent:options.eg2.save" data-agent-action="submit" data-i18n="opt.common.save">保存</button>
+          <button id="test-eg2" class="secondary" data-agent-id="@agent:options.eg2.test" data-agent-action="submit" data-i18n="opt.eg2.test">接続テスト</button>
+          <span id="eg2-status" class="status"></span>
+        </div>
+        <p class="hint" data-i18n-html="opt.eg2.hint">
+          <code>eg2</code> サーバーが <code>http://127.0.0.1:8765</code> 等で起動している必要があります。安全のため loopback アドレス (127.0.0.1 / localhost) のみ接続可能です。
+        </p>
+      </section>
+
       <!-- サイトルール -->
       <section class="card">
         <h2 data-i18n="opt.rules.h2">記憶したURL / 有効化ルール</h2>
