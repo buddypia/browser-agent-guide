@@ -1,6 +1,7 @@
 // 設定ページ。AI接続・サイトルール・レシピを編集して保存する。
 import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../lib/storage.js';
 import { createI18n, resolveLocale, normalizeLocale, languageName } from '../sidepanel/i18n.js';
+import { checkEg2Health, DEFAULT_EG2_URL } from '../lib/eg2-client.js';
 
 const $ = (id) => document.getElementById(id);
 const SAFE_RECIPE_VERBS = new Set(['injectHtml', 'injectCss', 'injectScript', 'outlineElement', 'injectButton', 'injectPanel']);
@@ -45,6 +46,7 @@ async function init() {
   fillMemoryForm();
   fillWorkflowForm();
   fillDaemonForm();
+  fillEg2Form();
   renderRules();
   renderRecipeSites();
   toggleProviderFields();
@@ -123,6 +125,40 @@ function testDaemon() {
     clearTimeout(timer);
     setStatus('daemon-status', t('opt.daemon.testFailed'), false);
   };
+}
+
+// ---- ローカル推論 (EmbeddingGemma 2) ----
+function fillEg2Form() {
+  const e = settings.eg2 || {};
+  $('eg2-enabled').checked = Boolean(e.enabled);
+  $('eg2-url').value = e.url || DEFAULT_SETTINGS.eg2.url;
+  $('eg2-model').value = e.model || DEFAULT_SETTINGS.eg2.model;
+}
+
+async function saveEg2() {
+  settings.eg2 = {
+    ...(settings.eg2 || {}),
+    enabled: $('eg2-enabled').checked,
+    url: $('eg2-url').value.trim() || DEFAULT_SETTINGS.eg2.url,
+    model: $('eg2-model').value || DEFAULT_SETTINGS.eg2.model,
+  };
+  await saveSettings(settings);
+  setStatus('eg2-status', t('opt.status.saved'), true);
+}
+
+async function testEg2() {
+  const url = $('eg2-url').value.trim();
+  if (!url) {
+    setStatus('eg2-status', t('opt.eg2.enterUrl'), false);
+    return;
+  }
+  setStatus('eg2-status', t('opt.eg2.connecting'), true);
+  const res = await checkEg2Health({ url });
+  if (res.ok) {
+    setStatus('eg2-status', t('opt.eg2.testOk', { status: res.status }), true);
+  } else {
+    setStatus('eg2-status', t('opt.eg2.testFailed', { error: res.error || 'unreachable' }), false);
+  }
 }
 
 function fillMemoryForm() {
@@ -380,6 +416,7 @@ function importSettings(file) {
       workflow: { ...DEFAULT_SETTINGS.workflow, ...(data.workflow || {}) },
       ui: { ...DEFAULT_SETTINGS.ui, ...(data.ui || {}) },
       daemon: { ...DEFAULT_SETTINGS.daemon, ...(data.daemon || {}) },
+      eg2: { ...DEFAULT_SETTINGS.eg2, ...(data.eg2 || {}) },
       pageFeedback: { ...DEFAULT_SETTINGS.pageFeedback, ...(data.pageFeedback || {}) },
     };
       await saveSettings(settings);
@@ -391,6 +428,7 @@ function importSettings(file) {
       fillMemoryForm();
       fillWorkflowForm();
       fillDaemonForm();
+      fillEg2Form();
       renderRules();
       renderRecipeSites();
       toggleProviderFields();
@@ -437,6 +475,8 @@ function bindEvents() {
   $('save-workflow').addEventListener('click', saveWorkflowSettings);
   $('save-daemon').addEventListener('click', saveDaemon);
   $('test-daemon').addEventListener('click', testDaemon);
+  $('save-eg2').addEventListener('click', saveEg2);
+  $('test-eg2').addEventListener('click', testEg2);
   $('add-rule').addEventListener('click', addRule);
   $('recipe-site').addEventListener('change', loadRecipeJson);
   $('save-recipe').addEventListener('click', saveRecipe);
