@@ -78,6 +78,7 @@ test('tools/list が新名5ツールのみを公開する（旧 page_feedback �
     const names = tools.map((t) => t.name).sort();
     // 厳密一致なので、旧 deprecated エイリアス（*_page_feedback*）が1つでも残れば失敗する。
     assert.deepEqual(names, [
+      'evaluate_feedback_goal',
       'get_feedback_context',
       'get_feedback_image',
       'get_latest_feedback_context',

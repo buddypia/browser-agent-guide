@@ -11,8 +11,9 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { buildEntryContent, buildEntryContext, buildEntryContextText, peekDistinctRecent, tabSummary } from './inbox.js';
+import { buildEntryContent, buildEntryContext, buildEntryContextText, entryHasImage, peekDistinctRecent, readEntryImageBuffer, tabSummary } from './inbox.js';
 import { createDiskEntryStore } from './store.js';
+import { evaluateGoalWithEg2, DEFAULT_EG2_URL } from './eg2.js';
 
 // 引数なし latest が曖昧（直近に複数プロジェクト）と判定する時間窓（既定90分、capturedAt 基準）。
 const DEFAULT_LATEST_WINDOW_MS = 90 * 60 * 1000;
@@ -203,6 +204,100 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       const entry = entryStore.findEntry(id);
       if (!entry) return { content: [{ type: 'text', text: `id=${id} は見つかりません。` }], isError: true };
       return imageResult(entryStore, entry, shotUrlFor, { contextId, imageReason });
+    }
+  );
+
+  server.registerTool(
+    'evaluate_feedback_goal',
+    {
+      title: '画面のゴール達成判定（EmbeddingGemma 2）',
+      description:
+        'フィードバックのスクリーンショットに対して、ローカルの EmbeddingGemma 2 (eg2) を用いてゼロデコーディング視覚判定を行う。' +
+        '外部 Vision LLM トークンを使わず、修正後の画面が目的の状態（モーダルが閉じたか、意図したUIが表示されているか等）になっているかを高速に判定する。',
+      inputSchema: {
+        id: z.string().min(1).optional().describe('判定対象の entry ID。省略時は最新 entry を使用。'),
+        goal: z.string().min(1).describe('判定したいゴール（例: "モーダルが閉じ、通常画面に戻っている"）。'),
+        choices: z
+          .record(z.string())
+          .optional()
+          .describe('選択肢の辞書（省略時は success / failure の二値判定）。'),
+        model: z.string().optional().describe('使用モデル（既定: "440m"）。'),
+        eg2Url: z.string().url().optional().describe('eg2 サーバーの URL（既定: http://127.0.0.1:8765）。'),
+        ...FILTER_SCHEMA,
+      },
+    },
+    async ({ id, goal, choices, model, eg2Url, urlContains, titleContains, tabId, windowId }) => {
+      let entry = null;
+      if (id) {
+        entry = entryStore.findEntry(id);
+        if (!entry) {
+          return { content: [{ type: 'text', text: `id=${id} は見つかりません。` }], isError: true };
+        }
+      } else {
+        const rows = entryStore.queryEntries({ limit: 1, urlContains, titleContains, tabId, windowId });
+        if (!rows.length) {
+          return { content: [{ type: 'text', text: emptyMessage({ urlContains, titleContains, tabId, windowId }) }], isError: true };
+        }
+        entry = rows[0];
+      }
+
+      if (entryHasImage(entry) === false) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `entry id=${entry.id} は text-only（メモのみ同期）のためスクリーンショット画像が存在せず、視覚判定を行えません。`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const imgBuf = readEntryImageBuffer(entry, 'shot');
+      if (!imgBuf || !imgBuf.length) {
+        return {
+          content: [{ type: 'text', text: `entry id=${entry.id} の画像バッファを取得できませんでした。` }],
+          isError: true,
+        };
+      }
+
+      const imageBase64 = imgBuf.toString('base64');
+      const evalResult = await evaluateGoalWithEg2({
+        imageBase64,
+        goal,
+        choices,
+        model: model || '440m',
+        eg2Url: eg2Url || DEFAULT_EG2_URL,
+      });
+
+      if (!evalResult.ok) {
+        const lines = [`eg2 評価エラー: ${evalResult.error}`];
+        if (evalResult.hint) lines.push(`ヒント: ${evalResult.hint}`);
+        return { content: [{ type: 'text', text: lines.join('\n') }], isError: true };
+      }
+
+      const lines = [
+        `判定結果: ${evalResult.choice}`,
+        `スコア: ${evalResult.score != null ? evalResult.score.toFixed(3) : '(スコアなし)'}`,
+      ];
+      if (evalResult.scores && Object.keys(evalResult.scores).length > 1) {
+        lines.push('選択肢スコア一覧:');
+        for (const [k, v] of Object.entries(evalResult.scores)) {
+          lines.push(`  - ${k}: ${typeof v === 'number' ? v.toFixed(3) : v}`);
+        }
+      }
+      lines.push(`対象 entry: id=${entry.id}  url=${entry.url || '(不明)'}`);
+
+      return {
+        content: [{ type: 'text', text: lines.join('\n') }],
+        structuredContent: {
+          choice: evalResult.choice,
+          score: evalResult.score,
+          scores: evalResult.scores,
+          entryId: entry.id,
+          goal,
+        },
+      };
     }
   );
 
