@@ -30,6 +30,7 @@ import {
   formatStepTitle,
 } from '../lib/workflow.js';
 import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18n.js';
+import { matchAffordanceFastPath, resolveFastPathAction } from '../lib/eg2-client.js';
 
 // ---- 設定ブロブのメモリキャッシュ ----
 // 1メッセージ処理で getSettings が複数回(例: handleMessage 冒頭の ensureI18n と
@@ -332,11 +333,48 @@ async function collectContext(tabId) {
 /** チャット本処理: 文脈収集 → AI(構造化出力) → 動詞実行 → 結果返却。 */
 async function runChat({ tabId, text, history, rememberScope }) {
   const settings = await getSettings();
+  const scope = normalizeRememberScope(rememberScope || settings.memory?.defaultScope);
+  const context = await collectContext(tabId);
+
+  // System 1 Fast Path: ローカル EmbeddingGemma 2 が有効な場合、高速類似度マッチングを試みる
+  if (settings.eg2?.enabled && Array.isArray(context?.affordances) && context.affordances.length > 0) {
+    try {
+      const matchResult = await matchAffordanceFastPath({
+        query: text,
+        affordances: context.affordances,
+        url: settings.eg2.url,
+        model: settings.eg2.model,
+      });
+      if (matchResult.matched && matchResult.best) {
+        const action = resolveFastPathAction(text, matchResult.best);
+        if (action) {
+          const res = await ensureContentAndSend(tabId, {
+            type: 'RUN_ACTIONS',
+            actions: [action],
+            source: 'chat',
+          });
+          const results = res?.results || [];
+          const remembered = await rememberSuccessfulChanges({
+            context,
+            actions: [action],
+            results,
+            source: 'chat',
+            scope,
+          });
+          const targetName = matchResult.best.label || matchResult.best.text || matchResult.best.aiId;
+          const pct = (matchResult.score * 100).toFixed(1);
+          const reply = `⚡️ [Fast Path (eg2)] 「${targetName}」(${matchResult.best.aiId}) を特定して操作しました (類似度: ${pct}%)。`;
+          return { reply, actions: [action], results, remembered, fastPath: true };
+        }
+      }
+    } catch (err) {
+      console.warn('[BAG:eg2] Fast path match failed, falling back to full AI:', err);
+    }
+  }
+
   if (!settings.ai.apiKey) {
     throw new Error(t('sw.err.apiKeyMissing'));
   }
-  const scope = normalizeRememberScope(rememberScope || settings.memory?.defaultScope);
-  const context = await collectContext(tabId);
   const verbNames = (context.verbs || []).map((v) => v.name);
 
   // ページ跨ぎワークフロー(記録した手順)を読み、プロンプトに「URL順の操作手順」として同梱する。
