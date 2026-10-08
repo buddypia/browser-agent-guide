@@ -44,11 +44,10 @@ log(`${files.length} files, ${lines} lines changed`);
 
 // 2. Tests (failure = nothing is pushed).
 const ensureDeps = (dir) => existsSync(join(dir, 'node_modules')) || run('npm', ['install', '--no-audit', '--no-fund'], dir);
-if (!ensureDeps(wt) || !run('npm', ['run', 'check'], wt)) finish('FAILED', 'npm run check failed');
-if (files.some((f) => f.startsWith('daemon/'))) {
-  const d = join(wt, 'daemon');
-  if (!ensureDeps(d) || !run('npm', ['test'], d)) finish('FAILED', 'daemon tests failed');
-}
+const daemon = join(wt, 'daemon'); // UI specs import daemon modules, so it needs deps either way
+if (!ensureDeps(wt) || !ensureDeps(daemon)) finish('FAILED', 'npm install failed');
+if (!run('npm', ['run', 'check'], wt)) finish('FAILED', 'npm run check failed');
+if (files.some((f) => f.startsWith('daemon/')) && !run('npm', ['test'], daemon)) finish('FAILED', 'daemon tests failed');
 
 // 3. AI review in a hook-free, read-only headless Claude session. Any failure fails closed (human review).
 const SCHEMA = {
