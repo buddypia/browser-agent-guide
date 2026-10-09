@@ -314,7 +314,7 @@
   "opt.eg2.url": "eg2 URL",
   "opt.eg2.model": "Model",
   "opt.eg2.test": "Test connection",
-  "opt.eg2.hint": "Requires <code>eg2</code> server running on <code>http://127.0.0.1:8765</code>. Only loopback addresses (127.0.0.1 / localhost) are allowed for security.",
+  "opt.eg2.hint": "Requires <code>eg2</code> server running on <code>http://127.0.0.1:38765</code>. Only loopback addresses (127.0.0.1 / localhost) are allowed for security.",
   "opt.eg2.connecting": "Checking connection…",
   "opt.eg2.testOk": "Connected (eg2 running: {status})",
   "opt.eg2.testFailed": "Connection failed (not running or invalid URL: {error})",

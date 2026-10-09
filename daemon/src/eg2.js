@@ -3,7 +3,7 @@
 
 import { createHash } from 'node:crypto';
 
-export const DEFAULT_EG2_URL = process.env.EG2_URL || 'http://127.0.0.1:8765';
+export const DEFAULT_EG2_URL = process.env.EG2_URL || 'http://127.0.0.1:38765';
 
 // セキュリティ制約
 const ALLOWED_LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
