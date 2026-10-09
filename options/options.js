@@ -1,5 +1,5 @@
 // 設定ページ。AI接続・サイトルール・レシピを編集して保存する。
-import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../lib/storage.js';
+import { getSettings, saveSettings, DEFAULT_SETTINGS, migrateEg2 } from '../lib/storage.js';
 import { createI18n, resolveLocale, normalizeLocale, languageName } from '../sidepanel/i18n.js';
 import { checkEg2Health, DEFAULT_EG2_URL } from '../lib/eg2-client.js';
 
@@ -416,7 +416,8 @@ function importSettings(file) {
       workflow: { ...DEFAULT_SETTINGS.workflow, ...(data.workflow || {}) },
       ui: { ...DEFAULT_SETTINGS.ui, ...(data.ui || {}) },
       daemon: { ...DEFAULT_SETTINGS.daemon, ...(data.daemon || {}) },
-      eg2: { ...DEFAULT_SETTINGS.eg2, ...(data.eg2 || {}) },
+      // 旧バージョンの書き出し (urlVersion なし・8765) も読込時と同じく移行する
+      eg2: migrateEg2(data.eg2),
       pageFeedback: { ...DEFAULT_SETTINGS.pageFeedback, ...(data.pageFeedback || {}) },
     };
       await saveSettings(settings);
