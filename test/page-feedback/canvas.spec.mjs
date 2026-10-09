@@ -36,7 +36,8 @@ test('compositor は実 canvas で taint せず有効な PNG を焼き込む', a
 
     const { scale, width, height } = VF.computeOutputSize(bmp.width, bmp.height);
     const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext('2d');
+    // GPU 合成だと並列負荷下で getImageData が 0 を返すことがあるため、CPU 側 canvas で読む。
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(bmp, 0, 0, width, height);
     if (bmp.close) bmp.close();
 

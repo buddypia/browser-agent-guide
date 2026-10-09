@@ -4920,6 +4920,7 @@
       if (msg?.type !== 'PING') await loadI18n();
       switch (msg?.type) {
         case 'PING':
+          await workflowCacheLoaded;
           return { ok: true };
         case 'COLLECT_CONTEXT':
           annotatePage();
@@ -5041,9 +5042,12 @@
   }
 
   // ---- 初期化: ロケール辞書を読み込み、保存済みの注釈を復元する ----
+  // 記録状態は辞書より先に読む: 読み込み前のクリックは記録されないため、取りこぼしの窓を最小にする。
+  // PING もこれを待つので、PING に応答した時点で記録の準備はできている。
+  const workflowCacheLoaded = loadWorkflowCache();
   (async () => {
+    await workflowCacheLoaded;
     await loadI18n();
-    await loadWorkflowCache();
     attachNavCheck(location.href); // 記録中: 直前のクリックでこのページへ遷移したなら URL 確認を付ける
     await loadAnnotations();
     renderAnnotations();
