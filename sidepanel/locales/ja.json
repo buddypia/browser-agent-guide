@@ -10,6 +10,7 @@
   "topbar.clearChatTitle": "現在のチャット履歴を消去して、新しいチャットを開始します",
   "topbar.newChat": "新規チャット",
   "topbar.openSettings": "設定を開く",
+  "topbar.more": "その他の操作",
   "memory.scopeTitle": "AIが注入したHTML/CSS/JSを自動保存する範囲",
   "memory.saveLabel": "保存範囲",
   "memory.page": "URL",

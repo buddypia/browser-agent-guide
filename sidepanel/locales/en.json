@@ -10,6 +10,7 @@
   "topbar.clearChatTitle": "Clear the current chat history and start a new chat",
   "topbar.newChat": "New chat",
   "topbar.openSettings": "Open settings",
+  "topbar.more": "More actions",
   "memory.scopeTitle": "Range for automatically saving AI-injected HTML/CSS/JS",
   "memory.saveLabel": "Auto-save",
   "memory.page": "URL",
