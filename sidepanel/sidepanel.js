@@ -1201,7 +1201,7 @@ async function loadSentMemos() {
 
 // 届いた内容と今の内容が同じなら送信済み。編集して中身が変われば未送信に戻る。
 function sentStateChip(a) {
-  const sent = Boolean(a.sig) && sentMemos[a.id]?.sig === a.sig;
+  const sent = Boolean(a.sig) && Boolean(sentMemos[a.sig]);
   const chip = document.createElement('span');
   chip.className = `anno-sent ${sent ? 'sent' : 'pending'}`;
   chip.textContent = sent ? t('annotations.sentState.sent') : t('annotations.sentState.pending');
@@ -1408,7 +1408,7 @@ function renderSupportAnnotationItem(a) {
   title.className = 'anno-title';
   title.textContent = annotationTitle(a);
   body.appendChild(title);
-  if (a.kind === 'note' && String(a.note || '').trim()) body.appendChild(sentStateChip(a));
+  if (a.kind === 'note' && String(a.note || '').trim() && a.forAI !== false) body.appendChild(sentStateChip(a));
   const sub = annotationSub(a);
   if (sub) {
     const subEl = document.createElement('span');

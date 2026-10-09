@@ -1160,18 +1160,27 @@ async function pushTextOnlyPageFeedback({ tabId, tab, data }) {
   return { transport: 'daemon', textOnly: true, dir: ack.dir, id: ack.id, items: data.items.length };
 }
 
-// AIへ届いたメモの内容署名を記録する。サイドパネルの送信トレイが「未送信/送信済み」を出すのに使う
-// (「メモを残しただけでは届かない」混乱を画面上で見えるようにする)。古い記録は件数で間引く。
+// AIへ届いたメモの内容署名(ページ+id+中身)を {sig: 送信時刻} で記録する。サイドパネルの送信トレイが
+// 「未送信/送信済み」を出すのに使う(「メモを残しただけでは届かない」混乱を画面上で見えるようにする)。
+// 表示用の付帯情報なので失敗しても送信結果は変えない。複数タブの同時送信で記録が消えないよう直列化する。
 const SENT_MEMOS_KEY = 'aiAdvisorSentMemos';
 const SENT_MEMOS_MAX = 500;
-async function recordSentMemos(items) {
-  const list = (items || []).filter((it) => it?.id && it?.sig);
-  if (!list.length) return;
-  const cur = (await chrome.storage.local.get(SENT_MEMOS_KEY))[SENT_MEMOS_KEY] || {};
-  const at = new Date().toISOString();
-  for (const it of list) cur[it.id] = { sig: it.sig, at };
-  const kept = Object.entries(cur).sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).slice(0, SENT_MEMOS_MAX);
-  await chrome.storage.local.set({ [SENT_MEMOS_KEY]: Object.fromEntries(kept) });
+let sentMemosQueue = Promise.resolve();
+function recordSentMemos(items) {
+  const sigs = (items || []).map((it) => it?.sig).filter(Boolean);
+  if (!sigs.length) return sentMemosQueue;
+  sentMemosQueue = sentMemosQueue.then(async () => {
+    try {
+      const cur = (await chrome.storage.local.get(SENT_MEMOS_KEY))[SENT_MEMOS_KEY] || {};
+      const at = new Date().toISOString();
+      for (const sig of sigs) cur[sig] = at;
+      const kept = Object.entries(cur).sort((a, b) => String(b[1]).localeCompare(String(a[1]))).slice(0, SENT_MEMOS_MAX);
+      await chrome.storage.local.set({ [SENT_MEMOS_KEY]: Object.fromEntries(kept) });
+    } catch {
+      /* 記録失敗は表示が「未送信」のままになるだけ */
+    }
+  });
+  return sentMemosQueue;
 }
 
 async function capturePageFeedback({ tabId, autoSync = false }) {

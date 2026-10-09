@@ -267,9 +267,11 @@ test.describe('UI quality gates', () => {
         drawing('d1', 'Right-align the total', 'text-sent'),
         drawing('d2', 'Make Confirm stand out', 'text-new'),
         { id: 'n1', kind: 'note', note: 'Address field is too narrow', intent: '', step: 1, resolved: true, target: 'Address', sig: 'text-edited' },
+        // 送信対象外のメモは送られないので、状態チップも出さない。
+        { id: 'n2', kind: 'note', note: 'Private reminder', intent: '', step: 1, resolved: true, target: 'Name', forAI: false, sig: 'text-private' },
       ],
-      // d1 は同じ内容で届いた。n1 は届いた後に編集された(署名が変わった)ので未送信に戻る。
-      aiAdvisorSentMemos: { d1: { sig: 'text-sent', at: '2026-10-09T00:00:00Z' }, n1: { sig: 'text-old', at: '2026-10-09T00:00:00Z' } },
+      // 記録は署名(ページ+id+中身)がキー。d1 は同じ内容で届いた。n1 は届いた後に編集され、署名が変わったので未送信。
+      aiAdvisorSentMemos: { 'text-sent': '2026-10-09T00:00:00Z', 'text-old': '2026-10-09T00:00:00Z' },
     });
     await page.setViewportSize({ width: 360, height: 720 });
     await page.goto(pageUrl('sidepanel/sidepanel.html'));
@@ -281,7 +283,7 @@ test.describe('UI quality gates', () => {
 
     // SW が送信を記録すると、その場で送信済みに変わる。
     await page.evaluate(() =>
-      chrome.storage.local.set({ aiAdvisorSentMemos: { d1: { sig: 'text-sent', at: 'x' }, d2: { sig: 'text-new', at: 'x' }, n1: { sig: 'text-edited', at: 'x' } } })
+      chrome.storage.local.set({ aiAdvisorSentMemos: { 'text-sent': 'x', 'text-new': 'x', 'text-edited': 'x' } })
     );
     await expect(tray.locator('.anno-sent.pending')).toHaveCount(0);
     await expect(tray.locator('.anno-sent.sent')).toHaveCount(3);

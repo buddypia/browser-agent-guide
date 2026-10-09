@@ -351,8 +351,9 @@
   }
 
   // 送信済み判定用の内容署名。AIへ渡る中身(本文・意図・図形)が変われば署名も変わり「未送信」に戻る。
+  // 注釈 id はページ読み込みごとの連番で別ページと重なるので、ページキーと id も含めて一意にする。
   function annoContentSig(a) {
-    return hashText(JSON.stringify([a.note || '', a.intent || '', a.shapes || []]));
+    return hashText(JSON.stringify([scopeKey(), a.id || '', a.note || '', a.intent || '', a.shapes || []]));
   }
 
   function uniqueId(base, seen) {
