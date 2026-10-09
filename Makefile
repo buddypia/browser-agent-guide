@@ -1,4 +1,4 @@
-.PHONY: wt.new wt.run q.check q.ci-mirror setup.skills setup.mcp mcp.setup
+.PHONY: ship wt.new wt.run q.check q.ci-mirror setup.skills setup.mcp mcp.setup
 
 wt.new:
 	@if [ -z "$(BR)" ]; then \
@@ -29,3 +29,7 @@ setup.mcp:
 	@node .claude/scripts/setup-mcp.mjs $(ARGS)
 
 mcp.setup: setup.mcp
+
+# Run from a finished worktree: test → AI review → PR → auto-merge small changes → cleanup.
+ship:
+	@node $(CURDIR)/scripts/auto-ship.mjs $(if $(DRY),--dry-run)
