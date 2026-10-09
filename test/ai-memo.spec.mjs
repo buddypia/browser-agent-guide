@@ -141,6 +141,7 @@ test.describe('お描き連動のAIメモ', () => {
     expect(summary.sig).toBeTruthy();
     expect(edited.id).toBe(summary.id);
     expect(edited.sig).not.toBe(summary.sig);
+
   });
 
   test('「完了」を連打しても空メモは1つだけ生成される（再入ガード）', async ({ page }) => {
@@ -479,6 +480,32 @@ test.describe('お描き連動のAIメモ', () => {
     expect(vf.items[0].resolved).toBe(true);
     expect(vf.items[0].anchorLabel).toContain('Rehydrated card');
     await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'FINISH_CAPTURE' }, {}, r)));
+  });
+
+  test('別ページで同じ注釈 id・同じ中身になっても送信済み署名は別になる', async ({ page }) => {
+    // 注釈 id はページ読み込みごとの連番なので別ページと重なる。署名がページを含まないと、
+    // あるページで送信すると別ページの同じ id のメモまで「送信済み」と表示されてしまう。
+    await page.route('https://example.com/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: PAGE_HTML })
+    );
+    const drawnOn = async (url) => {
+      await page.goto(url);
+      await page.addScriptTag({ content: CHROME_STUB });
+      await page.addStyleTag({ content: contentCss });
+      await page.addScriptTag({ content: contentScript });
+      await drawRectAndFinish(page, '同じ指示');
+      await page.locator('.bag-memo-save').last().click();
+      const listed = await page.evaluate(
+        () => new Promise((r) => window.__bagListener({ type: 'LIST_ANNOTATIONS' }, {}, r))
+      );
+      return listed.annotations.find((a) => a.kind === 'drawing');
+    };
+    const a = await drawnOn('https://example.com/page-a');
+    const b = await drawnOn('https://example.com/page-b');
+    expect(b.id).toBe(a.id);
+    expect(b.note).toBe(a.note);
+    expect(a.sig).toBeTruthy();
+    expect(b.sig).not.toBe(a.sig);
   });
 
   test('商品画像だけを囲んだお描きでも近傍の商品リンク候補をcaptureに残す', async ({ page }) => {

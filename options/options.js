@@ -370,12 +370,12 @@ function insertTemplate() {
     },
     {
       verb: 'injectCss',
-      args: { id: 'saved-style', css: '[data-bag-injected="saved-note"] { outline: 2px solid #0f766e; padding: 8px; }' },
+      args: { id: 'saved-style', css: '[data-bag-injected="saved-note"] { outline: 2px solid #b9321b; padding: 8px; }' },
       reason: '保存済みCSSを再適用',
     },
     {
       verb: 'outlineElement',
-      args: { selector: '#async-result', color: '#0f766e' },
+      args: { selector: '#async-result', color: '#b9321b' },
       // waitFor: 非同期で後から現れる要素を待ってから実行する(遅延ロード/SPA対応)。
       //          selector が timeoutMs(ミリ秒)以内に出現しなければ失敗扱いになる。
       waitFor: { selector: '#async-result', timeoutMs: 5000 },
