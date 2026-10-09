@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { judgeBranchMerged, isSafeBranchName, PROTECTED_BRANCHES } from '../scripts/cleanup-merged-branches.mjs';
+import { judgeBranchMerged, isSafeBranchName, PROTECTED_BRANCHES, getBranchPrs } from '../scripts/cleanup-merged-branches.mjs';
 
 test('isSafeBranchName protects primary branches and rejects dangerous tokens', () => {
   for (const b of ['main', 'master', 'HEAD', 'develop', 'release']) {
@@ -77,3 +77,29 @@ test('open or closed PR is not judged merged', () => {
   });
   assert.equal(res.merged, false);
 });
+
+test('getBranchPrs returns cached PRs on hit, and queries fallback on miss', () => {
+  const cache = new Map([
+    ['feature/cached', [{ number: 1, state: 'MERGED', headRefOid: 'sha1', headRefName: 'feature/cached' }]],
+  ]);
+
+  // Hit
+  let fallbackCalled = false;
+  const hit = getBranchPrs('feature/cached', cache, () => {
+    fallbackCalled = true;
+    return '[]';
+  });
+  assert.equal(fallbackCalled, false);
+  assert.equal(hit.length, 1);
+  assert.equal(hit[0].number, 1);
+
+  // Miss with successful fallback
+  const miss = getBranchPrs('feature/miss', cache, (_cmd, args) => {
+    assert.deepEqual(args.slice(0, 4), ['pr', 'list', '--head', 'feature/miss']);
+    return JSON.stringify([{ number: 2, state: 'MERGED', headRefOid: 'sha2', headRefName: 'feature/miss' }]);
+  });
+  assert.equal(miss.length, 1);
+  assert.equal(miss[0].number, 2);
+  assert.equal(cache.has('feature/miss'), true, 'should cache the fallback result');
+});
+

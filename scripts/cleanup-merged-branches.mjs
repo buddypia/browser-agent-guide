@@ -119,6 +119,26 @@ export function fetchPrCache() {
 }
 
 /**
+ * Retrieves PRs for a branch. Checks bulk cache first, and falls back to a targeted query
+ * if the branch was not found in the recent PR list.
+ */
+export function getBranchPrs(branch, prCache, runFn = sh) {
+  if (prCache && prCache.has(branch)) {
+    return prCache.get(branch);
+  }
+  const prJson = runFn('gh', ['pr', 'list', '--head', branch, '--state', 'all', '--limit', '5', '--json', 'number,state,headRefOid,headRefName']);
+  if (!prJson) return [];
+  try {
+    const list = JSON.parse(prJson);
+    if (Array.isArray(list)) {
+      if (prCache) prCache.set(branch, list);
+      return list;
+    }
+  } catch {}
+  return [];
+}
+
+/**
  * Safely deletes a remote branch if it exists and matches the expected commit SHA.
  */
 function deleteRemoteBranchSafely(branch, expectedSha) {
@@ -176,13 +196,14 @@ export function main(dryRun = false) {
     // 1. Fast ancestor check (fastest local check)
     const isAncestor = spawnSync('git', ['merge-base', '--is-ancestor', '--', branch, 'origin/main']).status === 0;
 
-    // 2. PR check from bulk cache (in-memory O(1) lookup)
-    const branchPrs = prCache.get(branch) || [];
+    // 2. PR check (bulk cache with single-branch fallback)
+    const branchPrs = getBranchPrs(branch, prCache);
 
     // 3. Tree check (compute only if ancestor and PR checks do not conclude)
+    // NOTE: git merge-tree takes refs directly; '--' causes parse option stop and usage error 129
     let mergedTree = null;
     if (!isAncestor && (!branchPrs.length || !branchPrs.some((p) => p.state === 'MERGED' && p.headRefOid === branchHeadSha)) && mainTree) {
-      mergedTree = sh('git', ['merge-tree', '--write-tree', 'origin/main', '--', branch]);
+      mergedTree = sh('git', ['merge-tree', '--write-tree', 'origin/main', `refs/heads/${branch}`]);
     }
 
     const { merged, reason } = judgeBranchMerged({ isAncestor, mainTree, mergedTree, branchHeadSha, prList: branchPrs });
