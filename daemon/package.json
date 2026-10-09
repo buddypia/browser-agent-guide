@@ -12,9 +12,12 @@
     "service": "node scripts/install-service.mjs",
     "test": "node --test 'test/*.test.mjs'"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "ws": "^8.21.0",
-    "zod": "^3.23.0"
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "ws": "^8.22.0",
+    "zod": "^3.25.0"
   }
 }
