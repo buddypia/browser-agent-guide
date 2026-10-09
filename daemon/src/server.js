@@ -222,7 +222,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
           .optional()
           .describe('選択肢の辞書（最大20件。省略時は success / failure の二値判定）。'),
         model: z.string().optional().describe('使用モデル（既定: "440m"）。'),
-        eg2Url: z.string().url().optional().describe('eg2 サーバーの URL（既定: http://127.0.0.1:8765。loopback のみ許可）。'),
+        eg2Url: z.string().url().optional().describe('eg2 サーバーの URL（既定: http://127.0.0.1:38765。loopback のみ許可）。'),
         ...FILTER_SCHEMA,
       },
     },

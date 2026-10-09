@@ -11,6 +11,7 @@ import {
   matchAffordanceFastPath,
   resolveFastPathAction,
 } from '../lib/eg2-client.js';
+import { DEFAULT_SETTINGS, migrateEg2 } from '../lib/storage.js';
 
 let passed = 0;
 function ok(name) {
@@ -233,6 +234,19 @@ async function runTests() {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  }
+
+  // 6. 既定 URL はデーモン既定ポート (8765) と衝突しない。旧既定のまま保存された設定は新既定で読む
+  {
+    assert.equal(DEFAULT_EG2_URL, 'http://127.0.0.1:38765');
+    assert.equal(DEFAULT_SETTINGS.eg2.url, DEFAULT_EG2_URL);
+    assert.equal(migrateEg2({ enabled: true, url: 'http://127.0.0.1:8765' }).url, DEFAULT_EG2_URL);
+    assert.equal(migrateEg2({ enabled: true, url: 'http://localhost:9999' }).url, 'http://localhost:9999');
+    // 新しい保存値 (urlVersion あり) で明示的に選んだ 8765 は書き換えない
+    assert.equal(migrateEg2({ url: 'http://127.0.0.1:8765', urlVersion: 2 }).url, 'http://127.0.0.1:8765');
+    assert.equal(migrateEg2(undefined).url, DEFAULT_EG2_URL);
+    assert.equal(migrateEg2({}).model, DEFAULT_SETTINGS.eg2.model);
+    ok('eg2 default URL avoids the daemon port and legacy saved URL migrates');
   }
 
   console.log(`\nAll ${passed} tests passed.`);
