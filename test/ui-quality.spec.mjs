@@ -567,7 +567,7 @@ test.describe('UI quality gates', () => {
     expect(msg.markdown).toContain('Reply to: First change');
   });
 
-  test('options page passes axe on the default settings state', async ({ page }) => {
+  test('options page passes axe on the default settings state', async ({ page }, testInfo) => {
     await page.goto(pageUrl('options/options.html'));
 
     // 既定の言語はブラウザ UI 言語依存。テストを決定的にするため日本語へ切り替えて検証する。
@@ -577,6 +577,9 @@ test.describe('UI quality gates', () => {
     await expect(page.getByLabel('プロバイダ')).toBeVisible();
     await expect(page.locator('.anthropic-field').first()).toBeHidden();
     await expect(page.getByRole('button', { name: '保存' }).first()).toBeVisible();
+    // サイドパネルと同じ紙の地色(light)で描かれる。
+    await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(245, 242, 236)');
+    await page.screenshot({ path: testInfo.outputPath('options-paper.png'), fullPage: true });
 
     await expectNoAxeViolations(page);
   });
