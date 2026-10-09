@@ -184,6 +184,12 @@ async function installChromeMock(page, seed = {}) {
   }, seed);
 }
 
+// 言語・自動保存・DL・全削除は ⋯ メニューに格納されている。
+async function openMoreMenu(page) {
+  const more = page.getByRole('button', { name: 'More actions' });
+  if ((await more.getAttribute('aria-expanded')) !== 'true') await more.click();
+}
+
 async function expectNoAxeViolations(page) {
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
@@ -209,19 +215,47 @@ test.describe('UI quality gates', () => {
     await expect(page.getByRole('button', { name: 'Copy tab ID 1' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Copy tab ID 1' })).toContainText('1');
     await expect(page.getByLabel('Target tab')).toContainText('Window 2 / Pos 1');
-    await expect(page.getByLabel('Language')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Add note' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Copy for AI' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'List elements' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open prompt history' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Delete all chat messages' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open settings' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Delete all chat messages' })).toBeHidden();
+    await openMoreMenu(page);
+    await expect(page.getByLabel('Language')).toBeVisible();
+    await expect(page.getByLabel('Auto-save')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Delete all chat messages' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Download chat history' })).toBeVisible();
+    await expectNoAxeViolations(page);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#more-menu')).toBeHidden();
+    await expect(page.getByRole('button', { name: 'More actions' })).toBeFocused();
     await expect(page.getByRole('textbox', { name: 'Instruction for AI' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Open prompt history' }).click();
     await expect(page.locator('#prompt-history-panel')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open prompt history' })).toHaveAttribute('aria-expanded', 'true');
 
+    await expectNoAxeViolations(page);
+  });
+
+  test('side panel keeps the header compact at side-panel width (redpen theme)', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 360, height: 720 });
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+    await expect(page.getByLabel('Target tab')).toContainText('Example App');
+
+    // 会話と送信トレイに高さを返す: ヘッダー(対象タブ+タブ切替+道具)は画面の3割以内。
+    const header = await page.locator('.topbar').boundingBox();
+    expect(header.height).toBeLessThanOrEqual(720 * 0.3);
+    // 道具は1列に収まる(折り返しで縦に積まない)。
+    const tops = await page.locator('#memo-workspace .quick-action').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
+    expect(new Set(tops).size).toBe(1);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    await page.screenshot({ path: testInfo.outputPath('sidepanel-redpen-360.png') });
+
+    await page.getByRole('button', { name: 'More actions' }).click();
+    await page.screenshot({ path: testInfo.outputPath('sidepanel-redpen-menu-360.png') });
     await expectNoAxeViolations(page);
   });
 
@@ -337,6 +371,7 @@ test.describe('UI quality gates', () => {
     await expect(page.locator('.brand')).toHaveCount(0);
     await expect(page.locator('.brand-name')).toHaveCount(0);
 
+    await openMoreMenu(page);
     const language = page.getByLabel('Language');
     await expect(language).toBeVisible();
     await expect(language).toHaveValue('en');
@@ -428,6 +463,7 @@ test.describe('UI quality gates', () => {
     await expect(page.locator('#messages').getByText('Second change', { exact: true })).toBeVisible();
     await expect(page.locator('#messages').getByText('Reply to: Second change')).toBeVisible();
 
+    await openMoreMenu(page);
     await page.getByRole('button', { name: 'Delete all chat messages' }).click();
     await expect(page.getByRole('heading', { name: 'Start by typing an instruction' })).toBeVisible();
     await expect(page.locator('#messages').getByText('Second change', { exact: true })).toHaveCount(0);
@@ -446,6 +482,7 @@ test.describe('UI quality gates', () => {
 
     // Set up download listener
     const downloadPromise = page.waitForEvent('download');
+    await openMoreMenu(page);
     await page.getByRole('button', { name: 'Download chat history' }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toContain('.md');
@@ -454,6 +491,7 @@ test.describe('UI quality gates', () => {
   test('side panel disables chat download until there is history', async ({ page }) => {
     await page.goto(pageUrl('sidepanel/sidepanel.html'));
 
+    await openMoreMenu(page);
     // Empty history: the download control is disabled (no modal alert path is reachable).
     const download = page.getByRole('button', { name: 'Download chat history' });
     await expect(download).toBeDisabled();
@@ -462,6 +500,7 @@ test.describe('UI quality gates', () => {
     await page.getByRole('button', { name: 'Send' }).click();
     await expect(page.locator('#messages').getByText('Reply to: First change')).toBeVisible();
 
+    await openMoreMenu(page);
     await expect(download).toBeEnabled();
   });
 
@@ -488,6 +527,7 @@ test.describe('UI quality gates', () => {
       };
     });
 
+    await openMoreMenu(page);
     await page.getByRole('button', { name: 'Download chat history' }).click();
     await page.waitForFunction(() => (window.__downloadMessages?.length || 0) > 0);
     const msg = await page.evaluate(() => window.__downloadMessages[0]);

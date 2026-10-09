@@ -10,6 +10,7 @@
   "topbar.clearChatTitle": "清除当前聊天记录并开始新的聊天",
   "topbar.newChat": "新聊天",
   "topbar.openSettings": "打开设置",
+  "topbar.more": "更多操作",
   "memory.scopeTitle": "自动保存 AI 注入的 HTML/CSS/JS 的范围",
   "memory.saveLabel": "保存范围",
   "memory.page": "URL",

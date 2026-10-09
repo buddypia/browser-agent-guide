@@ -8,61 +8,25 @@
   </head>
   <body>
     <header class="topbar">
-      <div class="brand-row">
-        <label class="scope-control scope-meta" title="Range for automatically saving AI-injected HTML/CSS/JS" data-i18n-title="memory.scopeTitle">
-          <span data-i18n="memory.saveLabel">Auto-save</span>
-          <select id="remember-scope">
-            <option value="page" data-i18n="memory.page">URL</option>
-            <option value="domain" data-i18n="memory.domain">Domain</option>
-            <option value="all" data-i18n="memory.all">All sites</option>
-          </select>
-        </label>
+      <div class="head-row">
+        <section id="target-tab" class="target-tab" aria-label="Target tab" data-i18n-aria-label="targetTab.label">
+          <span id="target-tab-title" class="target-tab-title" data-i18n="targetTab.unknownTitle">No active tab</span>
+          <div class="target-tab-sub">
+            <div id="target-tab-meta" class="target-tab-meta"></div>
+            <button id="btn-copy-tab-id" class="target-tab-id" type="button" title="Copy tab ID" aria-label="Copy tab ID" disabled>
+            <span class="target-tab-id-label" data-i18n="targetTab.idLabel">Tab ID</span>
+            <span id="target-tab-id-value" class="target-tab-id-value">—</span>
+            <svg class="target-tab-id-icon copy-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="8" y="8" width="11" height="11" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
+            </svg>
+            <svg class="target-tab-id-icon copied-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          </button>
+          </div>
+        </section>
         <div class="session-actions" aria-label="Session actions" data-i18n-aria-label="topbar.sessionActions">
-          <label class="language-control" title="Language" data-i18n-title="language.title">
-            <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" />
-              <path d="M3.6 9h16.8M3.6 15h16.8" />
-              <path d="M12 3a13.5 13.5 0 0 1 0 18M12 3a13.5 13.5 0 0 0 0 18" />
-            </svg>
-            <span class="sr-only" data-i18n="language.label">Language</span>
-            <select id="language-select" aria-label="Language" data-i18n-aria-label="language.label">
-              <option value="en">🇺🇸</option>
-              <option value="ko">🇰🇷</option>
-              <option value="ja">🇯🇵</option>
-              <option value="zh">🇨🇳</option>
-            </select>
-          </label>
-          <button
-            id="btn-clear-chat"
-            class="icon-action danger-action"
-            type="button"
-            title="Delete all chat messages"
-            aria-label="Delete all chat messages"
-            data-i18n-title="chat.deleteAllTitle"
-            data-i18n-aria-label="chat.deleteAllAria"
-          >
-            <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M3 6h18" />
-              <path d="M8 6V4h8v2" />
-              <path d="M6 6l1 14h10l1-14" />
-              <path d="M10 11v5M14 11v5" />
-            </svg>
-          </button>
-          <button
-            id="btn-download-chat"
-            class="icon-action"
-            type="button"
-            title="Download chat history"
-            aria-label="Download chat history"
-            data-i18n-title="chat.downloadAllTitle"
-            data-i18n-aria-label="chat.downloadAllAria"
-          >
-            <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-          </button>
           <button
             id="btn-settings"
             class="icon-action"
@@ -77,26 +41,82 @@
               <path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.04.04a2 2 0 0 1-2.82 2.82l-.04-.04a1.8 1.8 0 0 0-1.98-.36 1.8 1.8 0 0 0-1.08 1.65V21a2 2 0 0 1-4 0v-.09a1.8 1.8 0 0 0-1.08-1.65 1.8 1.8 0 0 0-1.98.36l-.04.04a2 2 0 0 1-2.82-2.82l.04-.04A1.8 1.8 0 0 0 4.6 15a1.8 1.8 0 0 0-1.65-1.08H3a2 2 0 0 1 0-4h.09A1.8 1.8 0 0 0 4.74 8a1.8 1.8 0 0 0-.36-1.98l-.04-.04a2 2 0 0 1 2.82-2.82l.04.04A1.8 1.8 0 0 0 9 4.6a1.8 1.8 0 0 0 1.08-1.65V3a2 2 0 0 1 4 0v.09A1.8 1.8 0 0 0 15.16 4.74a1.8 1.8 0 0 0 1.98-.36l.04-.04a2 2 0 0 1 2.82 2.82l-.04.04A1.8 1.8 0 0 0 19.4 9a1.8 1.8 0 0 0 1.65 1.08H21a2 2 0 0 1 0 4h-.09A1.8 1.8 0 0 0 19.4 15Z" />
             </svg>
           </button>
-        </div>
-      </div>
-      <section id="target-tab" class="target-tab" aria-label="Target tab" data-i18n-aria-label="targetTab.label">
-        <div class="target-tab-head">
-          <span class="target-tab-kicker" data-i18n="targetTab.kicker">Target tab</span>
-          <button id="btn-copy-tab-id" class="target-tab-id" type="button" title="Copy tab ID" aria-label="Copy tab ID" disabled>
-            <span class="target-tab-id-label" data-i18n="targetTab.idLabel">Tab ID</span>
-            <span id="target-tab-id-value" class="target-tab-id-value">—</span>
-            <svg class="target-tab-id-icon copy-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="8" y="8" width="11" height="11" rx="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
-            </svg>
-            <svg class="target-tab-id-icon copied-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M20 6 9 17l-5-5" />
+          <button
+            id="btn-more"
+            class="icon-action"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="more-menu"
+            title="More actions"
+            aria-label="More actions"
+            data-i18n-title="topbar.more"
+            data-i18n-aria-label="topbar.more"
+          >
+            <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 12h.01M12 12h.01M19 12h.01" />
             </svg>
           </button>
         </div>
-        <span id="target-tab-title" class="target-tab-title" data-i18n="targetTab.unknownTitle">No active tab</span>
-        <div id="target-tab-meta" class="target-tab-meta"></div>
-      </section>
+        <div id="more-menu" class="more-menu" hidden>
+          <label class="scope-control menu-field" title="Range for automatically saving AI-injected HTML/CSS/JS" data-i18n-title="memory.scopeTitle">
+          <span data-i18n="memory.saveLabel">Auto-save</span>
+          <select id="remember-scope">
+            <option value="page" data-i18n="memory.page">URL</option>
+            <option value="domain" data-i18n="memory.domain">Domain</option>
+            <option value="all" data-i18n="memory.all">All sites</option>
+          </select>
+        </label>
+          <label class="language-control menu-field" title="Language" data-i18n-title="language.title">
+            <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" />
+              <path d="M3.6 9h16.8M3.6 15h16.8" />
+              <path d="M12 3a13.5 13.5 0 0 1 0 18M12 3a13.5 13.5 0 0 0 0 18" />
+            </svg>
+            <span data-i18n="language.label">Language</span>
+            <select id="language-select" aria-label="Language" data-i18n-aria-label="language.label">
+              <option value="en">🇺🇸</option>
+              <option value="ko">🇰🇷</option>
+              <option value="ja">🇯🇵</option>
+              <option value="zh">🇨🇳</option>
+            </select>
+          </label>
+          <hr />
+          <button
+            id="btn-download-chat"
+            class="menu-item"
+            type="button"
+            title="Download chat history"
+            aria-label="Download chat history"
+            data-i18n-title="chat.downloadAllTitle"
+            data-i18n-aria-label="chat.downloadAllAria"
+          >
+            <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span data-i18n="chat.downloadAllAria">Download chat history</span>
+          </button>
+          <button
+            id="btn-clear-chat"
+            class="menu-item danger-action"
+            type="button"
+            title="Delete all chat messages"
+            aria-label="Delete all chat messages"
+            data-i18n-title="chat.deleteAllTitle"
+            data-i18n-aria-label="chat.deleteAllAria"
+          >
+            <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 6h18" />
+              <path d="M8 6V4h8v2" />
+              <path d="M6 6l1 14h10l1-14" />
+              <path d="M10 11v5M14 11v5" />
+            </svg>
+            <span data-i18n="chat.deleteAllAria">Delete all chat messages</span>
+          </button>
+        </div>
+      </div>
       <nav id="workspace-tabs" class="workspace-tabs" role="tablist" aria-label="Workspaces" data-i18n-aria-label="workspace.tabListLabel">
         <button
           id="btn-workspace-memo"
@@ -142,83 +162,70 @@
         </button>
       </nav>
       <div id="memo-workspace" class="toolbar workspace-panel" role="tabpanel" aria-labelledby="btn-workspace-memo">
-        <div class="tool-group">
-          <p class="tool-cap mark" data-i18n="toolbar.markGroup">Leave cues</p>
-          <div class="quick-actions two" aria-label="Frequent actions" data-i18n-aria-label="quickActions.label">
-            <button
-              id="btn-pick"
-              class="quick-action mark-rec"
-              type="button"
-              title="Click an element on the page to attach a note"
-              aria-label="Add note"
-              data-i18n-title="actions.pickTitle"
-              data-i18n-aria-label="actions.pickAria"
-            >
-              <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 3v4m0 10v4M3 12h4m10 0h4" />
-                <path d="M8 12a4 4 0 1 0 8 0 4 4 0 0 0-8 0Z" />
-              </svg>
-              <span data-i18n="actions.pick">Add note</span>
-            </button>
-            <button
-              id="btn-draw"
-              data-agent-id="@agent:sidepanel.draw"
-              data-agent-action="draw"
-              class="quick-action"
-              type="button"
-              title="Draw circles, boxes, arrows, or pen marks on the page and attach AI notes"
-              aria-label="Draw"
-              data-i18n-title="actions.drawTitle"
-              data-i18n-aria-label="actions.drawAria"
-            >
-              <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 19l7-7a2.1 2.1 0 0 0-3-3l-7 7-1 4 4-1Z" />
-                <path d="M14 7l3 3" />
-              </svg>
-              <span data-i18n="actions.draw">Draw</span>
-              <span id="memo-count-badge" class="memo-count-badge" aria-hidden="true" hidden></span>
-            </button>
-          </div>
-        </div>
-        <div class="tool-group">
-          <p class="tool-cap guide" data-i18n="toolbar.guideGroup">Guide AI</p>
-          <div class="quick-actions one" aria-label="Guide AI" data-i18n-aria-label="toolbar.guideGroup">
-            <button
-              id="btn-context"
-              class="quick-action guide"
-              type="button"
-              title="Copy guide context that teaches another AI about this page"
-              aria-label="Copy for AI"
-              data-i18n-title="actions.contextTitle"
-              data-i18n-aria-label="actions.contextAria"
-            >
-              <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M8 8h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z" />
-                <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2" />
-              </svg>
-              <span data-i18n="actions.context">Copy for AI</span>
-            </button>
-          </div>
-        </div>
-        <div class="tool-group">
-          <p class="tool-cap inspect" data-i18n="toolbar.inspectGroup">Inspect page</p>
-          <div class="quick-actions one" aria-label="Inspect page" data-i18n-aria-label="toolbar.inspectGroup">
-            <button
-              id="btn-affordances"
-              class="quick-action inspect"
-              type="button"
-              title="Inspect operable elements on this page"
-              aria-label="List elements"
-              data-i18n-title="actions.affordancesTitle"
-              data-i18n-aria-label="actions.affordancesAria"
-            >
-              <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M9 6h11M9 12h11M9 18h11" />
-                <path d="M4 6h.01M4 12h.01M4 18h.01" />
-              </svg>
-              <span data-i18n="actions.affordances">List elements</span>
-            </button>
-          </div>
+        <div class="tool-row" aria-label="Frequent actions" data-i18n-aria-label="quickActions.label">
+          <button
+            id="btn-pick"
+            class="quick-action mark-rec"
+            type="button"
+            title="Click an element on the page to attach a note"
+            aria-label="Add note"
+            data-i18n-title="actions.pickTitle"
+            data-i18n-aria-label="actions.pickAria"
+          >
+            <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v4m0 10v4M3 12h4m10 0h4" />
+              <path d="M8 12a4 4 0 1 0 8 0 4 4 0 0 0-8 0Z" />
+            </svg>
+            <span data-i18n="actions.pick">Add note</span>
+          </button>
+          <button
+            id="btn-draw"
+            data-agent-id="@agent:sidepanel.draw"
+            data-agent-action="draw"
+            class="quick-action"
+            type="button"
+            title="Draw circles, boxes, arrows, or pen marks on the page and attach AI notes"
+            aria-label="Draw"
+            data-i18n-title="actions.drawTitle"
+            data-i18n-aria-label="actions.drawAria"
+          >
+            <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 19l7-7a2.1 2.1 0 0 0-3-3l-7 7-1 4 4-1Z" />
+              <path d="M14 7l3 3" />
+            </svg>
+            <span data-i18n="actions.draw">Draw</span>
+            <span id="memo-count-badge" class="memo-count-badge" aria-hidden="true" hidden></span>
+          </button>
+          <button
+            id="btn-context"
+            class="quick-action guide"
+            type="button"
+            title="Copy guide context that teaches another AI about this page"
+            aria-label="Copy for AI"
+            data-i18n-title="actions.contextTitle"
+            data-i18n-aria-label="actions.contextAria"
+          >
+            <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 8h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z" />
+              <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2" />
+            </svg>
+            <span data-i18n="actions.context">Copy for AI</span>
+          </button>
+          <button
+            id="btn-affordances"
+            class="quick-action inspect"
+            type="button"
+            title="Inspect operable elements on this page"
+            aria-label="List elements"
+            data-i18n-title="actions.affordancesTitle"
+            data-i18n-aria-label="actions.affordancesAria"
+          >
+            <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 6h11M9 12h11M9 18h11" />
+              <path d="M4 6h.01M4 12h.01M4 18h.01" />
+            </svg>
+            <span data-i18n="actions.affordances">List elements</span>
+          </button>
         </div>
       </div>
       <div id="workflow-workspace" class="toolbar workspace-panel" role="tabpanel" aria-labelledby="btn-workspace-workflow" hidden>
