@@ -3,6 +3,7 @@
 // を一連で確認する。一時 inbox を使うので Downloads は汚さない。
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +16,26 @@ const indexJs = resolve(here, '../src/index.js');
 const PNG_B64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const TOKEN = 'e2e-token';
-const PORT = 8791;
+
+async function getAvailablePort(preferred) {
+  const check = (port) =>
+    new Promise((res) => {
+      const s = createServer();
+      s.once('error', () => res(false));
+      s.once('listening', () => s.close(() => res(true)));
+      s.listen(port, '127.0.0.1');
+    });
+  if (preferred && (await check(preferred))) return preferred;
+  return new Promise((res, rej) => {
+    const s = createServer();
+    s.listen(0, '127.0.0.1', () => {
+      const p = s.address().port;
+      s.close((err) => (err ? rej(err) : res(p)));
+    });
+  });
+}
+
+const PORT = await getAvailablePort(process.env.TEST_PORT ? Number(process.env.TEST_PORT) : 0);
 const inbox = mkdtempSync(join(tmpdir(), 'vf-e2e-'));
 // 偽 WebP（RIFF....WEBP）。MCP inline 専用コンパクト変種の経路を検証する。
 const INLINE_WEBP_B64 = (() => {
