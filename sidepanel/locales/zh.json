@@ -314,7 +314,7 @@
   "opt.eg2.url": "eg2 URL",
   "opt.eg2.model": "模型",
   "opt.eg2.test": "测试连接",
-  "opt.eg2.hint": "需在 <code>http://127.0.0.1:8765</code> 等地址运行 <code>eg2</code> 服务。出于安全考虑仅允许回环地址 (127.0.0.1 / localhost)。",
+  "opt.eg2.hint": "需在 <code>http://127.0.0.1:38765</code> 等地址运行 <code>eg2</code> 服务。出于安全考虑仅允许回环地址 (127.0.0.1 / localhost)。",
   "opt.eg2.connecting": "检查连接中…",
   "opt.eg2.testOk": "连接成功（eg2 运行中: {status}）",
   "opt.eg2.testFailed": "连接失败（未启动或 URL 无效: {error}）",

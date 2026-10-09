@@ -314,7 +314,7 @@
   "opt.eg2.url": "eg2 URL",
   "opt.eg2.model": "モデル",
   "opt.eg2.test": "接続テスト",
-  "opt.eg2.hint": "<code>eg2</code> サーバーが <code>http://127.0.0.1:8765</code> 等で起動している必要があります。安全のため loopback アドレス (127.0.0.1 / localhost) のみ接続可能です。",
+  "opt.eg2.hint": "<code>eg2</code> サーバーが <code>http://127.0.0.1:38765</code> 等で起動している必要があります。安全のため loopback アドレス (127.0.0.1 / localhost) のみ接続可能です。",
   "opt.eg2.connecting": "接続確認中…",
   "opt.eg2.testOk": "接続OK（eg2 稼働中: {status}）",
   "opt.eg2.testFailed": "接続失敗（未起動またはURL不正: {error}）",

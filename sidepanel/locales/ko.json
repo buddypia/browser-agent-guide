@@ -314,7 +314,7 @@
   "opt.eg2.url": "eg2 URL",
   "opt.eg2.model": "모델",
   "opt.eg2.test": "연결 테스트",
-  "opt.eg2.hint": "<code>http://127.0.0.1:8765</code> 등에서 <code>eg2</code> 서버가 실행 중이어야 합니다. 보안을 위해 loopback 주소(127.0.0.1 / localhost)만 연결 가능합니다.",
+  "opt.eg2.hint": "<code>http://127.0.0.1:38765</code> 등에서 <code>eg2</code> 서버가 실행 중이어야 합니다. 보안을 위해 loopback 주소(127.0.0.1 / localhost)만 연결 가능합니다.",
   "opt.eg2.connecting": "연결 확인 중…",
   "opt.eg2.testOk": "연결 성공(eg2 실행 중: {status})",
   "opt.eg2.testFailed": "연결 실패(미실행 또는 잘못된 URL: {error})",
