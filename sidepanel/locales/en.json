@@ -60,6 +60,8 @@
   "annotations.openOnPage": "Open",
   "annotations.forAIOn": "Send to AI",
   "annotations.forAIOff": "Do not send to AI",
+  "annotations.sentState.pending": "Not sent",
+  "annotations.sentState.sent": "Sent to AI",
   "annotations.memoCountTitle": "{count} drawing notes ({send} sent to AI)",
   "annotations.sendCount": "Send",
   "annotations.savedOnlyCount": "Saved",

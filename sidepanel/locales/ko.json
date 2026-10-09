@@ -60,6 +60,8 @@
   "annotations.openOnPage": "열기",
   "annotations.forAIOn": "AI에 전달",
   "annotations.forAIOff": "AI에 전달 안 함",
+  "annotations.sentState.pending": "미전송",
+  "annotations.sentState.sent": "전송됨",
   "annotations.memoCountTitle": "그리기 메모 {count}개(AI에 보낼 항목 {send}개)",
   "annotations.sendCount": "전송",
   "annotations.savedOnlyCount": "저장만",

@@ -1719,3 +1719,25 @@ textarea:focus-visible {
 .workspace-count[hidden] {
   display: none;
 }
+
+/* 送信状態: 未送信は朱(まだAIに渡っていない)、送信済みは控えめに */
+.anno-sent {
+  align-self: flex-start;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.anno-sent.pending {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+.anno-sent.sent {
+  background: var(--panel-3);
+  color: var(--muted);
+}

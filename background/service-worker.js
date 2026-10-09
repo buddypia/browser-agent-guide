@@ -1156,7 +1156,31 @@ async function pushTextOnlyPageFeedback({ tabId, tab, data }) {
       memo,
     },
   });
+  await recordSentMemos(data.items);
   return { transport: 'daemon', textOnly: true, dir: ack.dir, id: ack.id, items: data.items.length };
+}
+
+// AIへ届いたメモの内容署名(ページ+id+中身)を {sig: 送信時刻} で記録する。サイドパネルの送信トレイが
+// 「未送信/送信済み」を出すのに使う(「メモを残しただけでは届かない」混乱を画面上で見えるようにする)。
+// 表示用の付帯情報なので失敗しても送信結果は変えない。複数タブの同時送信で記録が消えないよう直列化する。
+const SENT_MEMOS_KEY = 'aiAdvisorSentMemos';
+const SENT_MEMOS_MAX = 500;
+let sentMemosQueue = Promise.resolve();
+function recordSentMemos(items) {
+  const sigs = (items || []).map((it) => it?.sig).filter(Boolean);
+  if (!sigs.length) return sentMemosQueue;
+  sentMemosQueue = sentMemosQueue.then(async () => {
+    try {
+      const cur = (await chrome.storage.local.get(SENT_MEMOS_KEY))[SENT_MEMOS_KEY] || {};
+      const at = new Date().toISOString();
+      for (const sig of sigs) cur[sig] = at;
+      const kept = Object.entries(cur).sort((a, b) => String(b[1]).localeCompare(String(a[1]))).slice(0, SENT_MEMOS_MAX);
+      await chrome.storage.local.set({ [SENT_MEMOS_KEY]: Object.fromEntries(kept) });
+    } catch {
+      /* 記録失敗は表示が「未送信」のままになるだけ */
+    }
+  });
+  return sentMemosQueue;
 }
 
 async function capturePageFeedback({ tabId, autoSync = false }) {
@@ -1244,6 +1268,7 @@ async function capturePageFeedback({ tabId, autoSync = false }) {
           memo,
         },
       });
+      await recordSentMemos(data.items);
       // ack.shotUrl はパス非依存の取得先（token-less）。サイドパネルが表示する（取得時に ?token= を付与）。
       return { transport: 'daemon', dir: ack.dir, file: `${ack.dir}/shot.png`, id: ack.id, imageUrl: ack.shotUrl || null, ...common };
     } catch (e) {
@@ -1281,6 +1306,7 @@ async function capturePageFeedback({ tabId, autoSync = false }) {
     /* 取得失敗時は相対パス表示にフォールバック */
   }
 
+  await recordSentMemos(data.items);
   return { transport: 'downloads', dir, absDir, file: `${dir}/shot.png`, absFile, daemonError, ...common };
 }
 
