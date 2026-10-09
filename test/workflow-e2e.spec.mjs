@@ -86,6 +86,8 @@ async function getServiceWorker(context) {
 const readStore = (sw, key) => sw.evaluate(async (k) => (await chrome.storage.local.get(k))[k], key);
 
 test.describe('決定的ワークフロー E2E (拡張ロード)', () => {
+  // 2本目は1本目が記録した手順を使う。1本目が落ちたら2本目は誤った前提で走らせない。
+  test.describe.configure({ mode: 'serial' });
   let server;
   let origin;
   let context;
@@ -125,6 +127,15 @@ test.describe('決定的ワークフロー E2E (拡張ロード)', () => {
     });
   const tabIdOf = (url) =>
     extPage.evaluate(async (u) => (await chrome.tabs.query({})).find((t) => (t.url || '').startsWith(u))?.id, url);
+  // 固定 sleep ではなく、content script が PING に応答するまで待つ(PING は記録状態の読み込みを待ってから応答する)。
+  const waitContentReady = (page) =>
+    expect
+      .poll(async () => {
+        const tabId = await tabIdOf(page.url());
+        if (!tabId) return false;
+        return extPage.evaluate((id) => chrome.tabs.sendMessage(id, { type: 'PING' }).then((r) => r?.ok === true).catch(() => false), tabId);
+      })
+      .toBe(true);
 
   test('記録 → 並び順/IDが変わっても最後まで決定的に実行し、確定ボタンは承認まで止まる', async () => {
     test.setTimeout(90_000);
@@ -134,11 +145,11 @@ test.describe('決定的ワークフロー E2E (拡張ロード)', () => {
     const page = await context.newPage();
     await page.goto(`${origin}/shop`);
     await expect(page.locator('#ship li').first()).toContainText('ヤマト通常');
-    await page.waitForTimeout(300); // content script の初期化待ち
+    await waitContentReady(page);
     await page.click('#ship li:nth-child(3) button');
     await page.click('#next');
     await page.waitForURL(/\/checkout\/\d+$/);
-    await page.waitForTimeout(300);
+    await waitContentReady(page);
     await page.fill('#qty', '2');
     await page.locator('#qty').blur();
     await page.selectOption('#region', 'os');
@@ -201,7 +212,7 @@ test.describe('決定的ワークフロー E2E (拡張ロード)', () => {
     const steps = (await readStore(sw, 'aiAdvisorWorkflow')).steps;
     const page = await context.newPage();
     await page.goto(`${origin}/shop`);
-    await page.waitForTimeout(300);
+    await waitContentReady(page);
     const tabId = await tabIdOf(`${origin}/shop`);
 
     const res = await sendToSw({ type: 'DRY_RUN_WORKFLOW', tabId, vars: { qty: '1' } });
