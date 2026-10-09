@@ -130,13 +130,19 @@ ${diff}
   if (registered) {
     cleaned = run(guard, ['mark-merged', wt, '--pr', String(pr.number)], wt) && run(guard, ['--repo', mainRoot, 'cleanup', '--confirmed', '--path', wt], mainRoot);
   } else {
-    // Fallback: unregistered worktrees still must be cleaned up along with their branch.
+    // Fallback: unregistered worktrees must be cleaned up deterministically along with their branch.
     try {
-      sh('git', ['worktree', 'remove', wt], mainRoot);
-      sh('git', ['branch', '-D', branch], mainRoot);
-      spawnSync('git', ['push', 'origin', '--delete', branch], { cwd: mainRoot, stdio: 'ignore' });
-      cleaned = true;
-      log(`fallback cleaned unregistered worktree and branch ${branch}`);
+      sh('git', ['worktree', 'remove', '--force', wt], mainRoot);
+      if (branch && branch !== 'main' && branch !== 'master' && !branch.startsWith('-')) {
+        sh('git', ['branch', '-D', '--', branch], mainRoot);
+        const pushRes = spawnSync('git', ['push', 'origin', '--delete', '--', branch], { cwd: mainRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        const stderr = (pushRes.stderr || '').trim();
+        if (pushRes.status !== 0 && !/remote ref does not exist/i.test(stderr)) {
+          log(`warning: could not delete remote branch origin/${branch}: ${stderr}`);
+        }
+        cleaned = true;
+        log(`fallback cleaned unregistered worktree and branch ${branch}`);
+      }
     } catch (e) {
       log(`fallback cleanup warning: ${e.message}`);
     }
