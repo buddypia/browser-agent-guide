@@ -132,6 +132,15 @@ test.describe('お描き連動のAIメモ', () => {
         });
       })
       .toBe('見出しをもっと短く');
+
+    // 送信トレイの「送信済み」判定用の署名は、中身を編集すると変わる(=未送信に戻る)。
+    const relisted = await page.evaluate(
+      () => new Promise((r) => window.__bagListener({ type: 'LIST_ANNOTATIONS' }, {}, r))
+    );
+    const edited = relisted.annotations.find((a) => a.kind === 'drawing');
+    expect(summary.sig).toBeTruthy();
+    expect(edited.id).toBe(summary.id);
+    expect(edited.sig).not.toBe(summary.sig);
   });
 
   test('「完了」を連打しても空メモは1つだけ生成される（再入ガード）', async ({ page }) => {

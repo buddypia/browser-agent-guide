@@ -60,6 +60,8 @@
   "annotations.openOnPage": "開く",
   "annotations.forAIOn": "AIに渡す",
   "annotations.forAIOff": "AIに渡さない",
+  "annotations.sentState.pending": "未送信",
+  "annotations.sentState.sent": "送信済み",
   "annotations.memoCountTitle": "描画メモ {count} 件（AIへ送る {send} 件）",
   "annotations.sendCount": "送信",
   "annotations.savedOnlyCount": "保存のみ",
