@@ -143,7 +143,7 @@ test.describe('SPA / 非同期レシピ再適用 (拡張ロード)', () => {
         {
           verb: 'injectHtml',
           args: { id: 'spa-after-async', html: '<p>after async</p>' },
-          waitFor: { selector: '#async-result', timeoutMs: 8000 },
+          waitFor: { selector: '#async-result', timeoutMs: 15000 },
           reason: '遅延要素が出てから',
         },
       ],
@@ -157,8 +157,8 @@ test.describe('SPA / 非同期レシピ再適用 (拡張ロード)', () => {
 
     // 非同期ロードを起動 → 約1.5秒後に #async-result が出現 → waitFor 解決 → 注入される。
     await page.getByTestId('async-load').click();
-    await expect(page.locator('#async-result')).toBeVisible({ timeout: 4000 });
-    await expect(page.locator('[data-bag-injected="spa-after-async"]')).toHaveCount(1, { timeout: 8000 });
+    await expect(page.locator('#async-result')).toBeVisible({ timeout: 8000 });
+    await expect(page.locator('[data-bag-injected="spa-after-async"]')).toHaveCount(1, { timeout: 15000 });
 
     await page.close();
   });

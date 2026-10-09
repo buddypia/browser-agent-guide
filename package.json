@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Guardrails that keep browser-operating AIs on track — a Chrome side-panel agent that drives any page through a closed, deterministic verb registry using Structured Outputs.",
   "private": false,
+  "type": "module",
   "license": "MIT",
   "author": "buddypia",
   "homepage": "https://github.com/buddypia/browser-agent-guide#readme",
