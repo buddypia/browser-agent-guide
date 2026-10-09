@@ -1057,6 +1057,27 @@ els.btnSettings.addEventListener('click', () => {
   send({ type: 'OPEN_OPTIONS' });
 });
 
+// ⋯ メニュー: 頻度の低い設定と破壊的操作(全削除)を常設ボタンから一段奥へ退避する。
+const btnMore = document.getElementById('btn-more');
+const moreMenu = document.getElementById('more-menu');
+function setMoreMenu(open) {
+  moreMenu.hidden = !open;
+  btnMore.setAttribute('aria-expanded', String(open));
+}
+btnMore.addEventListener('click', () => setMoreMenu(moreMenu.hidden));
+moreMenu.addEventListener('click', (e) => {
+  if (e.target.closest('button')) setMoreMenu(false);
+});
+document.addEventListener('click', (e) => {
+  if (!moreMenu.hidden && !moreMenu.contains(e.target) && !btnMore.contains(e.target)) setMoreMenu(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !moreMenu.hidden) {
+    setMoreMenu(false);
+    btnMore.focus();
+  }
+});
+
 els.rememberScope.addEventListener('change', async (e) => {
   const prev = state.rememberScope;
   const scope = normalizeRememberScope(e.target.value);

@@ -1,19 +1,23 @@
 :root {
-  --bg: #101416;
-  --panel: #171d20;
-  --panel-2: #20282c;
-  --panel-3: #263136;
-  --text: #eef3f1;
-  --muted: #9aa6a2;
-  --accent: #0f766e;
-  --accent-hover: #0b625c;
-  --accent-soft: #123430;
-  --ok: #39b980;
-  --err: #f87171;
-  --warn-bg: #2b2415;
-  --warn-text: #f4d28a;
-  --border: #2b363a;
-  --shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
+  /* 赤ペン校正: 紙 × 墨 × 朱。朱は「AIに渡す印」だけに使う */
+  --bg: #f5f2ec;
+  --panel: #f5f2ec;
+  --panel-2: #fffdf9;
+  --panel-3: #ebe6dc;
+  --text: #1c1a17;
+  --muted: #5d574d;
+  --accent: #b9321b;
+  --accent-hover: #9c2914;
+  --accent-soft: #f6dfd8;
+  --ok: #2f7a4b;
+  --err: #b42318;
+  --warn-bg: #fbf0d5;
+  --warn-text: #6b4700;
+  --wf: #5a3fa0;
+  --wf-soft: #ece6f6;
+  --border: #d9d2c4;
+  --border-strong: #b8ae9c;
+  --shadow: 0 10px 30px rgba(40, 30, 10, 0.14);
 }
 
 * { box-sizing: border-box; }
@@ -37,7 +41,7 @@ body {
   overflow-x: hidden;
   background: var(--bg);
   color: var(--text);
-  color-scheme: dark;
+  color-scheme: light;
   font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif;
 }
 
@@ -74,77 +78,89 @@ button:active {
 button:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid #44c7bb;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 .topbar {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
 
-.brand-row {
+/* 1行ヘッダー: 対象タブが主役。設定は歯車、頻度の低い操作は ⋯ へ */
+.head-row {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+  padding: 8px 8px 8px 14px;
+  border-bottom: 1px solid var(--border);
 }
 
 .session-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   flex: 0 0 auto;
 }
 
 .target-tab {
   display: grid;
-  gap: 6px;
+  gap: 1px;
+  flex: 1 1 auto;
   min-width: 0;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel-2);
 }
 
-.target-tab-head {
+.target-tab-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.target-tab-sub {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
-.target-tab-kicker {
-  color: #7dd3c7;
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1.2;
-  text-transform: uppercase;
+.target-tab-title,
+.target-tab-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-tab-meta {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.25;
 }
 
 .target-tab-id {
-  display: inline-grid;
-  grid-template-columns: auto minmax(2em, auto) 14px;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
-  min-height: 26px;
-  padding: 3px 6px;
-  border-color: rgba(244, 210, 138, 0.52);
-  background: #2b2415;
-  color: #f8e1aa;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
   line-height: 1;
 }
 
 .target-tab-id:hover:not(:disabled) {
-  border-color: rgba(244, 210, 138, 0.82);
-  background: #352b19;
+  border-color: var(--border);
+  background: var(--panel-2);
+  color: var(--text);
 }
 
 .target-tab-id:disabled {
@@ -153,34 +169,19 @@ textarea:focus-visible {
 }
 
 .target-tab-id.copied {
-  border-color: rgba(57, 185, 128, 0.84);
-  background: rgba(57, 185, 128, 0.15);
-  color: #c9f7dd;
-}
-
-.target-tab-id-label {
-  color: currentColor;
-  font-size: 10px;
-  font-weight: 850;
-  letter-spacing: 0;
-  text-transform: uppercase;
-  opacity: 0.82;
+  border-color: var(--ok);
+  color: var(--ok);
 }
 
 .target-tab-id-value {
-  overflow: hidden;
   color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1;
-  text-align: right;
-  text-overflow: ellipsis;
+  font-weight: 600;
 }
 
 .target-tab-id-icon {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   stroke: currentColor;
   stroke-width: 1.8;
   stroke-linecap: round;
@@ -197,83 +198,22 @@ textarea:focus-visible {
   display: block;
 }
 
-.target-tab-title,
-.target-tab-meta {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.target-tab-title {
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.target-tab-meta {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.25;
-}
-
-.language-control {
-  display: inline-grid;
-  grid-template-columns: 18px minmax(38px, auto);
-  align-items: center;
-  gap: 4px;
-  min-height: 40px;
-  padding: 0 7px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel-2);
-  color: var(--muted);
-}
-
-.language-control:hover {
-  color: var(--text);
-  background: var(--panel-3);
-}
-
-.language-control select {
-  min-width: 34px;
-  min-height: 30px;
-  padding: 0 2px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.language-control select:disabled {
-  cursor: default;
-  opacity: 0.65;
-}
-
 .icon-action {
   display: inline-grid;
   place-items: center;
-  width: 40px;
-  min-width: 40px;
-  min-height: 40px;
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
   padding: 0;
+  border-color: transparent;
+  background: transparent;
   color: var(--muted);
-  background: var(--panel-2);
 }
 
-.icon-action:hover {
+.icon-action:hover,
+.icon-action[aria-expanded="true"] {
+  background: var(--panel-3);
   color: var(--text);
-}
-
-.icon-action.danger-action {
-  color: #fca5a5;
-}
-
-.icon-action.danger-action:hover {
-  background: rgba(248, 113, 113, 0.12);
-  border-color: rgba(248, 113, 113, 0.4);
 }
 
 .action-icon {
@@ -287,12 +227,93 @@ textarea:focus-visible {
   fill: none;
 }
 
+/* ⋯ メニュー */
+.more-menu {
+  position: absolute;
+  top: calc(100% - 2px);
+  right: 8px;
+  z-index: 20;
+  display: grid;
+  gap: 2px;
+  width: 240px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  box-shadow: var(--shadow);
+}
+
+.more-menu[hidden] {
+  display: none;
+}
+
+.more-menu hr {
+  width: 100%;
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.menu-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 8px;
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.menu-field .action-icon {
+  display: none;
+}
+
+.menu-field select {
+  min-height: 30px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.menu-field select:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+}
+
+.menu-item:hover {
+  background: var(--panel-3);
+}
+
+.menu-item.danger-action {
+  color: var(--err);
+}
+
 .toolbar {
   display: grid;
-  grid-template-columns: 1fr;
   gap: 8px;
-  align-items: center;
   min-width: 0;
+  padding: 10px 14px 12px;
 }
 
 /* ── Workspaces: page notes and cross-page workflows are separate jobs ─── */
@@ -300,7 +321,7 @@ textarea:focus-visible {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0;
-  margin-top: 6px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--border);
   background: transparent;
 }
@@ -325,11 +346,11 @@ textarea:focus-visible {
 
 .workspace-tab:hover:not([aria-selected="true"]) {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(28, 26, 23, 0.03);
 }
 
 .workspace-tab:focus-visible {
-  outline: 2px solid #44c7bb;
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
@@ -358,7 +379,7 @@ textarea:focus-visible {
 .workspace-tab-scope {
   overflow: hidden;
   padding-left: 22px;
-  color: #9eb0ab;
+  color: var(--muted);
   font-size: 10px;
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -366,35 +387,17 @@ textarea:focus-visible {
 }
 
 .workspace-tab[aria-selected="true"] {
-  border-bottom-color: #39b980;
-  background: rgba(57, 185, 128, 0.06);
-  color: #c7f3dd;
+  border-bottom-color: var(--text);
+  color: var(--text);
 }
 
 .workspace-tab[aria-selected="true"] .workspace-tab-main {
-  color: #39b980;
-  font-weight: 800;
-}
-
-.workspace-tab[aria-selected="true"] .workspace-tab-scope {
-  opacity: 1;
-  color: #a3e6c5;
+  font-weight: 700;
 }
 
 .workspace-tab.workflow-tab[aria-selected="true"] {
-  border-bottom-color: #c084fc;
-  background: rgba(192, 132, 252, 0.06);
-  color: #e3cdfb;
-}
-
-.workspace-tab.workflow-tab[aria-selected="true"] .workspace-tab-main {
-  color: #c084fc;
-  font-weight: 800;
-}
-
-.workspace-tab.workflow-tab[aria-selected="true"] .workspace-tab-scope {
-  opacity: 1;
-  color: #d8b4fe;
+  border-bottom-color: var(--wf);
+  color: var(--wf);
 }
 
 .workspace-count {
@@ -423,15 +426,15 @@ textarea:focus-visible {
   display: grid;
   gap: 5px;
   padding: 9px;
-  border: 1px solid rgba(192, 132, 252, 0.36);
-  border-left: 3px solid #c084fc;
+  border: 1px solid rgba(90, 63, 160, 0.36);
+  border-left: 3px solid var(--wf);
   border-radius: 9px;
-  background: rgba(192, 132, 252, 0.08);
+  background: rgba(90, 63, 160, 0.08);
 }
 
 .workflow-entry-title {
   margin: 0;
-  color: #e3cdfb;
+  color: var(--wf);
   font-size: 12px;
   font-weight: 800;
 }
@@ -448,32 +451,20 @@ textarea:focus-visible {
   to { opacity: 1; transform: translateY(0); }
 }
 
-.scope-control {
-  display: grid;
-  grid-template-columns: auto minmax(76px, 1fr);
+
+
+/* 道具は1列。枠は細く、主役(朱)は送信だけに取っておく */
+.tool-row {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  width: 100%;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.scope-control select {
-  min-width: 0;
-  width: 100%;
-  color: var(--text);
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  min-height: 40px;
-  padding: 7px 8px;
-  cursor: pointer;
 }
 
 .quick-actions {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   min-width: 0;
 }
@@ -481,23 +472,36 @@ textarea:focus-visible {
 .quick-action {
   position: relative;
   display: inline-flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 6px;
   min-width: 0;
-  min-height: 50px;
-  padding: 5px 3px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-color: var(--border);
+  background: var(--panel-2);
   color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
   line-height: 1.15;
-  text-align: center;
+}
+
+.quick-action .action-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.quick-action span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* お描きメモの件数バッジ(ツールバーの俯瞰用) */
 .memo-count-badge {
   position: absolute;
-  top: 3px;
-  right: 3px;
+  top: -6px;
+  right: -6px;
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
@@ -508,29 +512,40 @@ textarea:focus-visible {
   background: var(--accent);
   color: #fff;
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
-  box-shadow: 0 0 0 1px var(--panel);
+  box-shadow: 0 0 0 2px var(--panel);
   pointer-events: none;
 }
 
-.quick-action span {
-  max-width: 100%;
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.quick-action:hover {
+  border-color: var(--border-strong);
 }
 
-.quick-action:hover {
-  border-color: #3f5156;
+/* AIへの受け渡し・点検は頻度が低いので枠なしの文字ボタンに落とす */
+.tool-row .quick-action.guide,
+.tool-row .quick-action.inspect {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 8px;
+}
+
+.tool-row .quick-action.guide:hover,
+.tool-row .quick-action.inspect:hover {
+  background: var(--panel-3);
+  color: var(--text);
+}
+
+/* 狭いパネルでは文字だけにして1列に収める */
+@media (max-width: 419px) {
+  .tool-row .quick-action .action-icon { display: none; }
 }
 
 .quick-action.is-active {
-  border-color: #4fcabe;
-  background: var(--accent-soft);
-  color: #d8fffa;
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--panel-2);
 }
 
 .secondary-action {
@@ -552,8 +567,8 @@ textarea:focus-visible {
 }
 
 .status-banner.ok {
-  background: var(--accent-soft);
-  color: #bff2eb;
+  background: var(--panel-3);
+  color: var(--text);
 }
 
 .status-banner a {
@@ -620,7 +635,7 @@ textarea:focus-visible {
   min-height: 28px;
   border: 0;
   background: transparent;
-  color: #7dd3c7;
+  color: var(--accent);
   font-size: 12px;
   padding: 0 6px;
 }
@@ -631,11 +646,11 @@ textarea:focus-visible {
 }
 
 .history-head .danger-link {
-  color: #fca5a5;
+  color: var(--err);
 }
 
 .history-head .danger-link:hover {
-  background: rgba(248, 113, 113, 0.12);
+  background: rgba(180, 35, 24, 0.12);
 }
 
 .anno-list,
@@ -656,7 +671,7 @@ textarea:focus-visible {
   padding: 0 2px;
   font-size: 11px;
   line-height: 1.4;
-  color: var(--muted, #6b7280);
+  color: var(--muted, var(--muted));
   text-align: center;
 }
 
@@ -698,7 +713,7 @@ textarea:focus-visible {
   align-items: center;
   justify-content: center;
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(28, 26, 23, 0.22);
   font-size: 11px;
   font-weight: 700;
 }
@@ -728,7 +743,7 @@ textarea:focus-visible {
   padding: 2px 5px;
   border-radius: 6px;
   background: var(--accent-soft);
-  color: #bff2eb;
+  color: var(--text);
   font-size: 11px;
   font-weight: 700;
   text-align: center;
@@ -760,7 +775,7 @@ textarea:focus-visible {
 
 .anno-warn {
   font-size: 11px;
-  color: #fca5a5;
+  color: var(--err);
 }
 
 .anno-flag {
@@ -774,7 +789,7 @@ textarea:focus-visible {
 
 .anno-flag.on {
   background: var(--accent-soft);
-  color: #bff2eb;
+  color: var(--text);
 }
 
 .anno-flag.off {
@@ -834,8 +849,8 @@ textarea:focus-visible {
 }
 
 .anno-tray-metric.send {
-  border-color: rgba(57, 185, 128, 0.42);
-  background: rgba(57, 185, 128, 0.1);
+  border-color: rgba(47, 122, 75, 0.42);
+  background: rgba(47, 122, 75, 0.1);
 }
 
 .anno-tray-metric.saved {
@@ -843,8 +858,8 @@ textarea:focus-visible {
 }
 
 .anno-tray-metric.warn {
-  border-color: rgba(248, 113, 113, 0.44);
-  background: rgba(248, 113, 113, 0.1);
+  border-color: rgba(180, 35, 24, 0.44);
+  background: rgba(180, 35, 24, 0.1);
 }
 
 .anno-tray-empty {
@@ -898,12 +913,12 @@ textarea:focus-visible {
 }
 
 .anno-preview-line {
-  fill: #445057;
+  fill: var(--border-strong);
   opacity: 0.62;
 }
 
 .anno-preview-line.strong {
-  fill: #68757b;
+  fill: var(--muted);
 }
 
 .anno-preview-badge circle {
@@ -965,10 +980,10 @@ textarea:focus-visible {
 
 .anno-tray-hint {
   padding: 6px 7px;
-  border: 1px solid rgba(248, 113, 113, 0.36);
+  border: 1px solid rgba(180, 35, 24, 0.36);
   border-radius: 7px;
-  background: rgba(248, 113, 113, 0.09);
-  color: #fecaca;
+  background: rgba(180, 35, 24, 0.09);
+  color: var(--err);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -1058,7 +1073,7 @@ textarea:focus-visible {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #9aa6a2;
+  color: var(--muted);
   opacity: 0;
 }
 
@@ -1071,12 +1086,12 @@ textarea:focus-visible {
 }
 
 .msg-delete:hover {
-  background: rgba(248, 113, 113, 0.12);
-  color: #fca5a5;
+  background: rgba(180, 35, 24, 0.12);
+  color: var(--err);
 }
 
 .msg-copy:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(28, 26, 23, 0.08);
   color: var(--text);
 }
 
@@ -1101,8 +1116,8 @@ textarea:focus-visible {
 
 .msg.user .bubble {
   align-self: flex-end;
-  background: var(--accent);
-  color: #ffffff;
+  background: var(--panel-3);
+  color: var(--text);
 }
 
 .msg.assistant .bubble {
@@ -1111,9 +1126,9 @@ textarea:focus-visible {
 }
 
 .msg.error .bubble {
-  background: #3a1718;
-  color: #fecaca;
-  border: 1px solid rgba(248, 113, 113, 0.32);
+  background: #fbe4e0;
+  color: var(--err);
+  border: 1px solid rgba(180, 35, 24, 0.32);
 }
 
 .actions {
@@ -1142,7 +1157,7 @@ textarea:focus-visible {
   grid-template-columns: 1fr;
   gap: 8px;
   padding: 10px 12px;
-  border-top: 2px solid var(--accent);
+  border-top: 1px solid var(--border);
   background: var(--panel);
 }
 
@@ -1170,9 +1185,9 @@ textarea:focus-visible {
 }
 
 .composer-hist.is-active {
-  border-color: #4fcabe;
-  background: var(--accent-soft);
-  color: #d8fffa;
+  border-color: var(--text);
+  background: var(--panel-3);
+  color: var(--text);
 }
 
 .composer-hist .action-icon {
@@ -1186,7 +1201,7 @@ textarea:focus-visible {
   min-height: 56px;
   max-height: 140px;
   resize: vertical;
-  background: var(--bg);
+  background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1194,28 +1209,30 @@ textarea:focus-visible {
 }
 
 .composer textarea::placeholder {
-  color: #7e8b87;
+  color: var(--muted);
 }
 
 .composer textarea:focus {
-  border-color: var(--accent);
-  outline: 2px solid rgba(68, 199, 187, 0.35);
+  border-color: var(--text);
+  outline: 1px solid var(--text);
+  outline-offset: 0;
 }
 
+/* 送信は墨。朱は「メモをAIへ渡す」操作にだけ使う */
 .composer > button {
   align-self: stretch;
   min-width: 58px;
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #ffffff;
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--panel-2);
   padding: 0 14px;
   font-weight: 700;
   width: 100%;
 }
 
 .composer > button:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: #000;
+  border-color: #000;
 }
 
 .composer > button:disabled {
@@ -1256,114 +1273,28 @@ textarea:focus-visible {
 }
 
 /* ── Redesign: demoted save-scope in the meta strip ───────────────────── */
-.scope-control.scope-meta {
-  width: auto;
-  grid-template-columns: auto auto;
-  flex: 0 1 auto;
-  font-size: 11px;
-}
 
-.scope-control.scope-meta select {
-  width: auto;
-  min-width: 64px;
-  min-height: 30px;
-  padding: 4px 8px;
-  font-size: 11px;
-}
-
-/* ── Redesign: captioned tool groups (Cues / Guide AI / Inspect) ──────── */
-.tool-group {
-  display: grid;
-  gap: 6px;
-}
-
-.tool-cap {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 2px 0 0;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--muted);
-  letter-spacing: 0.02em;
-}
-
-.tool-cap::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border-radius: 3px;
-  flex: 0 0 auto;
-}
-
-.tool-cap.mark::before { background: var(--ok); }
-.tool-cap.guide::before { background: #f4d28a; }
-.tool-cap.inspect::before { background: #5b9bd5; }
-.tool-cap.workflow::before { background: #c084fc; }
-
-.quick-actions.two {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.quick-actions.one {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-/* recommended marking action — green, but softer than the accent Send */
-.quick-action.mark-rec {
-  border-color: var(--ok);
-  background: rgba(57, 185, 128, 0.14);
-  color: #c7f3dd;
-}
-
-.quick-action.mark-rec:hover {
-  background: rgba(57, 185, 128, 0.22);
-  border-color: var(--ok);
-}
-
-/* AI handoff tools — a warm lane separate from page inspection. */
-.quick-action.guide {
-  border-color: rgba(244, 210, 138, 0.56);
-  background: rgba(244, 210, 138, 0.12);
-  color: #f7e4b4;
-}
-
-.quick-action.guide:hover {
-  background: rgba(244, 210, 138, 0.18);
-  border-color: rgba(244, 210, 138, 0.72);
-}
-
-/* read-only / export tools — quieter panel tier, no green */
-.quick-action.inspect {
-  background: var(--panel);
-  border-color: var(--border);
-}
-
-.quick-action.inspect:hover {
-  background: var(--panel-2);
-  border-color: #3f5156;
-}
 
 /* cross-page workflow recording — purple lane; turns red while recording */
 .quick-action.workflow-rec {
-  border-color: rgba(192, 132, 252, 0.5);
-  background: rgba(192, 132, 252, 0.12);
-  color: #e3cdfb;
+  border-color: rgba(90, 63, 160, 0.5);
+  background: rgba(90, 63, 160, 0.12);
+  color: var(--wf);
 }
 
 .quick-action.workflow-rec:hover {
-  background: rgba(192, 132, 252, 0.2);
-  border-color: rgba(192, 132, 252, 0.7);
+  background: rgba(90, 63, 160, 0.2);
+  border-color: rgba(90, 63, 160, 0.7);
 }
 
 .quick-action.workflow-rec[aria-pressed="true"] {
-  border-color: #ef4444;
-  background: rgba(239, 68, 68, 0.16);
-  color: #fecaca;
+  border-color: var(--err);
+  background: rgba(180, 35, 24, 0.16);
+  color: var(--err);
 }
 
 .quick-action.workflow-rec[aria-pressed="true"] .action-icon {
-  color: #ef4444;
+  color: var(--err);
   animation: bag-rec-pulse 1.4s ease-in-out infinite;
 }
 
@@ -1399,8 +1330,8 @@ textarea:focus-visible {
   min-width: 20px;
   height: 20px;
   border-radius: 999px;
-  background: #c084fc;
-  color: #1a1030;
+  background: var(--wf);
+  color: #ffffff;
   font-size: 11px;
   font-weight: 700;
 }
@@ -1424,7 +1355,7 @@ textarea:focus-visible {
 .workflow-step .wf-del {
   border: 0;
   background: transparent;
-  color: #fca5a5;
+  color: var(--err);
   font-size: 14px;
   line-height: 1;
   min-height: 24px;
@@ -1433,7 +1364,7 @@ textarea:focus-visible {
 }
 
 .workflow-step .wf-del:hover {
-  background: rgba(248, 113, 113, 0.14);
+  background: rgba(180, 35, 24, 0.14);
   border-radius: 6px;
 }
 
@@ -1450,9 +1381,9 @@ textarea:focus-visible {
 }
 
 .workflow-autorun-btn {
-  border: 1px solid #34d399;
-  background: rgba(52, 211, 153, 0.16);
-  color: #bbf7d0;
+  border: 1px solid var(--ok);
+  background: var(--panel-2);
+  color: var(--ok);
   border-radius: 8px;
   min-height: 34px;
   padding: 0 12px;
@@ -1462,7 +1393,7 @@ textarea:focus-visible {
 }
 
 .workflow-autorun-btn:hover {
-  background: rgba(52, 211, 153, 0.26);
+  background: #e3f1e7;
 }
 
 .workflow-autorun-btn:disabled {
@@ -1472,15 +1403,15 @@ textarea:focus-visible {
 
 /* 実行中は赤(停止ボタン)＋点滅で「動いている」ことを示す */
 .workflow-autorun-btn[aria-pressed="true"] {
-  border-color: #ef4444;
-  background: rgba(239, 68, 68, 0.18);
-  color: #fecaca;
+  border-color: var(--err);
+  background: rgba(180, 35, 24, 0.18);
+  color: var(--err);
   animation: bag-rec-pulse 1.4s ease-in-out infinite;
 }
 
 .workflow-autorun-state {
   font-size: 11px;
-  color: #fca5a5;
+  color: var(--err);
 }
 
 .workflow-save {
@@ -1502,9 +1433,9 @@ textarea:focus-visible {
 }
 
 .workflow-save-btn {
-  border: 1px solid #c084fc;
-  background: rgba(192, 132, 252, 0.18);
-  color: #e3cdfb;
+  border: 1px solid var(--wf);
+  background: rgba(90, 63, 160, 0.18);
+  color: var(--wf);
   border-radius: 8px;
   min-height: 34px;
   padding: 0 10px;
@@ -1514,7 +1445,7 @@ textarea:focus-visible {
 }
 
 .workflow-save-btn:hover {
-  background: rgba(192, 132, 252, 0.28);
+  background: rgba(90, 63, 160, 0.28);
 }
 
 .workflow-save-btn:disabled {
@@ -1547,7 +1478,7 @@ textarea:focus-visible {
 .workflow-saved-item button {
   border: 0;
   background: transparent;
-  color: #7dd3c7;
+  color: var(--accent);
   font-size: 12px;
   min-height: 26px;
   padding: 0 6px;
@@ -1555,7 +1486,7 @@ textarea:focus-visible {
 }
 
 .workflow-saved-item button.wf-saved-del {
-  color: #fca5a5;
+  color: var(--err);
 }
 
 .workflow-saved-item button:hover {
@@ -1585,7 +1516,7 @@ textarea:focus-visible {
 
 .starter-chip:hover {
   background: var(--panel-3);
-  border-color: #3f5156;
+  border-color: var(--border-strong);
 }
 
 .starter-chip.meta {
@@ -1596,7 +1527,7 @@ textarea:focus-visible {
 
 .start-pointer {
   margin: 2px 0 0;
-  color: #7dd3c7;
+  color: var(--muted);
   font-size: 12px;
   font-weight: 600;
 }
@@ -1613,9 +1544,9 @@ textarea:focus-visible {
 
 .workflow-step.is-done { border-style: dashed; }
 .workflow-step.is-done .wf-text { color: var(--muted); }
-.workflow-step.is-done .wf-num { background: var(--ok); color: #06210f; }
-.workflow-step.is-held { border-color: #f59e0b; }
-.workflow-step.needs-review { border-color: rgba(244, 210, 138, 0.6); }
+.workflow-step.is-done .wf-num { background: var(--ok); color: #ffffff; }
+.workflow-step.is-held { border-color: #b7791f; }
+.workflow-step.needs-review { border-color: rgba(183, 121, 31, 0.6); }
 
 .workflow-step .wf-note {
   margin-top: 2px;
@@ -1641,13 +1572,13 @@ textarea:focus-visible {
   line-height: 16px;
   color: var(--muted);
 }
-.wf-badge--ai { border-color: rgba(192, 132, 252, 0.5); color: #e9d5ff; }
-.wf-badge--gate { border-color: rgba(245, 158, 11, 0.6); color: #fde68a; }
+.wf-badge--ai { border-color: rgba(90, 63, 160, 0.5); color: var(--wf); }
+.wf-badge--gate { border-color: rgba(183, 121, 31, 0.6); color: var(--warn-text); }
 
 .wf-dry { margin-top: 4px; font-size: 11px; }
-.wf-dry--ok { color: #86efac; }
-.wf-dry--warn { color: #fcd34d; }
-.wf-dry--ai { color: #e9d5ff; }
+.wf-dry--ok { color: var(--ok); }
+.wf-dry--warn { color: var(--warn-text); }
+.wf-dry--ai { color: var(--wf); }
 
 .wf-review,
 .wf-suggest {
@@ -1662,7 +1593,7 @@ textarea:focus-visible {
   line-height: 1.4;
 }
 .wf-review { background: var(--warn-bg); color: var(--warn-text); }
-.wf-suggest { background: rgba(192, 132, 252, 0.12); color: #ede9fe; }
+.wf-suggest { background: rgba(90, 63, 160, 0.12); color: var(--wf); }
 .wf-suggest-text { flex: 1 1 100%; }
 
 .wf-mini {
@@ -1709,7 +1640,7 @@ textarea:focus-visible {
   font: inherit;
   font-size: 12px;
 }
-.wf-input:focus-visible { outline: 2px solid #44c7bb; outline-offset: 1px; }
+.wf-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .wf-input[hidden] { display: none; }
 
 .wf-hint { margin: 0; font-size: 10.5px; line-height: 1.45; color: var(--muted); }
@@ -1748,7 +1679,7 @@ textarea:focus-visible {
   align-items: center;
   gap: 8px;
   padding: 8px;
-  border: 1px solid rgba(245, 158, 11, 0.6);
+  border: 1px solid rgba(183, 121, 31, 0.6);
   border-radius: 8px;
   background: var(--warn-bg);
   color: var(--warn-text);
@@ -1759,9 +1690,9 @@ textarea:focus-visible {
 .workflow-approve-btn {
   min-height: 30px;
   padding: 0 10px;
-  border-color: rgba(245, 158, 11, 0.8);
-  background: rgba(245, 158, 11, 0.18);
-  color: #fde68a;
+  border-color: rgba(183, 121, 31, 0.8);
+  background: rgba(183, 121, 31, 0.18);
+  color: var(--warn-text);
   font-size: 12px;
   font-weight: 600;
 }
@@ -1770,4 +1701,21 @@ textarea:focus-visible {
   min-height: 34px;
   padding: 0 10px;
   font-size: 12px;
+}
+
+.memo-count-badge[hidden] {
+  display: none;
+}
+
+.menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.menu-item:disabled:hover {
+  background: transparent;
+}
+
+.workspace-count[hidden] {
+  display: none;
 }

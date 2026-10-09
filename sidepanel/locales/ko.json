@@ -10,6 +10,7 @@
   "topbar.clearChatTitle": "현재 채팅 기록을 지우고 새 채팅을 시작합니다",
   "topbar.newChat": "새 채팅",
   "topbar.openSettings": "설정 열기",
+  "topbar.more": "추가 작업",
   "memory.scopeTitle": "AI가 삽입한 HTML/CSS/JS를 자동 저장할 범위",
   "memory.saveLabel": "저장 범위",
   "memory.page": "URL",
