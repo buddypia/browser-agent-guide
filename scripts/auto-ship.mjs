@@ -125,13 +125,28 @@ ${diff}
   // --match-head-commit: refuse if the branch moved after the tested/reviewed HEAD.
   run('gh', ['pr', 'merge', String(pr.number), '--squash', '--match-head-commit', head], wt);
   if (JSON.parse(sh('gh', ['pr', 'view', String(pr.number), '--json', 'state'], wt)).state !== 'MERGED') stop('FAILED', `merge did not complete: ${pr.url}`);
-  if (!existsSync(join(wt, '.tmp/.agent_worktree_owner.json'))) stop('MERGED', `${pr.url} (worktree not guard-registered; clean it up manually)`);
-  const cleaned = run(guard, ['mark-merged', wt, '--pr', String(pr.number)], wt) && run(guard, ['--repo', mainRoot, 'cleanup', '--confirmed', '--path', wt], mainRoot);
+  const registered = existsSync(join(wt, '.tmp/.agent_worktree_owner.json'));
+  let cleaned = false;
+  if (registered) {
+    cleaned = run(guard, ['mark-merged', wt, '--pr', String(pr.number)], wt) && run(guard, ['--repo', mainRoot, 'cleanup', '--confirmed', '--path', wt], mainRoot);
+  } else {
+    // Fallback: unregistered worktrees still must be cleaned up along with their branch.
+    try {
+      sh('git', ['worktree', 'remove', wt], mainRoot);
+      sh('git', ['branch', '-D', branch], mainRoot);
+      spawnSync('git', ['push', 'origin', '--delete', branch], { cwd: mainRoot, stdio: 'ignore' });
+      cleaned = true;
+      log(`fallback cleaned unregistered worktree and branch ${branch}`);
+    } catch (e) {
+      log(`fallback cleanup warning: ${e.message}`);
+    }
+  }
   // Fast-forward the main checkout only when it is on main and has no tracked changes.
   if (sh('git', ['branch', '--show-current'], mainRoot) === 'main' && !sh('git', ['status', '--porcelain', '--untracked-files=no'], mainRoot)) {
     spawnSync('git', ['pull', '--ff-only', '-q', 'origin', 'main'], { cwd: mainRoot, stdio: 'ignore' });
   }
-  stop('MERGED', `${pr.url}${cleaned ? ' (worktree cleaned up)' : ' (cleanup failed; run agent-worktree-guard cleanup --confirmed)'}`);
+  const failHint = registered ? 'run agent-worktree-guard cleanup --confirmed' : 'clean up worktree and branch manually';
+  stop('MERGED', `${pr.url}${cleaned ? ' (worktree cleaned up)' : ` (cleanup failed; ${failHint})`}`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
