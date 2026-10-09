@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: './test',
   testMatch: '**/*.spec.mjs',
   timeout: 60_000,
-  retries: process.env.CI ? 2 : 1,
+  retries: process.env.CI ? 2 : 0,
   workers: process.env.PW_WORKERS ? Number(process.env.PW_WORKERS) : 2,
   reporter: [['list']],
   use: {

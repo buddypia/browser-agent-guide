@@ -35,7 +35,7 @@ async function getAvailablePort(preferred) {
   });
 }
 
-const PORT = await getAvailablePort(Number(process.env.BAG_PF_PORT || process.env.TEST_PORT || 8791));
+const PORT = await getAvailablePort(process.env.TEST_PORT ? Number(process.env.TEST_PORT) : 0);
 const inbox = mkdtempSync(join(tmpdir(), 'vf-e2e-'));
 // 偽 WebP（RIFF....WEBP）。MCP inline 専用コンパクト変種の経路を検証する。
 const INLINE_WEBP_B64 = (() => {
