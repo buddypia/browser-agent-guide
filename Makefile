@@ -1,4 +1,4 @@
-.PHONY: ship wt.new wt.run q.check q.ci-mirror setup.skills setup.mcp mcp.setup
+.PHONY: ship wt.new wt.run q.check q.ci-mirror setup.skills setup.mcp mcp.setup clean.branches
 
 wt.new:
 	@if [ -z "$(BR)" ]; then \
@@ -33,3 +33,6 @@ mcp.setup: setup.mcp
 # Run from a finished worktree: test → AI review → PR → auto-merge small changes → cleanup.
 ship:
 	@node $(CURDIR)/scripts/auto-ship.mjs $(if $(DRY),--dry-run)
+
+clean.branches:
+	@node $(CURDIR)/scripts/cleanup-merged-branches.mjs $(if $(DRY),--dry-run)
