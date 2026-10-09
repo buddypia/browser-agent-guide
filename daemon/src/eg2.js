@@ -56,7 +56,7 @@ export function validateEg2Url(urlStr) {
 export async function checkEg2Health({ eg2Url = DEFAULT_EG2_URL, timeoutMs = 2500 } = {}) {
   const urlCheck = validateEg2Url(eg2Url);
   if (!urlCheck.valid) {
-    return { ok: false, error: urlCheck.error, hint: 'eg2Url にはローカルのアドレス（例: http://127.0.0.1:8765）を指定してください。' };
+    return { ok: false, error: urlCheck.error, hint: 'eg2Url にはローカルのアドレス（例: http://127.0.0.1:38765）を指定してください。' };
   }
 
   const endpoint = `${urlCheck.url}/health`;
@@ -185,7 +185,7 @@ export async function evaluateGoalWithEg2({
   // 2. SSRF ガード
   const urlCheck = validateEg2Url(eg2Url);
   if (!urlCheck.valid) {
-    return { ok: false, error: urlCheck.error, hint: 'eg2Url にはローカルのアドレス（例: http://127.0.0.1:8765）を指定してください。' };
+    return { ok: false, error: urlCheck.error, hint: 'eg2Url にはローカルのアドレス（例: http://127.0.0.1:38765）を指定してください。' };
   }
 
   // data:image/png;base64,... プレフィックスの安全な除去

@@ -130,7 +130,7 @@ server.on('error', (err) => {
     process.stderr.write(`\n[bag-pf] エラー: ポート ${port} は既に使用されています。\n`);
     if (port === 8765) {
       process.stderr.write(
-        `[bag-pf] ヒント: eg2-cli (EmbeddingGemma 2) または別の bag-page-feedback デーモンが起動している可能性があります。\n` +
+        `[bag-pf] ヒント: 別の bag-page-feedback デーモンが起動している可能性があります (eg2-cli の既定は 38765 なので衝突しません)。\n` +
         `[bag-pf] 代替ポートを指定して起動してください:\n` +
         `[bag-pf]   node src/index.js --port 8766\n` +
         `[bag-pf]   または環境変数 BAG_PF_PORT=8766 node src/index.js\n`
