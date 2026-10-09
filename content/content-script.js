@@ -350,6 +350,11 @@
     return `text-${hash.toString(36)}`;
   }
 
+  // 送信済み判定用の内容署名。AIへ渡る中身(本文・意図・図形)が変われば署名も変わり「未送信」に戻る。
+  function annoContentSig(a) {
+    return hashText(JSON.stringify([a.note || '', a.intent || '', a.shapes || []]));
+  }
+
   function uniqueId(base, seen) {
     let id = base;
     let n = 2;
@@ -1369,6 +1374,7 @@
       shapePreview: drawing ? buildShapePreview(a.shapes) : undefined,
       target: t ? truncate(labelOf(t), 50) : '',
       resolved,
+      sig: annoContentSig(a),
     };
   }
 
@@ -4143,6 +4149,7 @@
       const anchorLabel = target ? truncate(labelOf(target) || bestLabel, 60) : truncate(anchor.text || bestLabel || anchor.tag || '', 60);
       items.push({
         id: a.id,
+        sig: annoContentSig(a),
         color: firstColor,
         note: a.note || '',
         intent: a.intent || '',

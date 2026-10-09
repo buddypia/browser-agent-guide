@@ -1188,10 +1188,30 @@ function textToDataUrl(text, mime) {
 }
 
 // ---- 保存済み手がかりの一覧 ----
+// SW が記録する「AIへ届いたメモの内容署名」。トレイの未送信/送信済み表示に使う。
+const SENT_MEMOS_KEY = 'aiAdvisorSentMemos';
+let sentMemos = {};
+async function loadSentMemos() {
+  try {
+    sentMemos = (await chrome.storage.local.get(SENT_MEMOS_KEY))[SENT_MEMOS_KEY] || {};
+  } catch {
+    sentMemos = {};
+  }
+}
+
+// 届いた内容と今の内容が同じなら送信済み。編集して中身が変われば未送信に戻る。
+function sentStateChip(a) {
+  const sent = Boolean(a.sig) && sentMemos[a.id]?.sig === a.sig;
+  const chip = document.createElement('span');
+  chip.className = `anno-sent ${sent ? 'sent' : 'pending'}`;
+  chip.textContent = sent ? t('annotations.sentState.sent') : t('annotations.sentState.pending');
+  return chip;
+}
+
 async function refreshAnnotations() {
   if (state.tabId == null) return;
   try {
-    const res = await send({ type: 'LIST_ANNOTATIONS', tabId: state.tabId });
+    const [res] = await Promise.all([send({ type: 'LIST_ANNOTATIONS', tabId: state.tabId }), loadSentMemos()]);
     renderAnnotationList(res?.annotations || []);
   } catch {
     renderAnnotationList([]);
@@ -1331,9 +1351,15 @@ function renderDrawingTrayItem(a, index) {
   const title = document.createElement('span');
   title.className = 'anno-tray-title';
   title.textContent = a.note || a.shapeText || t('annotations.kind.drawing');
-  const flag = document.createElement('span');
-  flag.className = `anno-flag ${a.forAI === false ? 'off' : 'on'}`;
-  flag.textContent = a.forAI === false ? t('annotations.forAIOff') : t('annotations.forAIOn');
+  // 送信対象なら「未送信/送信済み」がそのまま送信対象であることも示すので、ON フラグの代わりに出す。
+  let flag;
+  if (a.forAI === false) {
+    flag = document.createElement('span');
+    flag.className = 'anno-flag off';
+    flag.textContent = t('annotations.forAIOff');
+  } else {
+    flag = sentStateChip(a);
+  }
   head.append(num, title, flag);
 
   const sub = document.createElement('div');
@@ -1382,6 +1408,7 @@ function renderSupportAnnotationItem(a) {
   title.className = 'anno-title';
   title.textContent = annotationTitle(a);
   body.appendChild(title);
+  if (a.kind === 'note' && String(a.note || '').trim()) body.appendChild(sentStateChip(a));
   const sub = annotationSub(a);
   if (sub) {
     const subEl = document.createElement('span');
@@ -2054,6 +2081,10 @@ chrome.runtime.onMessage?.addListener?.((msg) => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes.aiAdvisorAnnotations) refreshAnnotations();
+  if (changes[SENT_MEMOS_KEY]) {
+    sentMemos = changes[SENT_MEMOS_KEY].newValue || {};
+    renderAnnotationList(state.annotations);
+  }
   if (changes[WORKFLOW_KEY]) refreshWorkflow();
   if (changes[RUN_KEY]) refreshWorkflowRun();
   if (changes.aiAdvisorSettings) {

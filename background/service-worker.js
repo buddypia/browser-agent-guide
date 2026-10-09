@@ -1156,7 +1156,22 @@ async function pushTextOnlyPageFeedback({ tabId, tab, data }) {
       memo,
     },
   });
+  await recordSentMemos(data.items);
   return { transport: 'daemon', textOnly: true, dir: ack.dir, id: ack.id, items: data.items.length };
+}
+
+// AIへ届いたメモの内容署名を記録する。サイドパネルの送信トレイが「未送信/送信済み」を出すのに使う
+// (「メモを残しただけでは届かない」混乱を画面上で見えるようにする)。古い記録は件数で間引く。
+const SENT_MEMOS_KEY = 'aiAdvisorSentMemos';
+const SENT_MEMOS_MAX = 500;
+async function recordSentMemos(items) {
+  const list = (items || []).filter((it) => it?.id && it?.sig);
+  if (!list.length) return;
+  const cur = (await chrome.storage.local.get(SENT_MEMOS_KEY))[SENT_MEMOS_KEY] || {};
+  const at = new Date().toISOString();
+  for (const it of list) cur[it.id] = { sig: it.sig, at };
+  const kept = Object.entries(cur).sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).slice(0, SENT_MEMOS_MAX);
+  await chrome.storage.local.set({ [SENT_MEMOS_KEY]: Object.fromEntries(kept) });
 }
 
 async function capturePageFeedback({ tabId, autoSync = false }) {
@@ -1244,6 +1259,7 @@ async function capturePageFeedback({ tabId, autoSync = false }) {
           memo,
         },
       });
+      await recordSentMemos(data.items);
       // ack.shotUrl はパス非依存の取得先（token-less）。サイドパネルが表示する（取得時に ?token= を付与）。
       return { transport: 'daemon', dir: ack.dir, file: `${ack.dir}/shot.png`, id: ack.id, imageUrl: ack.shotUrl || null, ...common };
     } catch (e) {
@@ -1281,6 +1297,7 @@ async function capturePageFeedback({ tabId, autoSync = false }) {
     /* 取得失敗時は相対パス表示にフォールバック */
   }
 
+  await recordSentMemos(data.items);
   return { transport: 'downloads', dir, absDir, file: `${dir}/shot.png`, absFile, daemonError, ...common };
 }
 

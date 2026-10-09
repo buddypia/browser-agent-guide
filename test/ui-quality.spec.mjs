@@ -87,7 +87,8 @@ async function installChromeMock(page, seed = {}) {
             provider: 'mock',
           };
         case 'LIST_ANNOTATIONS':
-          return { annotations: [] };
+          // content script の一覧はテストごとに seed の __mockAnnotations で差し替える。
+          return { annotations: copy(store.__mockAnnotations) || [] };
         case 'RUN_VERB':
           if (message.verb === 'listAffordances') return { ok: true, result: { affordances: [] } };
           return { ok: true, result: {} };
@@ -256,6 +257,35 @@ test.describe('UI quality gates', () => {
 
     await page.getByRole('button', { name: 'More actions' }).click();
     await page.screenshot({ path: testInfo.outputPath('sidepanel-redpen-menu-360.png') });
+    await expectNoAxeViolations(page);
+  });
+
+  test('side panel tray shows which memos already reached AI', async ({ page }, testInfo) => {
+    const drawing = (id, note, sig) => ({ id, kind: 'drawing', note, intent: '', shapeText: '', step: 1, forAI: true, resolved: true, target: 'Total', sig, shapePreview: null });
+    await installChromeMock(page, {
+      __mockAnnotations: [
+        drawing('d1', 'Right-align the total', 'text-sent'),
+        drawing('d2', 'Make Confirm stand out', 'text-new'),
+        { id: 'n1', kind: 'note', note: 'Address field is too narrow', intent: '', step: 1, resolved: true, target: 'Address', sig: 'text-edited' },
+      ],
+      // d1 は同じ内容で届いた。n1 は届いた後に編集された(署名が変わった)ので未送信に戻る。
+      aiAdvisorSentMemos: { d1: { sig: 'text-sent', at: '2026-10-09T00:00:00Z' }, n1: { sig: 'text-old', at: '2026-10-09T00:00:00Z' } },
+    });
+    await page.setViewportSize({ width: 360, height: 720 });
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+
+    const tray = page.locator('#anno-panel');
+    await expect(tray.locator('.anno-tray-item').nth(0).locator('.anno-sent')).toHaveText('Sent to AI');
+    await expect(tray.locator('.anno-tray-item').nth(1).locator('.anno-sent')).toHaveText('Not sent');
+    await expect(tray.locator('.anno-item .anno-sent')).toHaveText('Not sent');
+
+    // SW が送信を記録すると、その場で送信済みに変わる。
+    await page.evaluate(() =>
+      chrome.storage.local.set({ aiAdvisorSentMemos: { d1: { sig: 'text-sent', at: 'x' }, d2: { sig: 'text-new', at: 'x' }, n1: { sig: 'text-edited', at: 'x' } } })
+    );
+    await expect(tray.locator('.anno-sent.pending')).toHaveCount(0);
+    await expect(tray.locator('.anno-sent.sent')).toHaveCount(3);
+    await page.screenshot({ path: testInfo.outputPath('sidepanel-tray-sent-360.png') });
     await expectNoAxeViolations(page);
   });
 
