@@ -224,6 +224,12 @@ Playwright + axe によるサイドパネル/設定画面のUIアクセシビリ
 
 採用したAnti-Slopワークフローは [docs/ui-quality-workflow.md](docs/ui-quality-workflow.md) にまとめています。
 
+## コントリビューション
+
+プルリクエスト、バグ報告、新しい動詞（Verb）の提案を歓迎します。作業前に [CONTRIBUTING.md](CONTRIBUTING.md) および [行動規範 (Code of Conduct)](CODE_OF_CONDUCT.md) をご確認ください。
+
+セキュリティに関する報告は [セキュリティポリシー (Security Policy)](SECURITY.md) を参照してください。
+
 ## ライセンス
 
 [MIT](LICENSE)

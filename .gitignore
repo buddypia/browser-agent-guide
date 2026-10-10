@@ -16,6 +16,9 @@ jspm_packages/
 dist/
 build/
 out/
+.turbo/
+.parcel-cache/
+*.tsbuildinfo
 
 # ──────────────────────────────────────────────────────────────
 # Test / coverage artifacts
@@ -29,10 +32,15 @@ coverage/
 .playwright-cli/
 
 # ──────────────────────────────────────────────────────────────
-# Python bytecode cache (scripts/agent-worktree-guard tests + py_compile)
+# Python bytecode cache & virtual environments (scripts/agent-worktree-guard)
 # ──────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
 
 # ──────────────────────────────────────────────────────────────
 # Scratch / temporary working dirs
@@ -106,6 +114,7 @@ desktop.ini
 # ──────────────────────────────────────────────────────────────
 .idea/
 .vscode/
+.cursor/
 *.swp
 *.swo
 *~
