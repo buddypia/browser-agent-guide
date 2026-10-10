@@ -1,0 +1,38 @@
+name: 🚀 Feature Request / Verb Proposal
+description: Suggest an idea or propose a new action verb for the registry
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea or need a new verb to control web pages deterministically? We welcome proposals!
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Use Case
+      description: What task or user journey are you trying to accomplish that current capabilities do not support?
+      placeholder: I want to be able to...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution or Verb Schema
+      description: If proposing a new verb, what should its name and arguments look like in `AI_VERBS`?
+      placeholder: |
+        Verb: `focusElement`
+        Args: `{ selector: string }`
+        Description: Focus an element without triggering a click.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or workarounds you've considered.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any other context, references, or mockups.

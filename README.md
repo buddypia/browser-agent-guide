@@ -209,6 +209,12 @@ test, and Playwright + axe UI checks for the side panel and options page.
 
 The adopted anti-slop workflow is documented in [docs/ui-quality-workflow.md](docs/ui-quality-workflow.md).
 
+## Contributing
+
+Contributions, bug reports, and verb proposals are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md) before getting started.
+
+For security concerns, please consult our [Security Policy](SECURITY.md).
+
 ## License
 
 [MIT](LICENSE)
