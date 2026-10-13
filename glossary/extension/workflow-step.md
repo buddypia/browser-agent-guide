@@ -20,7 +20,7 @@ code_refs:
 api_refs: []
 db_refs: []
 related: ["verb-registry", "affordance"]
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 confidence: medium
 ---
 
