@@ -5060,4 +5060,10 @@
     await loadAnnotations();
     renderAnnotations();
   })();
+
+  // 有効化(レシピ適用)を自分から要求する。SW の ACTIVATE は onUpdated(complete)/onActivated から
+  // 一方的に送られるが、document_idle の注入は load 後になりうるので、受信側がまだ無いと黙って失われ、
+  // その読み込みではレシピが二度と適用されない(spa-recipe テストの間欠失敗の原因)。受信準備ができた
+  // ここで引き直せば取りこぼさない。二重に届いても appliedRecipeSig で1回だけ適用される。
+  chrome.runtime.sendMessage({ type: 'CONTENT_READY', url: location.href }, () => void chrome.runtime.lastError);
 })();
