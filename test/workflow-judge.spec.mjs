@@ -35,9 +35,11 @@ function listHtml(names, button = '選ぶ') {
 }
 
 // 偽 Jev: 本文の候補から「Anker」を含むものを選ぶ。1つなら高確信、複数なら迷う(最初を最有力に)。
-function fakeJev(body) {
+// flip: 迷う時の最有力を入れ替える(承認後に問い直すと別の候補を選んでしまう状況を作る)。
+function fakeJev(body, flip = false) {
   const criteria = body?.questions?.pick?.criteria || {};
   const anker = Object.keys(criteria).filter((k) => k !== 'none' && /Anker/.test(criteria[k]));
+  if (flip) anker.reverse();
   const probabilities = Object.fromEntries(Object.keys(criteria).map((k) => [k, 0]));
   if (anker.length === 1) {
     probabilities[anker[0]] = 0.95;
@@ -64,7 +66,7 @@ function startServer(state) {
           const body = JSON.parse(raw);
           state.jevCalls.push({ auth: req.headers.authorization, body });
           res.setHeader('content-type', 'application/json');
-          res.end(JSON.stringify(fakeJev(body)));
+          res.end(JSON.stringify(fakeJev(body, state.flip)));
         });
         return;
       }
@@ -88,7 +90,7 @@ const readStore = (sw, key) => sw.evaluate(async (k) => (await chrome.storage.lo
 
 test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
   test.describe.configure({ mode: 'serial' });
-  const state = { variant: 'rec', button: '選ぶ', jevCalls: [] };
+  const state = { variant: 'rec', button: '選ぶ', jevCalls: [], flip: false };
   let server;
   let origin;
   let context;
@@ -201,8 +203,13 @@ test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
     expect(memo.label).toContain('ブラック');
     expect(memo.reason).toMatch(/48%/);
 
+    // 承認後に問い直すとホワイトを選ぶ状態にしても、承認したブラックを押し、Jev は呼ばない。
+    state.flip = true;
+    const callsBefore = state.jevCalls.length;
     expect(await sendToSw({ type: 'APPROVE_WORKFLOW_STEP', tabId })).toMatchObject({ active: true });
     await expect(page.locator('#state')).toHaveText('picked:Anker USB-C ケーブル(1m)ブラック', { timeout: 15_000 });
+    expect(state.jevCalls.length).toBe(callsBefore);
+    state.flip = false;
     await expect.poll(async () => (await runOf())?.doneStepIds?.length ?? 0).toBe(1);
     const done = await runOf();
     expect(done).toMatchObject({ judgeApprovedStepId: '', approvedStepId: '', heldKind: '' });
