@@ -296,6 +296,8 @@ test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
   });
 
   test('記録した要素が消えた時の差し替えは、確信度が高くても承認を待つ', async () => {
+    // 記録要素が無い経路は毎回 WF_STEP_TIMEOUT_MS(6s) 出現を待ってから差し替えに進む(設計)。負荷時の余裕を持たせる。
+    test.setTimeout(150_000);
     await sw.evaluate(() => chrome.storage.local.set({ aiAdvisorWorkflow: { recording: true, steps: [], saved: [] } }));
     state.formLabel = '保存する';
     const rec = await context.newPage();
@@ -317,7 +319,7 @@ test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
       await waitContentReady(page);
       const tabId = await tabIdOf(`${origin}/form`);
       expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
-      await expect.poll(async () => (await runOf())?.heldKind || '', { timeout: 20_000 }).toBe('judge');
+      await expect.poll(async () => (await runOf())?.heldKind || '', { timeout: 45_000 }).toBe('judge');
       expect((await runOf()).heldLabel).toBe('保存');
       await expect(page.locator('#state')).toHaveText('idle');
       expect(await sendToSw({ type: 'APPROVE_WORKFLOW_STEP', tabId })).toMatchObject({ active: true });
@@ -329,6 +331,8 @@ test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
     }
   });
   test('確定系の承認は示した候補にだけ効く: 承認後に記録要素が戻っても、それは押さずに再び止まる', async () => {
+    // 記録要素が無い経路は毎回 WF_STEP_TIMEOUT_MS(6s) 出現を待ってから差し替えに進む(設計)。負荷時の余裕を持たせる。
+    test.setTimeout(150_000);
     // 記録: 確定系ボタン(自動で gate 付き)。
     await sw.evaluate(() => chrome.storage.local.set({ aiAdvisorWorkflow: { recording: true, steps: [], saved: [] } }));
     state.formLabel = '今すぐ購入する';
@@ -351,12 +355,12 @@ test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
       const tabId = await tabIdOf(`${origin}/form`);
       expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
       // 記録要素が無い → 差し替え候補の承認待ち → 承認 → 確定系ゲートで「今すぐ購入」に束縛して停止。
-      await expect.poll(async () => (await runOf())?.heldKind || '', { timeout: 20_000 }).toBe('judge');
+      await expect.poll(async () => (await runOf())?.heldKind || '', { timeout: 45_000 }).toBe('judge');
       expect(await sendToSw({ type: 'APPROVE_WORKFLOW_STEP', tabId })).toMatchObject({ active: true });
       await expect.poll(async () => {
         const r = await runOf();
         return r && !r.active && r.heldKind === '' ? r.heldLabel : '';
-      }, { timeout: 20_000 }).toBe('今すぐ購入');
+      }, { timeout: 45_000 }).toBe('今すぐ購入');
 
       // 承認前にページが変わり、記録した元のボタンが戻った → 承認は「今すぐ購入」にしか効かないので押さない。
       state.formLabel = '今すぐ購入する';
@@ -366,7 +370,7 @@ test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
       await expect.poll(async () => {
         const r = await runOf();
         return r && !r.active && r.heldStepId === buy.id ? 'held-again' : '';
-      }, { timeout: 20_000 }).toBe('held-again');
+      }, { timeout: 45_000 }).toBe('held-again');
       await expect(page.locator('#state')).toHaveText('idle');
       await page.close();
     } finally {
