@@ -88,9 +88,14 @@ AI は着手前に、関連する用語エントリだけを読み、次を復�
 
 1. **ローカル pre-commit hook**(`bash scripts/glossary/install-git-hook.sh`) … 最速のフィードバック。
    緊急回避は `git commit --no-verify`(CI が後段で必ず捕捉)。
-2. **`npm run check`** … `check:glossary` + `test:glossary` を含む(手元の総合ゲート)。
+2. **`npm run check`** … `check:glossary` + `glossary:staleness`(base は origin/main)+ `test:glossary` を含む
+   (手元の総合ゲート)。`make ship` はこれを通すので、CI を待たずに自動マージする経路でも staleness が効く。
+   以前は staleness が入っておらず、CI で初めて落ちた(2026-10-14, #108)。
 3. **CI**(`.github/workflows/glossary.yml`) … hook を回避しても止まる最終ゲート。
    PR で `check-staleness --base origin/<base>` を回す。
+
+`last_verified` は日付単位なので、base と同じ日の2度目の変更では前進できない。その場合は同じ変更で
+エントリ本体を実装に合わせて直していれば再検証とみなす(巻き戻しは失敗)。
 
 ## やらないこと(意図的な非ゴール)
 

@@ -157,3 +157,40 @@ test('--staged: ステージした変更だけを見る', () => {
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test('base と同じ日付のままでも、エントリ本体を書き直していれば成功(同日2度目の変更)', () => {
+  const repo = setupRepo();
+  try {
+    write(repo, 'lib/foo.mjs', [
+      'export function foo() {', '  // @term: widget', '  return 4;', '  // @endterm: widget', '}', '',
+    ].join('\n'));
+    // last_verified は base と同じ 2026-01-01(同じ日に既に touch 済みで、もう前進できない)
+    write(repo, 'glossary/x/widget.md', [
+      '---', 'id: widget', 'term: "Widget"', 'status: stable', 'owner: "@me"',
+      'bounded_context: x', 'last_verified: 2026-01-01', 'confidence: high', '---',
+      '## 定義', 'widget (返り値 4 に合わせて更新).', '',
+    ].join('\n'));
+    const r = runStaleness(repo, '--working');
+    assert.equal(r.code, 0, r.out);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('last_verified を巻き戻したら失敗', () => {
+  const repo = setupRepo();
+  try {
+    write(repo, 'lib/foo.mjs', [
+      'export function foo() {', '  // @term: widget', '  return 5;', '  // @endterm: widget', '}', '',
+    ].join('\n'));
+    write(repo, 'glossary/x/widget.md', [
+      '---', 'id: widget', 'term: "Widget"', 'status: stable', 'owner: "@me"',
+      'bounded_context: x', 'last_verified: 2025-12-31', 'confidence: high', '---',
+      '## 定義', 'widget (書き直し).', '',
+    ].join('\n'));
+    const r = runStaleness(repo, '--working');
+    assert.equal(r.code, 1, r.out);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});

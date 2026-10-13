@@ -85,19 +85,25 @@ function main() {
       errors.push(`✗ @term: "${id}" が変更されましたが、対応する用語エントリがありません(${[...paths].join(', ')})`);
       continue;
     }
-    const baseVerified = lastVerifiedOf(ctx.baseContent(entry.relPath));
-    const newVerified = lastVerifiedOf(ctx.newContent(entry.relPath));
+    const baseEntry = ctx.baseContent(entry.relPath);
+    const newEntry = ctx.newContent(entry.relPath);
+    const baseVerified = lastVerifiedOf(baseEntry);
+    const newVerified = lastVerifiedOf(newEntry);
     if (newVerified == null) {
       errors.push(`✗ ${entry.relPath}: last_verified を読めません`);
       continue;
     }
     // base に存在しない(=この変更で新規追加された)用語は OK。
     if (baseVerified == null) continue;
-    if (String(newVerified) <= String(baseVerified)) {
+    // 日付は1日単位なので、base と同じ日の2度目の変更では前進させられない(touch しても差分が出ず、
+    // ゲートを通す手段が無くなる)。同じ日付なら、同じ変更でエントリ本体を書き直したことを再検証とみなす。
+    const advanced = String(newVerified) > String(baseVerified);
+    const sameDayRevised = String(newVerified) === String(baseVerified) && newEntry !== baseEntry;
+    if (!advanced && !sameDayRevised) {
       errors.push(
         `✗ 用語 "${id}" のガード範囲(${[...paths].join(', ')})が変更されましたが、` +
         `${entry.relPath} の last_verified が更新されていません(現在 ${newVerified})。\n` +
-        `   → 内容を確認し  node scripts/glossary/touch.mjs ${id}  で last_verified を今日に更新してください。`
+        `   → 内容を確認し  node scripts/glossary/touch.mjs ${id}  で last_verified を今日に更新してください(base と同じ日なら、エントリ本体を実装に合わせて直せば通ります)。`
       );
     }
   }
