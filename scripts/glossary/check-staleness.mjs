@@ -46,6 +46,23 @@ function lastVerifiedOf(content) {
   }
 }
 
+function bodyOf(content) {
+  try {
+    return parseFrontmatter(content).body;
+  } catch {
+    return content;
+  }
+}
+
+// iso 日付がいま(どのタイムゾーンでも)「今日」でありうるか。touch はローカル日付、CI は UTC で動くので
+// 日付の正午 UTC から ±36h を今日とみなす。テストは GLOSSARY_TODAY=YYYY-MM-DD で固定する。
+function isToday(iso) {
+  const fixed = process.env.GLOSSARY_TODAY;
+  const now = fixed ? Date.parse(`${fixed}T12:00:00Z`) : Date.now();
+  const d = Date.parse(`${iso}T12:00:00Z`);
+  return Number.isFinite(d) && Math.abs(now - d) <= 36 * 3600 * 1000;
+}
+
 function main() {
   const { mode, ref: refArg } = parseArgs(process.argv.slice(2));
   let ref = refArg;
@@ -85,19 +102,27 @@ function main() {
       errors.push(`✗ @term: "${id}" が変更されましたが、対応する用語エントリがありません(${[...paths].join(', ')})`);
       continue;
     }
-    const baseVerified = lastVerifiedOf(ctx.baseContent(entry.relPath));
-    const newVerified = lastVerifiedOf(ctx.newContent(entry.relPath));
+    const baseEntry = ctx.baseContent(entry.relPath);
+    const newEntry = ctx.newContent(entry.relPath);
+    const baseVerified = lastVerifiedOf(baseEntry);
+    const newVerified = lastVerifiedOf(newEntry);
     if (newVerified == null) {
       errors.push(`✗ ${entry.relPath}: last_verified を読めません`);
       continue;
     }
     // base に存在しない(=この変更で新規追加された)用語は OK。
     if (baseVerified == null) continue;
-    if (String(newVerified) <= String(baseVerified)) {
+    // 日付は1日単位なので、base が今日の日付だと2度目の変更では前進させられない(touch しても差分が出ず、
+    // ゲートを通す手段が無くなる)。その時に限り、同じ変更で本文を書き直したことを再検証とみなす。
+    // 古い日付のままの本文修正は通さない(前進させれば済むので、例外にすると抜け穴になる)。
+    const advanced = String(newVerified) > String(baseVerified);
+    const sameDayRevised =
+      String(newVerified) === String(baseVerified) && isToday(String(newVerified)) && bodyOf(newEntry) !== bodyOf(baseEntry);
+    if (!advanced && !sameDayRevised) {
       errors.push(
         `✗ 用語 "${id}" のガード範囲(${[...paths].join(', ')})が変更されましたが、` +
         `${entry.relPath} の last_verified が更新されていません(現在 ${newVerified})。\n` +
-        `   → 内容を確認し  node scripts/glossary/touch.mjs ${id}  で last_verified を今日に更新してください。`
+        `   → 内容を確認し  node scripts/glossary/touch.mjs ${id}  で last_verified を今日に更新してください(base が既に今日の日付なら、本文を実装に合わせて直せば通ります)。`
       );
     }
   }
