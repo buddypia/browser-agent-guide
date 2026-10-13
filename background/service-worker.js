@@ -543,7 +543,7 @@ async function startWorkflowAutoRun(tabId, vars) {
 /** 自動実行セッションを停止する。 */
 async function stopWorkflowAutoRun() {
   const run = await readWorkflowRun();
-  await writeWorkflowRun({ ...run, active: false, doneStepIds: [], heldStepId: '', approvedStepId: '' });
+  await writeWorkflowRun({ ...run, active: false, doneStepIds: [], heldStepId: '', heldKind: '', approvedStepId: '', judgeApprovedStepId: '' });
   notifyAutoRun({ phase: 'stopped', text: t('sw.autorun.stopped') });
   return { active: false };
 }
