@@ -22,9 +22,11 @@ function write(repo, rel, content) {
 }
 
 // check-staleness をモード指定で実行し {code, out} を返す。
-function runStaleness(repo, mode) {
+function runStaleness(repo, mode, env = {}) {
   try {
-    const out = execFileSync('node', [SCRIPT, mode], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const out = execFileSync('node', [SCRIPT, mode], {
+      cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env },
+    });
     return { code: 0, out };
   } catch (e) {
     return { code: e.status ?? 1, out: `${e.stdout || ''}${e.stderr || ''}` };
@@ -153,6 +155,66 @@ test('--staged: ステージした変更だけを見る', () => {
     git(repo, ['add', '-A']);
     const r2 = runStaleness(repo, '--staged');
     assert.equal(r2.code, 0, r2.out);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// コード変更 + 用語(last_verified, 本文, confidence)を書き換えた作業ツリーを作る。
+function reviseSameDate(repo, { body = 'widget.', confidence = 'high' } = {}) {
+  write(repo, 'lib/foo.mjs', [
+    'export function foo() {', '  // @term: widget', '  return 4;', '  // @endterm: widget', '}', '',
+  ].join('\n'));
+  write(repo, 'glossary/x/widget.md', [
+    '---', 'id: widget', 'term: "Widget"', 'status: stable', 'owner: "@me"',
+    'bounded_context: x', 'last_verified: 2026-01-01', `confidence: ${confidence}`, '---',
+    '## 定義', body, '',
+  ].join('\n'));
+}
+
+test('base が今日の日付なら、本文を書き直せば日付据え置きでも成功(同日2度目の変更)', () => {
+  const repo = setupRepo();
+  try {
+    reviseSameDate(repo, { body: 'widget (返り値 4 に合わせて更新).' });
+    assert.equal(runStaleness(repo, '--working', { GLOSSARY_TODAY: '2026-01-01' }).code, 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('日付据え置きの本文修正は、その日付が今日でなければ失敗(古い日付の抜け穴を作らない)', () => {
+  const repo = setupRepo();
+  try {
+    reviseSameDate(repo, { body: 'widget (返り値 4 に合わせて更新).' });
+    assert.equal(runStaleness(repo, '--working', { GLOSSARY_TODAY: '2026-01-03' }).code, 1);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('今日の日付でも、frontmatter だけの変更は本文の書き直しとみなさない', () => {
+  const repo = setupRepo();
+  try {
+    reviseSameDate(repo, { confidence: 'low' });
+    assert.equal(runStaleness(repo, '--working', { GLOSSARY_TODAY: '2026-01-01' }).code, 1);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('last_verified を巻き戻したら失敗', () => {
+  const repo = setupRepo();
+  try {
+    write(repo, 'lib/foo.mjs', [
+      'export function foo() {', '  // @term: widget', '  return 5;', '  // @endterm: widget', '}', '',
+    ].join('\n'));
+    write(repo, 'glossary/x/widget.md', [
+      '---', 'id: widget', 'term: "Widget"', 'status: stable', 'owner: "@me"',
+      'bounded_context: x', 'last_verified: 2025-12-31', 'confidence: high', '---',
+      '## 定義', 'widget (書き直し).', '',
+    ].join('\n'));
+    const r = runStaleness(repo, '--working');
+    assert.equal(r.code, 1, r.out);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
