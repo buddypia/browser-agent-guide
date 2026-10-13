@@ -273,7 +273,7 @@ async function refreshState() {
     // 別タブ切替・ページ遷移などで再取得が走る時点で、ページ側の picker/draw は
     // 無効化されている。古い true が残って ESC が空振りの停止を送らないようリセットする。
     state.pickerActive = false;
-    const s = await send({ type: 'GET_ACTIVE_TAB_STATE' });
+    const s = await send({ type: 'GET_ACTIVE_TAB_STATE', windowId: await resolvePanelWindowId() });
     state.activeTabState = s;
     state.tabId = s.tabId;
     state.windowId = s.windowId ?? null;
@@ -294,6 +294,20 @@ async function refreshState() {
   } catch (e) {
     showBanner(escapeHtml(t('errors.stateFetchFailed', { message: e.message })), false);
   }
+}
+
+// サイドパネルはウィンドウ単位なので、対象タブは「パネルが載っているウィンドウ」の
+// アクティブタブ。SW 側の currentWindow(=最後にフォーカスされたウィンドウ)に頼らない。
+let panelWindowId = null;
+async function resolvePanelWindowId() {
+  if (panelWindowId != null) return panelWindowId;
+  try {
+    const win = await chrome.windows?.getCurrent?.();
+    if (Number.isInteger(win?.id)) panelWindowId = win.id;
+  } catch {
+    /* 取得不可なら SW 側の currentWindow にフォールバック */
+  }
+  return panelWindowId;
 }
 
 function renderTargetTab(s = {}) {
@@ -2103,7 +2117,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 // アクティブタブの変化に追従して対象タブIDとバナーを更新する。
-chrome.tabs.onActivated.addListener(() => refreshState());
+chrome.tabs.onActivated.addListener(({ windowId }) => {
+  if (panelWindowId == null || windowId === panelWindowId) refreshState();
+});
 chrome.tabs.onUpdated.addListener((_tabId, info) => {
   if (info.status === 'complete' || info.url) refreshState();
 });
