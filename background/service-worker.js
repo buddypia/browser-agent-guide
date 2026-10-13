@@ -190,7 +190,7 @@ async function handleMessage(msg, sender) {
       // content script へロケール辞書を渡す(content は import 不可のため SW が供給する)。
       return { locale: i18nLocale, messages: i18nMessages, fallback: i18nFallback };
     case 'GET_ACTIVE_TAB_STATE':
-      return getActiveTabState();
+      return getActiveTabState(msg.windowId);
     case 'CHAT':
       return runChat(msg);
     case 'REMEMBER_PAGE':
@@ -303,9 +303,15 @@ ${String(code || '')}
   };
 }
 
-/** アクティブタブの状態(URL/一致状況)を返す。 */
-async function getActiveTabState() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+/**
+ * アクティブタブの状態(URL/一致状況)を返す。
+ * SW には自分のウィンドウが無く currentWindow は「最後にフォーカスされたウィンドウ」に
+ * なるため、DevTools 等にフォーカスが移ると空になる。サイドパネルが自身の windowId を
+ * 渡してきた場合はそのウィンドウのアクティブタブを引く。
+ */
+async function getActiveTabState(windowId) {
+  const query = Number.isInteger(windowId) ? { active: true, windowId } : { active: true, currentWindow: true };
+  const [tab] = await chrome.tabs.query(query);
   if (!tab) return { tabId: null, matched: false };
   const settings = await getSettings();
   const rules = findMatchingRules(tab.url || '', settings.sites);
