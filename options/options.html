@@ -113,6 +113,43 @@
         </p>
       </section>
 
+      <!-- 判断AI (Jev) -->
+      <section class="card">
+        <h2 data-i18n="opt.judge.h2">判断AI (曖昧な候補選択)</h2>
+        <p class="hint" data-i18n-html="opt.judge.intro">
+          ワークフロー実行中に、リストの項目が変わった・記録した要素が無い・ルールで決まらない時の「どれを選ぶか」だけを判断AIに任せます。チャットと操作生成は上の AI 接続 (LLM) のままです。
+        </p>
+        <div class="grid">
+          <label>
+            <span data-i18n="opt.judge.provider">候補選択に使うAI</span>
+            <select id="judge-provider">
+              <option value="llm" data-i18n="opt.judge.providerLlm">LLM (AI 接続と同じ)</option>
+              <option value="jev">TypeSafe Jev</option>
+            </select>
+          </label>
+          <label>
+            <span data-i18n="opt.judge.apiKey">Jev APIキー</span>
+            <input id="judge-apiKey" type="password" placeholder="APIキー / ローカルにのみ保存" data-i18n-placeholder="opt.ai.apiKeyPlaceholder" autocomplete="off" />
+          </label>
+          <label>
+            <span data-i18n="opt.judge.model">モデル</span>
+            <input id="judge-model" type="text" placeholder="jev-latest" />
+          </label>
+          <label>
+            <span data-i18n="opt.judge.minConfidence">自動で進む確信度 (0〜1)</span>
+            <input id="judge-minConfidence" type="number" min="0" max="1" step="0.05" value="0.7" />
+          </label>
+        </div>
+        <div class="row">
+          <button id="save-judge" class="primary" data-agent-id="@agent:options.judge.save" data-agent-action="submit" data-i18n="opt.common.save">保存</button>
+          <button id="test-judge" class="secondary" data-agent-id="@agent:options.judge.test" data-agent-action="submit" data-i18n="opt.judge.test">接続テスト</button>
+          <span id="judge-status" class="status"></span>
+        </div>
+        <p class="hint" data-i18n-html="opt.judge.hint">
+          確信度以上なら選んで進み、手順に「選んだ項目と確信度」のメモを残します（「次回から固定」で確定）。未満なら手順を保留し、迷った候補をメモに残して「承認して続行」を待ちます。この承認では購入・確定系の保留は解除されません。候補テキスト、記録した手順の説明・対象名・メモ、ページのタイトル/URLが <code>api.typesafe.ai</code> に送信されます。
+        </p>
+      </section>
+
       <!-- ページフィードバック デーモン -->
       <section class="card">
         <h2 data-i18n="opt.daemon.h2">ページフィードバック デーモン</h2>
