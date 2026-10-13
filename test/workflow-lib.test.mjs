@@ -131,6 +131,7 @@ const ok = (name) => {
   assert.equal(RUN_KEY, 'aiAdvisorWorkflowRun');
   assert.deepEqual(normalizeRun(null), {
     active: false, doneStepIds: [], tabId: null, navCount: 0, startedAt: '', vars: {}, heldStepId: '', approvedStepId: '',
+    heldKind: '', judgeApprovedStepId: '',
   });
   const r = normalizeRun({ active: true, doneStepIds: ['a', 1, 'b'], tabId: 7, navCount: 3, startedAt: 't' });
   assert.equal(r.active, true);

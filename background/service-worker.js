@@ -31,6 +31,7 @@ import {
 } from '../lib/workflow.js';
 import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18n.js';
 import { matchAffordanceFastPath, resolveFastPathAction } from '../lib/eg2-client.js';
+import { isJudgeReady, callJudgeChoice } from '../lib/judge-client.js';
 
 // ---- 設定ブロブのメモリキャッシュ ----
 // 1メッセージ処理で getSettings が複数回(例: handleMessage 冒頭の ensureI18n と
@@ -551,7 +552,9 @@ async function stopWorkflowAutoRun() {
 async function approveWorkflowStep(tabId) {
   const run = await readWorkflowRun();
   if (!run.heldStepId) return { active: run.active, reason: 'nothing-held' };
-  await writeWorkflowRun({ ...run, active: true, approvedStepId: run.heldStepId, heldStepId: '', tabId: run.tabId ?? tabId });
+  // 判断AIの保留を承認しても確定系ゲートは外さない(承認の種類を分けて持つ)。
+  const approval = run.heldKind === 'judge' ? { judgeApprovedStepId: run.heldStepId } : { approvedStepId: run.heldStepId };
+  await writeWorkflowRun({ ...run, ...approval, active: true, heldStepId: '', heldKind: '', tabId: run.tabId ?? tabId });
   notifyAutoRun({ phase: 'start', text: t('sw.wf.approved') });
   maybeAutoRunWorkflow(run.tabId ?? tabId).catch((e) => console.warn('[autorun]', e?.message || e));
   return { active: true };
@@ -641,8 +644,11 @@ async function driveWorkflow(tabId) {
       ? await runStructuredStep(tabId, step, run, settings, { title: tab.title, url: tab.url })
       : await runLegacyStep(tabId, tab.url, step, run, settings);
     if (outcome.status === 'held') {
-      return stop('held', t('sw.wf.held', { n, label: outcome.label || step.target || '' }), {
+      const byJudge = outcome.heldKind === 'judge';
+      const label = outcome.label || step.target || '';
+      return stop('held', byJudge ? t('sw.wf.judgeHeld', { n, label, reason: outcome.aiReason || '' }) : t('sw.wf.held', { n, label }), {
         heldStepId: step.id,
+        heldKind: byJudge ? 'judge' : '',
         approvedStepId: '',
       });
     }
@@ -666,7 +672,9 @@ async function driveWorkflow(tabId) {
       ...latest,
       doneStepIds: Array.from(new Set([...latest.doneStepIds, step.id])),
       approvedStepId: latest.approvedStepId === step.id ? '' : latest.approvedStepId,
+      judgeApprovedStepId: latest.judgeApprovedStepId === step.id ? '' : latest.judgeApprovedStepId,
       heldStepId: '',
+      heldKind: '',
     });
     const what = formatStepTitle(step, t);
     const via = outcome.via === 'ai' ? ` ${t('sw.wf.viaAi', { text: outcome.chosenText || outcome.label || '', reason: outcome.aiReason || '' })}` : '';
@@ -675,8 +683,18 @@ async function driveWorkflow(tabId) {
   }
 }
 
-// AI に候補キーを1つ選ばせる(閉じた選択)。キー未設定なら選べない(none)。
-async function chooseCandidateWithAI({ settings, step, candidates, reason, url, title }) {
+// AI に候補キーを1つ選ばせる(閉じた選択)。判断AI(Jev)が設定済みならそれを使い、確率で
+// 「選んで進む / 迷ったので保留(choice:'hold', key=最有力)」を分ける。未設定なら従来どおり LLM。
+// judgeApproved: 人間がこの手順の保留を承認済み → 確信度不足でも最有力の候補で進む。
+async function chooseCandidateWithAI({ settings, step, candidates, reason, url, title, judgeApproved = false }) {
+  if (isJudgeReady(settings.judge)) {
+    const r = await callJudgeChoice({ judge: settings.judge, step, candidates, reason, url, title });
+    const pct = (p) => `${Math.round(p * 100)}%`;
+    if (r.confident && r.choice !== 'none') return { choice: r.choice, reason: t('sw.wf.judgeReason', { pct: pct(r.probability) }) };
+    if (r.confident || !r.best) return { choice: 'none', reason: t('sw.wf.judgeNone', { pct: pct(r.probability) }) };
+    if (judgeApproved) return { choice: r.best, reason: t('sw.wf.judgeApproved', { pct: pct(r.bestProbability) }) };
+    return { choice: 'hold', key: r.best, reason: t('sw.wf.judgeUnsure', { pct: pct(r.bestProbability) }) };
+  }
   if (!settings.ai.apiKey) return { choice: 'none', reason: t('sw.wf.noKeyForChoice') };
   const messages = buildChoiceMessages({ step, candidates, reason, url, title });
   return callAIChoice({ ai: settings.ai, messages, keys: candidates.map((c) => c.key), t });
@@ -699,6 +717,13 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
   let via = 'rule';
   let aiReason = '';
   let suggestion = null;
+  const judgeApproved = run.judgeApprovedStepId === rawStep.id;
+  // 判断AIが迷った → 最有力の候補と確信度を手順メモ(suggestion.pending)に残して保留する。
+  const holdForJudge = async (r, kind) => {
+    const label = res.candidates.find((c) => c.key === r.key)?.text || '';
+    if (suggest && !dryRun) await setStepSuggestion(rawStep.id, { kind, anchor: null, label, reason: r.reason, pending: true });
+    return { status: 'held', heldKind: 'judge', label, aiReason: r.reason, error: t('sw.wf.judgeHeldShort', { label, reason: r.reason }) };
+  };
   for (let attempt = 0; attempt < 3 && ['choose', 'missing', 'stale'].includes(res?.status); attempt++) {
     if (res.status === 'stale') {
       res = await send(); // 候補が再描画で無効になった → 列挙し直す
@@ -712,7 +737,8 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
       } else {
         if (!allowAI) return { status: 'needs-ai', error: t(`sw.wf.pick.${pick.status}`) };
         const pool = pick.status === 'ambiguous' ? pick.indices.map((i) => res.candidates[i]) : res.candidates;
-        const r = await chooseCandidateWithAI({ settings, step, candidates: pool, reason: pick.status, url, title });
+        const r = await chooseCandidateWithAI({ settings, step, candidates: pool, reason: pick.status, url, title, judgeApproved });
+        if (r.choice === 'hold') return holdForJudge(r, 'choice');
         if (r.choice === 'none') return { status: 'failed', error: `${t(`sw.wf.pick.${pick.status}`)} ${r.reason}`.trim() };
         key = r.choice;
         via = 'ai';
@@ -723,7 +749,8 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
     } else {
       // missing: 記録した要素が見つからない → 同じ役割の候補から AI が選ぶ。
       if (!allowAI) return { status: 'missing', error: t('sw.wf.pick.missing') };
-      const r = await chooseCandidateWithAI({ settings, step, candidates: res.candidates, reason: 'missing', url, title });
+      const r = await chooseCandidateWithAI({ settings, step, candidates: res.candidates, reason: 'missing', url, title, judgeApproved });
+      if (r.choice === 'hold') return holdForJudge(r, 'anchor');
       if (r.choice === 'none') return { status: 'failed', error: `${t('sw.wf.pick.missing')} ${r.reason}`.trim() };
       key = r.choice;
       via = 'ai';

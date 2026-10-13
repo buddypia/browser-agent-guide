@@ -2,6 +2,7 @@
 import { getSettings, saveSettings, DEFAULT_SETTINGS, migrateEg2 } from '../lib/storage.js';
 import { createI18n, resolveLocale, normalizeLocale, languageName } from '../sidepanel/i18n.js';
 import { checkEg2Health, DEFAULT_EG2_URL } from '../lib/eg2-client.js';
+import { askJudge } from '../lib/judge-client.js';
 
 const $ = (id) => document.getElementById(id);
 const SAFE_RECIPE_VERBS = new Set(['injectHtml', 'injectCss', 'injectScript', 'outlineElement', 'injectButton', 'injectPanel']);
@@ -45,6 +46,7 @@ async function init() {
   fillAiForm();
   fillMemoryForm();
   fillWorkflowForm();
+  fillJudgeForm();
   fillDaemonForm();
   fillEg2Form();
   renderRules();
@@ -167,6 +169,52 @@ function fillMemoryForm() {
 
 function fillWorkflowForm() {
   $('autorun-allow-irreversible').checked = Boolean(settings.workflow?.allowIrreversibleClicks);
+}
+
+// ---- 判断AI (Jev) ----
+function fillJudgeForm() {
+  const j = { ...DEFAULT_SETTINGS.judge, ...(settings.judge || {}) };
+  $('judge-provider').value = j.provider === 'jev' ? 'jev' : 'llm';
+  $('judge-apiKey').value = j.apiKey;
+  $('judge-model').value = j.model;
+  $('judge-minConfidence').value = j.minConfidence;
+}
+
+function readJudgeForm() {
+  const min = Number.parseFloat($('judge-minConfidence').value);
+  return {
+    ...DEFAULT_SETTINGS.judge,
+    ...(settings.judge || {}),
+    provider: $('judge-provider').value === 'jev' ? 'jev' : 'llm',
+    apiKey: $('judge-apiKey').value.trim(),
+    model: $('judge-model').value.trim() || DEFAULT_SETTINGS.judge.model,
+    minConfidence: Number.isFinite(min) ? Math.min(1, Math.max(0, min)) : DEFAULT_SETTINGS.judge.minConfidence,
+  };
+}
+
+async function saveJudge() {
+  settings.judge = readJudgeForm();
+  await saveSettings(settings);
+  setStatus('judge-status', t('opt.status.saved'), true);
+}
+
+// 課金される実リクエストを1回だけ送る(ユーザー操作時のみ)。
+async function testJudge() {
+  const judge = readJudgeForm();
+  if (!judge.apiKey) {
+    setStatus('judge-status', t('opt.judge.enterKey'), false);
+    return;
+  }
+  setStatus('judge-status', t('opt.eg2.connecting'), true);
+  try {
+    const data = await askJudge({
+      judge,
+      body: { state: 'connection test', questions: { pick: { type: 'noul', instructions: 'This is a connection test.' } } },
+    });
+    setStatus('judge-status', t('opt.judge.testOk', { model: data?.model || judge.model }), true);
+  } catch (e) {
+    setStatus('judge-status', t('opt.judge.testFailed', { error: e.message }), false);
+  }
 }
 
 // ---- AI設定 ----
@@ -414,6 +462,7 @@ function importSettings(file) {
       ai: { ...DEFAULT_SETTINGS.ai, ...(data.ai || {}) },
       memory: { ...DEFAULT_SETTINGS.memory, ...(data.memory || {}) },
       workflow: { ...DEFAULT_SETTINGS.workflow, ...(data.workflow || {}) },
+      judge: { ...DEFAULT_SETTINGS.judge, ...(data.judge || {}) },
       ui: { ...DEFAULT_SETTINGS.ui, ...(data.ui || {}) },
       daemon: { ...DEFAULT_SETTINGS.daemon, ...(data.daemon || {}) },
       // 旧バージョンの書き出し (urlVersion なし・8765) も読込時と同じく移行する
@@ -428,6 +477,7 @@ function importSettings(file) {
       fillAiForm();
       fillMemoryForm();
       fillWorkflowForm();
+      fillJudgeForm();
       fillDaemonForm();
       fillEg2Form();
       renderRules();
@@ -477,6 +527,8 @@ function bindEvents() {
   $('save-daemon').addEventListener('click', saveDaemon);
   $('test-daemon').addEventListener('click', testDaemon);
   $('save-eg2').addEventListener('click', saveEg2);
+  $('save-judge').addEventListener('click', saveJudge);
+  $('test-judge').addEventListener('click', testJudge);
   $('test-eg2').addEventListener('click', testEg2);
   $('add-rule').addEventListener('click', addRule);
   $('recipe-site').addEventListener('change', loadRecipeJson);
