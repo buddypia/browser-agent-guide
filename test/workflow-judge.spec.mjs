@@ -3,6 +3,8 @@
 //   - 確信度が高い → そのまま選んで進み、手順に「選んだ項目と確信度」のメモ(suggestion)を残す
 //   - 確信度が低い → 手順を保留し、最有力の候補をメモ(pending)に残す → 承認で進む
 //   - 判断の承認では確定系ゲートは外れない(確定系ラベルは別の承認で止まる)
+//   - 承認は保留時に示した候補に束縛される(承認後に AI へ問い直さない)
+//   - 記録要素が消えた時の差し替えは確信度が高くても承認待ち / Jev 障害は手順番号つきで止まる
 import { test, expect, chromium } from '@playwright/test';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -34,11 +36,17 @@ function listHtml(names, button = '選ぶ') {
   </script></body></html>`;
 }
 
-// 偽 Jev: 本文の候補から「Anker」を含むものを選ぶ。1つなら高確信、複数なら迷う(最初を最有力に)。
+const FORM_HTML = (label) => `<!doctype html><html><head><meta charset="utf-8"><title>設定</title></head><body>
+  <h2>設定</h2><button id="b-${label}" type="button">${label}</button> <button type="button">キャンセル</button>
+  <output id="state">idle</output>
+  <script>document.body.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) document.getElementById('state').textContent = 'clicked:' + b.textContent; });</script>
+  </body></html>`;
+
+// 偽 Jev: 本文の候補から prefer(正規表現)に合うものを選ぶ。1つなら高確信、複数なら迷う(最初を最有力に)。
 // flip: 迷う時の最有力を入れ替える(承認後に問い直すと別の候補を選んでしまう状況を作る)。
-function fakeJev(body, flip = false) {
+function fakeJev(body, { prefer = 'Anker', flip = false } = {}) {
   const criteria = body?.questions?.pick?.criteria || {};
-  const anker = Object.keys(criteria).filter((k) => k !== 'none' && /Anker/.test(criteria[k]));
+  const anker = Object.keys(criteria).filter((k) => k !== 'none' && new RegExp(prefer).test(criteria[k]));
   if (flip) anker.reverse();
   const probabilities = Object.fromEntries(Object.keys(criteria).map((k) => [k, 0]));
   if (anker.length === 1) {
@@ -66,12 +74,17 @@ function startServer(state) {
           const body = JSON.parse(raw);
           state.jevCalls.push({ auth: req.headers.authorization, body });
           res.setHeader('content-type', 'application/json');
-          res.end(JSON.stringify(fakeJev(body, state.flip)));
+          if (state.fail) {
+            res.statusCode = 500;
+            return res.end('{"error":"boom"}');
+          }
+          res.end(JSON.stringify(fakeJev(body, state)));
         });
         return;
       }
       res.setHeader('content-type', 'text/html; charset=utf-8');
       if (url.pathname === '/list') return res.end(listHtml(VARIANTS[state.variant], state.button));
+      if (url.pathname === '/form') return res.end(FORM_HTML(state.formLabel));
       res.statusCode = 404;
       res.end('not found');
     });
@@ -90,7 +103,7 @@ const readStore = (sw, key) => sw.evaluate(async (k) => (await chrome.storage.lo
 
 test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
   test.describe.configure({ mode: 'serial' });
-  const state = { variant: 'rec', button: '選ぶ', jevCalls: [], flip: false };
+  const state = { variant: 'rec', button: '選ぶ', formLabel: '保存する', jevCalls: [], prefer: 'Anker', flip: false, fail: false };
   let server;
   let origin;
   let context;
@@ -111,6 +124,11 @@ test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
     const extId = new URL(sw.url()).host;
     extPage = await context.newPage();
     await extPage.goto(`chrome-extension://${extId}/options/options.html`);
+    // SW の進捗通知(notifyAutoRun のブロードキャスト)を拡張ページで拾う。
+    await extPage.evaluate(() => {
+      window.__autorun = [];
+      chrome.runtime.onMessage.addListener((m) => void window.__autorun.push(JSON.stringify(m)));
+    });
     // LLM キーは無し。判断AIだけを loopback の偽 Jev に向ける。
     await sw.evaluate(async (base) => {
       const k = 'aiAdvisorSettings';
@@ -162,7 +180,7 @@ test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
     const { page } = await openList('rec');
     await page.click('#list li:nth-child(2) button');
     await expect(page.locator('#state')).toHaveText('picked:Anker USB-C ケーブル 1m');
-    await expect.poll(async () => (await readStore(sw, 'aiAdvisorWorkflow'))?.steps?.length ?? 0).toBe(1);
+    await expect.poll(async () => (await readStore(sw, 'aiAdvisorWorkflow'))?.steps?.length ?? 0, { timeout: 15_000 }).toBe(1);
     recorded = await stepOf();
     expect(recorded.locator.kind).toBe('pick');
     expect(recorded.choice.value).toContain('Anker USB-C ケーブル 1m');
@@ -197,6 +215,7 @@ test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
     await expect.poll(async () => (await runOf())?.heldStepId || '', { timeout: 15_000 }).toBe(recorded.id);
     const held = await runOf();
     expect(held).toMatchObject({ active: false, heldKind: 'judge', doneStepIds: [] });
+    expect(held.heldLabel).toMatch(/^Anker USB-C ケーブル\(1m\)ブラック/); // 承認の束縛先 = 示した候補
     await expect(page.locator('#state')).toHaveText('idle'); // 迷ったので押していない
     const memo = (await stepOf()).suggestion;
     expect(memo).toMatchObject({ kind: 'choice', pending: true });
@@ -212,7 +231,7 @@ test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
     state.flip = false;
     await expect.poll(async () => (await runOf())?.doneStepIds?.length ?? 0).toBe(1);
     const done = await runOf();
-    expect(done).toMatchObject({ judgeApprovedStepId: '', approvedStepId: '', heldKind: '' });
+    expect(done).toMatchObject({ judgeApprovedStepId: '', approvedStepId: '', heldKind: '', heldLabel: '', approvedLabel: '' });
     expect((await stepOf()).suggestion.pending).not.toBe(true); // 成功の記録で提案が上書きされた
     await page.close();
   });
@@ -235,5 +254,124 @@ test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
     expect(await sendToSw({ type: 'APPROVE_WORKFLOW_STEP', tabId })).toMatchObject({ active: true });
     await expect(page.locator('#state')).toHaveText('picked:Anker USB-C ケーブル(1m)ブラック', { timeout: 15_000 });
     await page.close();
+  });
+  test('確定系ゲートの承認も保留時に示した候補に束縛され、承認後に AI へ問い直さない', async () => {
+    await setSteps([recorded]);
+    const { page, tabId } = await openList('relabeled', '今すぐ購入');
+    expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+    // Jev は高確信で新パッケージを選ぶが、確定系ラベルなので通常のゲートで止まる。
+    await expect.poll(async () => (await runOf())?.heldStepId || '', { timeout: 15_000 }).toBe(recorded.id);
+    const held = await runOf();
+    expect(held.heldKind).toBe('');
+    expect(held.heldLabel).toMatch(/^【新パッケージ】Anker USB-C to USB-C ケーブル \(1m\)/);
+    await expect(page.locator('#state')).toHaveText('idle');
+
+    // 承認後に問い直すと Belkin を選ぶ状態にしても、承認した候補だけを押す。
+    state.prefer = 'Belkin';
+    const callsBefore = state.jevCalls.length;
+    expect(await sendToSw({ type: 'APPROVE_WORKFLOW_STEP', tabId })).toMatchObject({ active: true });
+    await expect(page.locator('#state')).toHaveText('picked:【新パッケージ】Anker USB-C to USB-C ケーブル (1m)', { timeout: 15_000 });
+    expect(state.jevCalls.length).toBe(callsBefore);
+    state.prefer = 'Anker';
+    await page.close();
+  });
+
+  test('Jev が失敗したら「該当なし」と誤読せず、手順番号つきの失敗で止まる', async () => {
+    await setSteps([recorded]);
+    const { page, tabId } = await openList('relabeled');
+    await extPage.evaluate(() => (window.__autorun.length = 0));
+    state.fail = true;
+    try {
+      expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+      await expect.poll(async () => (await runOf())?.active, { timeout: 15_000 }).toBe(false);
+      const msgs = await extPage.evaluate(() => window.__autorun.join('\n'));
+      expect(msgs).toContain('Jev API error 500');
+      expect(msgs).not.toContain('手順?');
+      expect(await runOf()).toMatchObject({ heldStepId: '', doneStepIds: [] });
+      await expect(page.locator('#state')).toHaveText('idle');
+    } finally {
+      state.fail = false;
+    }
+    await page.close();
+  });
+
+  test('記録した要素が消えた時の差し替えは、確信度が高くても承認を待つ', async () => {
+    await sw.evaluate(() => chrome.storage.local.set({ aiAdvisorWorkflow: { recording: true, steps: [], saved: [] } }));
+    state.formLabel = '保存する';
+    const rec = await context.newPage();
+    await rec.goto(`${origin}/form`);
+    await waitContentReady(rec);
+    await rec.click('#b-保存する');
+    await expect.poll(async () => (await readStore(sw, 'aiAdvisorWorkflow'))?.steps?.length ?? 0, { timeout: 15_000 }).toBe(1);
+    const fixed = { ...(await stepOf()), needsReview: false, gate: false };
+    expect(fixed.locator.kind).toBe('fixed');
+    await rec.close();
+    await setSteps([fixed]);
+
+    // ボタンの id/表記が変わって記録要素が見つからない → Jev は 0.95 で「保存」を選ぶが、自動では押さない。
+    state.formLabel = '保存';
+    state.prefer = '^保存$';
+    try {
+      const page = await context.newPage();
+      await page.goto(`${origin}/form`);
+      await waitContentReady(page);
+      const tabId = await tabIdOf(`${origin}/form`);
+      expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+      await expect.poll(async () => (await runOf())?.heldKind || '', { timeout: 20_000 }).toBe('judge');
+      expect((await runOf()).heldLabel).toBe('保存');
+      await expect(page.locator('#state')).toHaveText('idle');
+      expect(await sendToSw({ type: 'APPROVE_WORKFLOW_STEP', tabId })).toMatchObject({ active: true });
+      await expect(page.locator('#state')).toHaveText('clicked:保存', { timeout: 15_000 });
+      await page.close();
+    } finally {
+      state.prefer = 'Anker';
+      state.formLabel = '保存する';
+    }
+  });
+  test('確定系の承認は示した候補にだけ効く: 承認後に記録要素が戻っても、それは押さずに再び止まる', async () => {
+    // 記録: 確定系ボタン(自動で gate 付き)。
+    await sw.evaluate(() => chrome.storage.local.set({ aiAdvisorWorkflow: { recording: true, steps: [], saved: [] } }));
+    state.formLabel = '今すぐ購入する';
+    const rec = await context.newPage();
+    await rec.goto(`${origin}/form`);
+    await waitContentReady(rec);
+    await rec.click('#b-今すぐ購入する');
+    await expect.poll(async () => (await readStore(sw, 'aiAdvisorWorkflow'))?.steps?.length ?? 0, { timeout: 15_000 }).toBe(1);
+    const buy = { ...(await stepOf()), needsReview: false };
+    expect(buy.gate).toBe(true);
+    await rec.close();
+    await setSteps([buy]);
+
+    state.formLabel = '今すぐ購入';
+    state.prefer = '^今すぐ購入$';
+    try {
+      const page = await context.newPage();
+      await page.goto(`${origin}/form`);
+      await waitContentReady(page);
+      const tabId = await tabIdOf(`${origin}/form`);
+      expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+      // 記録要素が無い → 差し替え候補の承認待ち → 承認 → 確定系ゲートで「今すぐ購入」に束縛して停止。
+      await expect.poll(async () => (await runOf())?.heldKind || '', { timeout: 20_000 }).toBe('judge');
+      expect(await sendToSw({ type: 'APPROVE_WORKFLOW_STEP', tabId })).toMatchObject({ active: true });
+      await expect.poll(async () => {
+        const r = await runOf();
+        return r && !r.active && r.heldKind === '' ? r.heldLabel : '';
+      }, { timeout: 20_000 }).toBe('今すぐ購入');
+
+      // 承認前にページが変わり、記録した元のボタンが戻った → 承認は「今すぐ購入」にしか効かないので押さない。
+      state.formLabel = '今すぐ購入する';
+      await page.reload();
+      await waitContentReady(page);
+      await sendToSw({ type: 'APPROVE_WORKFLOW_STEP', tabId });
+      await expect.poll(async () => {
+        const r = await runOf();
+        return r && !r.active && r.heldStepId === buy.id ? 'held-again' : '';
+      }, { timeout: 20_000 }).toBe('held-again');
+      await expect(page.locator('#state')).toHaveText('idle');
+      await page.close();
+    } finally {
+      state.prefer = 'Anker';
+      state.formLabel = '保存する';
+    }
   });
 });

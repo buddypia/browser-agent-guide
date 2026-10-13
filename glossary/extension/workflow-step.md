@@ -40,8 +40,12 @@ confidence: medium
   判断AI(`settings.judge.provider:'jev'`)を設定すると、この候補選択だけを TypeSafe Jev に任せる
   (`callJudgeChoice`。チャット/verbs 生成は LLM のまま)。選んだ候補の確率が `minConfidence` 以上なら進んで
   確信度つきの `suggestion` を残し、未満なら最有力を `suggestion.pending` に残して `heldKind:'judge'` で保留する。
-  承認後は Jev に問い直さず、提案と同じテキストの候補を押す(承認した候補 = 押す候補)。その承認は
+  記録要素が無い時の差し替え(候補がページ全体)は確信度に関わらず保留する。判断の承認は
   `judgeApprovedStepId`(候補選択だけを通す)で、確定系ゲートの `approvedStepId` とは別に持つ。
+- **承認の不変条件**: 承認が許すのは「保留時に人間へ示した候補」だけ。保留時に `run.heldLabel` へ候補の
+  テキストを残し、承認で `approvedLabel` へ移す。再実行は AI に問い直さず、そのテキストの候補(一意)だけを押し、
+  content の確定系ゲートも対象のテキストが `expectText` と一致する時だけ承認を効かせる。AI が選んだ候補を
+  一意に示せない(テキスト無し/同じ表記が複数)時は保留せず止める。外部 AI へ手順の入力値は送らない。
 - `check.type` は `none | url | text | appears`。URL は `urlPattern`(`:id` 汎化)で照合する。
 - `gate: true`(確定系ラベルは自動付与)の手順は承認まで `held` で止まる。
 

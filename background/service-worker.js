@@ -543,7 +543,7 @@ async function startWorkflowAutoRun(tabId, vars) {
 /** 自動実行セッションを停止する。 */
 async function stopWorkflowAutoRun() {
   const run = await readWorkflowRun();
-  await writeWorkflowRun({ ...run, active: false, doneStepIds: [], heldStepId: '', heldKind: '', approvedStepId: '', judgeApprovedStepId: '' });
+  await writeWorkflowRun({ ...run, active: false, doneStepIds: [], heldStepId: '', heldKind: '', heldLabel: '', approvedStepId: '', judgeApprovedStepId: '', approvedLabel: '' });
   notifyAutoRun({ phase: 'stopped', text: t('sw.autorun.stopped') });
   return { active: false };
 }
@@ -553,8 +553,18 @@ async function approveWorkflowStep(tabId) {
   const run = await readWorkflowRun();
   if (!run.heldStepId) return { active: run.active, reason: 'nothing-held' };
   // 判断AIの保留を承認しても確定系ゲートは外さない(承認の種類を分けて持つ)。
+  // 承認は「保留時に人間へ示した候補」(heldLabel)に束縛する。再実行で AI に問い直さず、同じ候補だけを押す。
   const approval = run.heldKind === 'judge' ? { judgeApprovedStepId: run.heldStepId } : { approvedStepId: run.heldStepId };
-  await writeWorkflowRun({ ...run, ...approval, active: true, heldStepId: '', heldKind: '', tabId: run.tabId ?? tabId });
+  await writeWorkflowRun({
+    ...run,
+    ...approval,
+    approvedLabel: run.heldLabel,
+    active: true,
+    heldStepId: '',
+    heldKind: '',
+    heldLabel: '',
+    tabId: run.tabId ?? tabId,
+  });
   notifyAutoRun({ phase: 'start', text: t('sw.wf.approved') });
   maybeAutoRunWorkflow(run.tabId ?? tabId).catch((e) => console.warn('[autorun]', e?.message || e));
   return { active: true };
@@ -605,6 +615,7 @@ async function driveWorkflow(tabId) {
     const n = all.findIndex((s) => s.id === step.id) + 1;
     const stop = async (phase, text, extra = {}) => {
       const latest = await readWorkflowRun();
+      if (!latest.active) return; // 実行中にユーザーが停止済み → 保留状態などを書き戻さない
       await writeWorkflowRun({ ...latest, active: false, ...extra });
       notifyAutoRun({ phase, text, stepId: step.id });
     };
@@ -643,12 +654,14 @@ async function driveWorkflow(tabId) {
     const outcome = structured
       ? await runStructuredStep(tabId, step, run, settings, { title: tab.title, url: tab.url })
       : await runLegacyStep(tabId, tab.url, step, run, settings);
+    if (outcome.status === 'stopped') return;
     if (outcome.status === 'held') {
       const byJudge = outcome.heldKind === 'judge';
       const label = outcome.label || step.target || '';
       return stop('held', byJudge ? t('sw.wf.judgeHeld', { n, label, reason: outcome.aiReason || '' }) : t('sw.wf.held', { n, label }), {
         heldStepId: step.id,
         heldKind: byJudge ? 'judge' : '',
+        heldLabel: outcome.heldLabel || '',
         approvedStepId: '',
       });
     }
@@ -673,8 +686,10 @@ async function driveWorkflow(tabId) {
       doneStepIds: Array.from(new Set([...latest.doneStepIds, step.id])),
       approvedStepId: latest.approvedStepId === step.id ? '' : latest.approvedStepId,
       judgeApprovedStepId: latest.judgeApprovedStepId === step.id ? '' : latest.judgeApprovedStepId,
+      approvedLabel: '',
       heldStepId: '',
       heldKind: '',
+      heldLabel: '',
     });
     const what = formatStepTitle(step, t);
     const via = outcome.via === 'ai' ? ` ${t('sw.wf.viaAi', { text: outcome.chosenText || outcome.label || '', reason: outcome.aiReason || '' })}` : '';
@@ -683,21 +698,28 @@ async function driveWorkflow(tabId) {
   }
 }
 
-const sameCandidateText = (a, b) => String(a ?? '').replace(/\s+/g, ' ').trim() === String(b ?? '').replace(/\s+/g, ' ').trim();
+const normCandidateText = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
+
+/** テキストが一致する候補がちょうど1つならそれを返す(0件/複数は null = 人間に一意に示せない)。 */
+function uniqueCandidateByText(candidates, text) {
+  const want = normCandidateText(text);
+  if (!want) return null;
+  const hits = (candidates || []).filter((c) => normCandidateText(c.text) === want);
+  return hits.length === 1 ? hits[0] : null;
+}
 
 // AI に候補キーを1つ選ばせる(閉じた選択)。判断AI(Jev)が設定済みならそれを使い、確率で
-// 「選んで進む / 迷ったので保留(choice:'hold', key=最有力)」を分ける。未設定なら従来どおり LLM。
-// approvedLabel: 人間が承認した提案(保留時に手順メモへ残した最有力のテキスト)。同じテキストの候補が
-// 今もあればそれを選ぶ(判断AIに問い直さない = 承認した候補と押す候補を一致させる)。無ければ改めて判断する。
-async function chooseCandidateWithAI({ settings, step, candidates, reason, url, title, approvedLabel = '' }) {
-  const approved = approvedLabel && candidates.find((c) => sameCandidateText(c.text, approvedLabel));
-  if (approved) return { choice: approved.key, reason: t('sw.wf.judgeApproved') };
+// 「選んで進む / 人間に確認する(choice:'hold', key=最有力)」を分ける。未設定なら従来どおり LLM。
+// 記録した要素が無い(missing)時の差し替えはページ全体から候補を拾うので、確信度に関わらず確認に回す。
+async function chooseCandidateWithAI({ settings, step, candidates, reason, url, title }) {
   if (isJudgeReady(settings.judge)) {
     const r = await callJudgeChoice({ judge: settings.judge, step, candidates, reason, url, title });
     const pct = (p) => `${Math.round(p * 100)}%`;
-    if (r.confident && r.choice !== 'none') return { choice: r.choice, reason: t('sw.wf.judgeReason', { pct: pct(r.probability) }) };
-    if (r.confident || !r.best) return { choice: 'none', reason: t('sw.wf.judgeNone', { pct: pct(r.probability) }) };
-    return { choice: 'hold', key: r.best, reason: t('sw.wf.judgeUnsure', { pct: pct(r.bestProbability) }) };
+    const model = r.model || settings.judge.model;
+    if (!r.best || (r.confident && r.choice === 'none')) return { choice: 'none', reason: t('sw.wf.judgeNone', { pct: pct(r.probability), model }) };
+    if (r.confident && reason !== 'missing') return { choice: r.choice, reason: t('sw.wf.judgeReason', { pct: pct(r.probability), model }) };
+    const why = reason === 'missing' ? 'sw.wf.judgeMissing' : 'sw.wf.judgeUnsure';
+    return { choice: 'hold', key: r.best, reason: t(why, { pct: pct(r.bestProbability), model }) };
   }
   if (!settings.ai.apiKey) return { choice: 'none', reason: t('sw.wf.noKeyForChoice') };
   const messages = buildChoiceMessages({ step, candidates, reason, url, title });
@@ -706,13 +728,18 @@ async function chooseCandidateWithAI({ settings, step, candidates, reason, url, 
 
 /**
  * 構造化手順を1つ実行する(dryRun なら対象を示すだけ)。
- * @returns {{status:'ok'|'held'|'failed'|'needs-ai'|'missing', label?, chosenText?, via?, aiReason?, error?}}
+ * 承認の不変条件: 人間が承認するのは「保留時に示した候補」(heldLabel)。承認後の再実行は AI に問い直さず、
+ * その候補だけを押す。AI が選んだ候補を一意に示せない(テキスト無し/同じ表記が複数)なら保留せず止める。
+ * @returns {{status:'ok'|'held'|'failed'|'needs-ai'|'missing'|'stopped', label?, chosenText?, heldLabel?, via?, aiReason?, error?}}
  */
 async function runStructuredStep(tabId, rawStep, run, settings, { title = '', url = '', dryRun = false, allowAI = true, suggest = true } = {}) {
   const step = resolveStepVars(rawStep, run.vars);
+  const approvedLabel = run.approvedStepId === rawStep.id || run.judgeApprovedStepId === rawStep.id ? run.approvedLabel : '';
   const options = {
     allowIrreversibleClicks: Boolean(settings.workflow?.allowIrreversibleClicks),
     approved: run.approvedStepId === rawStep.id,
+    // 確定系の承認は人間に示した候補にだけ効かせる(承認後に別の要素へ解決されたら content が再び保留する)。
+    expectText: run.approvedStepId === rawStep.id ? approvedLabel : '',
     dryRun,
     timeoutMs: dryRun ? WF_DRY_TIMEOUT_MS : WF_STEP_TIMEOUT_MS,
   };
@@ -721,12 +748,26 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
   let via = 'rule';
   let aiReason = '';
   let suggestion = null;
-  const approvedLabel = run.judgeApprovedStepId === rawStep.id && rawStep.suggestion?.pending ? rawStep.suggestion.label : '';
-  // 判断AIが迷った → 最有力の候補と確信度を手順メモ(suggestion.pending)に残して保留する。
+  let sentText = ''; // 押す候補のテキスト(保留時の承認の束縛先)
+  let sentFrom = []; // その候補を選んだ時の候補一覧(一意性の判定用)
+  const unbindable = (label) => ({ status: 'failed', error: t('sw.wf.unbindable', { label: label || '?' }) });
+  const askAI = async (args) => {
+    let r;
+    try {
+      r = await chooseCandidateWithAI({ settings, step, url, title, ...args });
+    } catch (e) {
+      return { failed: { status: 'failed', error: t('sw.wf.aiError', { error: String(e?.message || e) }) } };
+    }
+    // 判断待ちの間にユーザーが停止していたら、何も押さず保留も書かない。
+    if (!dryRun && !(await readWorkflowRun()).active) return { failed: { status: 'stopped' } };
+    return { r };
+  };
+  // 判断AIが迷った(または要素の差し替え) → 最有力の候補を手順メモに残し、その候補に束縛して保留する。
   const holdForJudge = async (r, kind) => {
-    const label = res.candidates.find((c) => c.key === r.key)?.text || '';
-    if (suggest && !dryRun) await setStepSuggestion(rawStep.id, { kind, anchor: null, label, reason: r.reason, pending: true });
-    return { status: 'held', heldKind: 'judge', label, aiReason: r.reason, error: t('sw.wf.judgeHeldShort', { label, reason: r.reason }) };
+    const hit = uniqueCandidateByText(res.candidates, res.candidates.find((c) => c.key === r.key)?.text);
+    if (!hit) return unbindable(res.candidates.find((c) => c.key === r.key)?.text);
+    if (suggest && !dryRun) await setStepSuggestion(rawStep.id, { kind, anchor: null, label: hit.text, reason: r.reason, pending: true });
+    return { status: 'held', heldKind: 'judge', label: hit.text, heldLabel: hit.text, aiReason: r.reason, error: t('sw.wf.judgeHeldShort', { label: hit.text, reason: r.reason }) };
   };
   for (let attempt = 0; attempt < 3 && ['choose', 'missing', 'stale'].includes(res?.status); attempt++) {
     if (res.status === 'stale') {
@@ -734,14 +775,24 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
       continue;
     }
     let key = null;
-    if (res.status === 'choose') {
+    if (approvedLabel) {
+      // 承認済み: 人間が見た候補だけを押す(見つからない/複数なら押さずに止める)。
+      const hit = uniqueCandidateByText(res.candidates, approvedLabel);
+      if (!hit) return { status: 'failed', error: t('sw.wf.approvedGone', { label: approvedLabel }) };
+      key = hit.key;
+      via = 'approved';
+      aiReason = t('sw.wf.approvedReason');
+      // 承認して押した候補を、提案(pending)に代わる実行済みメモとして残す(「次回から固定」で確定できる)。
+      suggestion = { kind: res.status === 'missing' ? 'anchor' : 'choice' };
+    } else if (res.status === 'choose') {
       const pick = pickCandidate(res.candidates, step.choice);
       if (pick.status === 'ok') {
         key = res.candidates[pick.index].key;
       } else {
         if (!allowAI) return { status: 'needs-ai', error: t(`sw.wf.pick.${pick.status}`) };
         const pool = pick.status === 'ambiguous' ? pick.indices.map((i) => res.candidates[i]) : res.candidates;
-        const r = await chooseCandidateWithAI({ settings, step, candidates: pool, reason: pick.status, url, title, approvedLabel });
+        const { r, failed } = await askAI({ candidates: pool, reason: pick.status });
+        if (failed) return failed;
         if (r.choice === 'hold') return holdForJudge(r, 'choice');
         if (r.choice === 'none') return { status: 'failed', error: `${t(`sw.wf.pick.${pick.status}`)} ${r.reason}`.trim() };
         key = r.choice;
@@ -753,7 +804,8 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
     } else {
       // missing: 記録した要素が見つからない → 同じ役割の候補から AI が選ぶ。
       if (!allowAI) return { status: 'missing', error: t('sw.wf.pick.missing') };
-      const r = await chooseCandidateWithAI({ settings, step, candidates: res.candidates, reason: 'missing', url, title, approvedLabel });
+      const { r, failed } = await askAI({ candidates: res.candidates, reason: 'missing' });
+      if (failed) return failed;
       if (r.choice === 'hold') return holdForJudge(r, 'anchor');
       if (r.choice === 'none') return { status: 'failed', error: `${t('sw.wf.pick.missing')} ${r.reason}`.trim() };
       key = r.choice;
@@ -761,9 +813,17 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
       aiReason = r.reason;
       suggestion = { kind: 'anchor' };
     }
+    sentFrom = res.candidates;
+    sentText = res.candidates.find((c) => c.key === key)?.text || '';
     res = await send({ choiceKey: key, token: res.token });
   }
   if (!res || !res.status) return { status: 'failed', error: t('sw.autorun.failed') };
+  if (res.status === 'held') {
+    // ルールで決まった候補は再解決も決定的なので従来どおり。AI/承認で選んだ候補は、承認をその候補に束縛する。
+    if (via === 'rule') return { ...res, via, aiReason };
+    if (!uniqueCandidateByText(sentFrom, sentText)) return unbindable(sentText);
+    return { ...res, via, aiReason, heldLabel: normCandidateText(sentText) };
+  }
   if (res.status === 'ok' && suggestion && suggest && !dryRun) {
     await setStepSuggestion(rawStep.id, {
       kind: suggestion.kind,

@@ -4853,7 +4853,10 @@
     }
 
     // 3) 承認ゲート: 手順単位のゲート、または実行時に確定系ラベルへ変わったクリックは人間の承認まで止める。
-    if (verb === 'click' && !opts.approved) {
+    //    承認は「人間に示した候補」(expectText)に束縛される。今回の対象がそれと違えば承認は効かない。
+    const norm = (x) => String(x ?? '').replace(/\s+/g, ' ').trim();
+    const approved = Boolean(opts.approved) && (!opts.expectText || norm(chosenText) === norm(opts.expectText));
+    if (verb === 'click' && !approved) {
       const changedToRisky =
         !opts.allowIrreversibleClicks && isIrreversibleLabel(label) && !isIrreversibleLabel(step.target || '');
       if (step.gate || changedToRisky) {
