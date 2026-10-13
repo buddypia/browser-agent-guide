@@ -202,6 +202,10 @@ async function handleMessage(msg, sender) {
       return runSingleVerb(msg);
     case 'COLLECT_CONTEXT':
       return collectContext(msg.tabId);
+    case 'CONTENT_READY':
+      // content の受信準備完了 → このページのレシピを(取りこぼしていれば)適用する。
+      // 自動実行は onUpdated と ensureContentAndSend(未注入なら注入して再送)で既に確実なので、ここでは起こさない。
+      return syncTab(sender?.tab?.id, sender?.tab?.url || msg.url);
     case 'SPA_NAVIGATED':
       // content から SPA内部遷移(URL変化)の通知。新URLにマッチするレシピを再適用する。
       syncTabAutoRun(sender?.tab?.id, msg.url);
