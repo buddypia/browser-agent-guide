@@ -1753,21 +1753,26 @@ function renderReviewPrompt(s) {
 function renderSuggestion(s) {
   const sg = s.suggestion;
   const box = createEl('div', 'wf-suggest');
-  const text = sg.kind === 'anchor' ? t('wf.suggest.anchor', { label: sg.label }) : t('wf.suggest.choice', { label: sg.label });
+  const text = sg.pending
+    ? t('wf.suggest.pending', { label: sg.label })
+    : sg.kind === 'anchor' ? t('wf.suggest.anchor', { label: sg.label }) : t('wf.suggest.choice', { label: sg.label });
   box.appendChild(createEl('span', 'wf-suggest-text', sg.reason ? `${text} (${sg.reason})` : text));
-  const adopt = createEl('button', 'wf-mini', t('wf.suggest.adopt'));
-  adopt.type = 'button';
-  adopt.addEventListener('click', () =>
-    updateWorkflowStep(s.id, (cur) =>
-      cur.suggestion?.kind === 'anchor' && cur.suggestion.anchor
-        ? { locator: { ...cur.locator, anchor: cur.suggestion.anchor }, suggestion: null }
-        : { choice: { by: 'text', value: cur.suggestion?.label || '' }, suggestion: null, needsReview: false }
-    )
-  );
+  // 要素の差し替え(anchor)は実行して初めて anchor が取れるので、未実行の提案は固定できない。
+  if (sg.kind === 'choice' || sg.anchor) {
+    const adopt = createEl('button', 'wf-mini', t('wf.suggest.adopt'));
+    adopt.type = 'button';
+    adopt.addEventListener('click', () =>
+      updateWorkflowStep(s.id, (cur) =>
+        cur.suggestion?.kind === 'anchor' && cur.suggestion.anchor
+          ? { locator: { ...cur.locator, anchor: cur.suggestion.anchor }, suggestion: null }
+          : { choice: { by: 'text', value: cur.suggestion?.label || '' }, suggestion: null, needsReview: false }
+      )
+    );
+    box.appendChild(adopt);
+  }
   const dismiss = createEl('button', 'wf-mini wf-mini--ghost', t('wf.suggest.dismiss'));
   dismiss.type = 'button';
   dismiss.addEventListener('click', () => updateWorkflowStep(s.id, { suggestion: null }));
-  box.appendChild(adopt);
   box.appendChild(dismiss);
   return box;
 }

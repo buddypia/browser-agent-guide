@@ -16,10 +16,11 @@ code_refs:
   - { path: "lib/workflow.js", symbol: "pickCandidate" }
   - { path: "content/content-script.js", symbol: "runStep" }
   - { path: "background/service-worker.js", symbol: "driveWorkflow" }
+  - { path: "lib/judge-client.js", symbol: "callJudgeChoice" }
 api_refs: []
 db_refs: []
 related: ["verb-registry", "affordance"]
-last_verified: 2026-10-08
+last_verified: 2026-10-13
 confidence: medium
 ---
 
@@ -36,6 +37,11 @@ confidence: medium
 - `choice.by` は `index | text | first | last | min | max | ai`。候補からの選択は SW の純関数
   `pickCandidate` が決め、決まらない時(曖昧/該当なし/`ai`)だけ AI に **候補キーの enum から1つ**
   を選ばせる(`callAIChoice`)。AI が補った結果は `suggestion` として残り、人間が採用した時だけ学習される。
+  判断AI(`settings.judge.provider:'jev'`)を設定すると、この候補選択だけを TypeSafe Jev に任せる
+  (`callJudgeChoice`。チャット/verbs 生成は LLM のまま)。選んだ候補の確率が `minConfidence` 以上なら進んで
+  確信度つきの `suggestion` を残し、未満なら最有力を `suggestion.pending` に残して `heldKind:'judge'` で保留する。
+  承認後は Jev に問い直さず、提案と同じテキストの候補を押す(承認した候補 = 押す候補)。その承認は
+  `judgeApprovedStepId`(候補選択だけを通す)で、確定系ゲートの `approvedStepId` とは別に持つ。
 - `check.type` は `none | url | text | appears`。URL は `urlPattern`(`:id` 汎化)で照合する。
 - `gate: true`(確定系ラベルは自動付与)の手順は承認まで `held` で止まる。
 
