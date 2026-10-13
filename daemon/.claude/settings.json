@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[browser-agent-guide] WARNING: this session was started in daemon/. Claude Code reads .claude/settings.json only from the launch directory, so the repo-root governance hooks (worktree / merge / pre-ship review / destructive-git guards, worktree ledger) are NOT active in this session. Before editing, committing, opening or merging a PR, ask the user to run `/cd ..` (repo root) or restart claude at the repo root. / このセッションは daemon/ で起動されたため、リポジトリルートの governance hooks が無効です。変更・コミット・PR・マージの前に、ユーザーへ `/cd ..`（またはリポジトリルートで再起動）を依頼してください。'",
+            "timeout": 5,
+            "statusMessage": "Governance: checking launch directory"
+          }
+        ]
+      }
+    ]
+  }
+}
