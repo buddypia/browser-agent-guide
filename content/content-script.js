@@ -8,19 +8,16 @@
 
   // 仕込んだボタン等のクリック履歴(AIが後で読み取る手がかり)
   const signalLog = [];
-  // Listen for clipboard hook events
+  // ページがクリップボードへ書いたテキスト(clipboard-hook.js 経由)。トークン等の秘密を含みうるうえ、ページが任意の文を
+  // 書けるので、signalLog とは分けてプロンプト/文脈テキストへは自動で入れない。readSignals で明示的に求めた時だけ返す。
+  const clipboardLog = [];
   window.addEventListener('BAG_CLIPBOARD_WRITE', (e) => {
     const expectedNonce = window.__BAG_NONCE__;
     if (!expectedNonce || e.detail?.nonce !== expectedNonce) {
       return;
     }
-    const text = e.detail?.text || '';
-    signalLog.push({
-      aiId: 'clipboard',
-      intent: 'clipboard-write: ' + text,
-      text: text,
-      at: new Date().toISOString()
-    });
+    clipboardLog.push({ text: String(e.detail?.text || ''), at: new Date().toISOString() });
+    if (clipboardLog.length > 20) clipboardLog.shift();
   });
   // 同一ページ読込内でのレシピ二重適用を防ぐための署名
   let appliedRecipeSig = null;
@@ -241,7 +238,7 @@
     return (
       el.getAttribute('placeholder') ||
       el.getAttribute('title') ||
-      el.getAttribute('value') ||
+      (el.type === 'password' ? '' : el.getAttribute('value')) ||
       el.getAttribute('name') ||
       ''
     ).trim();
@@ -497,9 +494,9 @@
       },
     },
     readSignals: {
-      description: '仕込んだボタン等がクリックされた履歴(手がかり)を返す。',
+      description: '仕込んだボタン等がクリックされた履歴(手がかり)と、ページがクリップボードへ書いたテキスト(clipboard)を返す。',
       args: {},
-      run: async () => ({ signals: signalLog.slice() }),
+      run: async () => ({ signals: signalLog.slice(), clipboard: clipboardLog.slice() }),
     },
     clickAffordance: {
       description: 'aiIdで指定した要素をクリックする(推奨)。',
