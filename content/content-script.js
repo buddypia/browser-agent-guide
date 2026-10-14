@@ -247,6 +247,16 @@
     ).trim();
   }
 
+  // 秘密の入力欄(パスワード/カード番号/ワンタイムコード)の値はページの外へ出さない。affordance はチャットの
+  // LLM に送られるため、入力済みかどうかだけを伝える。
+  function fieldValueOf(el) {
+    if (!('value' in el)) return '';
+    const v = String(el.value || '');
+    const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+    const secret = el.type === 'password' || /\b(cc-|one-time-code|current-password|new-password)/.test(ac);
+    return secret && v ? '***' : v;
+  }
+
   function referenceLabelOf(el) {
     const labelledBy = el.getAttribute('aria-labelledby');
     if (labelledBy) {
@@ -289,7 +299,7 @@
           role: el.getAttribute(ATTR.role) || role,
           label: labelOf(el),
           intent: el.getAttribute(ATTR.intent) || '',
-          value: 'value' in el ? String(el.value || '') : '',
+          value: fieldValueOf(el),
         });
         return;
       }
@@ -300,7 +310,7 @@
         aiId,
         role,
         label: labelOf(el),
-        value: 'value' in el ? String(el.value || '') : '',
+        value: fieldValueOf(el),
       });
     });
     return list;
