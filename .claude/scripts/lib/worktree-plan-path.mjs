@@ -87,7 +87,7 @@ export function preShipMarkerPath(mainRoot, branch) {
  * `worktree-owner-tracker` (PostToolUse) 가 생성 시 현재 session_id 를 1줄 기록하고,
  * `worktree-session-owner-guard` (PreToolUse Layer 2) 가 읽어 소유권을 판정한다.
  *
- * REVIEW.md 와 같은 `.tmp/worktree-<safeBranch>/` 디렉토리에 둔다 — `.gitignore` 의
+ * `.tmp/worktree-<safeBranch>/` 디렉토리에 둔다 — `.gitignore` 의
  * `.tmp/` 패턴으로 git tracking 봉쇄 + branch namespace 격리로 병렬 worktree 충돌 해소.
  *
  * @param {string} worktreePath — worktree 루트 절대 경로

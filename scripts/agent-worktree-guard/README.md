@@ -95,13 +95,8 @@ generated `.claude/settings.json` includes:
   work briefing and the exact PR question until `confirm-pr --confirmed`; after
   confirmation it continues until merge is recorded; after merge it continues
   until `cleanup --confirmed` removes the worktree and prints `# PR 承認後の完了報告`.
-  The briefing surfaces each worktree's full 11-section approval review
-  (`REVIEW.md`: 承認依頼 / 状態サマリー / コミット情報 / PR Draft / 修正ファイル /
-  変更内容 / なぜ / トレードオフ / リスク・Rollback / 残タスク / セッション改善) so
-  the PR question is answered from the review content, not a bare yes/no — and
-  when `REVIEW.md` is missing it points at the scaffold command (the
-  `worktree-review-report-guard` Stop hook still blocks until that report is
-  complete).
+  The briefing lists each worktree's branch, commits and changed files (git
+  facts); the agent explains the change in chat before asking.
 - `WorktreeCreate` / `WorktreeRemove`: route Claude `--worktree` lifecycle
   through the same ledger and owner-marker checks.
 
@@ -112,7 +107,7 @@ so the wrapper CLI and Git hook are kept as additional layers.
 
 Antigravity is wired in `.agents/hooks.json` with the same shared guard for
 `run_command` SessionStart/PreToolUse/PostToolUse coverage, plus the same
-Stop-time shipping/review report gates via Antigravity adapters. Local
+Stop-time shipping gate via an Antigravity adapter. Local
 `.agents/config.json` remains ignored because `worktree-init.mjs` writes
 per-machine `GIT_WORK_TREE` / `GIT_DIR` values there.
 
@@ -156,7 +151,3 @@ block `git push --no-verify` in AI tool calls.
 以下の worktree 作業は完了状態です。
 内容を確認し、merge / cleanup に進めてよいか承認してください。
 ```
-
-The hook output must also include the 11-section `REVIEW.md` approval review
-before that human decision, so the user can answer from evidence instead of a
-bare yes/no prompt.
