@@ -244,13 +244,18 @@
     ).trim();
   }
 
-  // 秘密の入力欄(パスワード/カード番号/ワンタイムコード)の値はページの外へ出さない。affordance はチャットの
-  // LLM に送られるため、入力済みかどうかだけを伝える。
+  // 秘密の入力欄(パスワード/カード番号/セキュリティコード/ワンタイムコード)の値はページの外へ出さない。affordance は
+  // チャットの LLM に送られるため、入力済みかどうかだけを伝える。autocomplete を付けないカード決済フォームも多いので
+  // name/id も見る(誤判定しても値が *** になるだけ)。
   function fieldValueOf(el) {
     if (!('value' in el)) return '';
     const v = String(el.value || '');
     const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
-    const secret = el.type === 'password' || /\b(cc-|one-time-code|current-password|new-password)/.test(ac);
+    const hint = `${el.getAttribute('name') || ''} ${el.id || ''}`.toLowerCase();
+    const secret =
+      el.type === 'password' ||
+      /\b(cc-|one-time-code|current-password|new-password)/.test(ac) ||
+      /cvv|cvc|card.?num|cc.?num|security.?code|(^|[^a-z])(csc|otp)(code|[^a-z]|$)/.test(hint);
     return secret && v ? '***' : v;
   }
 
