@@ -205,27 +205,35 @@ test.describe('Milestone 2 Integration', () => {
     await optionsPage.close();
   });
 
-  test('c. Permanent Clipboard Hook intercepts page clipboard-write and records to signalLog', async () => {
+  test('c. Clipboard Hook: copied text is kept out of the page context and returned only by readSignals', async () => {
     const page = await context.newPage();
     await page.goto(pageUrl);
 
     // Evaluate copy action in the page context (MAIN world) to trigger clipboard hook
     await page.evaluate(async () => {
-      // Navigator clipboard writeText in the MAIN world context
       await navigator.clipboard.writeText('copied-by-hook-test-content');
     });
 
-    // Send a message from Playwright to content script of active tab to retrieve signals (signalLog)
     const sw = await getServiceWorker(context);
-    const tabState = await sw.evaluate(async () => {
-      const [tab] = await chrome.tabs.query({ active: true });
-      return chrome.tabs.sendMessage(tab.id, { type: 'COLLECT_CONTEXT' });
-    });
+    const send = (msg) =>
+      sw.evaluate(async (m) => {
+        const [tab] = await chrome.tabs.query({ active: true });
+        return chrome.tabs.sendMessage(tab.id, m);
+      }, msg);
 
-    const clipboardSignal = tabState.signals.find(s => s.aiId === 'clipboard');
-    expect(clipboardSignal).toBeDefined();
-    expect(clipboardSignal.text).toBe('copied-by-hook-test-content');
-    expect(clipboardSignal.intent).toBe('clipboard-write: copied-by-hook-test-content');
+    // The chat prompt and the export text are built from these; the copied text must not reach them automatically.
+    const ctx = await send({ type: 'COLLECT_CONTEXT' });
+    expect(JSON.stringify(ctx)).not.toContain('copied-by-hook-test-content');
+    const exported = await send({ type: 'EXPORT_CONTEXT' });
+    expect(exported.text).not.toContain('copied-by-hook-test-content');
+
+    // An agent that explicitly asks for it (readSignals, e.g. via execute_actions) still gets it.
+    await expect
+      .poll(async () => {
+        const res = await send({ type: 'RUN_ACTIONS', actions: [{ verb: 'readSignals', args: {} }], source: 'execute_actions' });
+        return JSON.stringify(res);
+      })
+      .toContain('copied-by-hook-test-content');
 
     await page.close();
   });

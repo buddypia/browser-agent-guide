@@ -18,7 +18,7 @@ code_refs:
 api_refs: []
 db_refs: []
 related: ["recipe", "affordance"]
-last_verified: 2026-06-28
+last_verified: 2026-10-14
 confidence: high
 ---
 
@@ -35,3 +35,5 @@ Structured Outputs の enum としてそれを強制する。LLM は `AI_VERBS` 
 
 - 自由形式の DOM 操作を足さない(レジストリを開いてはいけない)。
 - 高リスク verb(`setStyle` / `removeElement` / `defineMarker`)を chat 経路に晒さない。
+- 秘密を含みうるページ由来のデータ(ページがクリップボードへ書いたテキスト等)を `COLLECT_CONTEXT` に自動で混ぜない。
+  読む verb(`readSignals` の `clipboard`)で明示的に求めた時だけ返す。
