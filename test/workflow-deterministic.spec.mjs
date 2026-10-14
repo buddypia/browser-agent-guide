@@ -370,11 +370,14 @@ test.describe('ページ文脈(COLLECT_CONTEXT)', () => {
       add({ type: 'text', name: 'card', autocomplete: 'cc-number' }, '4111111111111111');
       add({ type: 'text', name: 'otp', autocomplete: 'one-time-code' }, '987654');
       add({ type: 'password', name: 'empty' }, '');
+      add({ type: 'text', name: 'card_cvv' }, '737'); // autocomplete 無しのカード決済フォーム
+      add({ type: 'text', id: 'cardNumber' }, '5555444433331111');
+      add({ type: 'text', name: 'otp_code' }, '246810');
     });
     await page.fill('#qty', '3');
     const ctx = await send(page, { type: 'COLLECT_CONTEXT' });
     const json = JSON.stringify(ctx.affordances);
-    for (const secret of ['hunter2-pass', '4111111111111111', '987654']) expect(json).not.toContain(secret);
+    for (const secret of ['hunter2-pass', '4111111111111111', '987654', '737', '5555444433331111', '246810']) expect(json).not.toContain(secret);
     const byName = (n) => ctx.affordances.find((a) => a.label === n);
     expect(byName('pw').value).toBe('***');
     expect(byName('empty').value).toBe('');
