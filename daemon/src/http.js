@@ -19,15 +19,47 @@ const MAX_BODY = 8 * 1024 * 1024; // 8MB（tools/call の要求は小さい）
 // /shot/<id>.png | /raw/<id>.png。id は slug 文字種（[a-z0-9_-]、'__' 区切り）に限定し traversal を排除する。
 const IMAGE_ROUTE = /^\/(shot|raw)\/([A-Za-z0-9_-]+)\.png$/;
 
+// DNS rebinding 対策(MCP 仕様: localhost の Streamable HTTP サーバーは Origin を検証する)。悪意あるページが自分の
+// ドメインを 127.0.0.1 に向け直すと、ブラウザは同一オリジンとして /mcp を叩ける(execute_actions でユーザーのタブを
+// 操作し、結果も読める)。Host が loopback(か --host で明示した名前)以外、または Origin が loopback 以外なら拒否する。
+// CLI は Origin を送らない。--host に 0.0.0.0/:: を指定した時は利用者が外部公開を選んだとみなし Host は問わない。
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
+const WILDCARD = new Set(['0.0.0.0', '::', '[::]']);
+function hostnameOf(authority) {
+  try {
+    return new URL(`http://${authority}`).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+export function isAllowedRequest(headers, bindHost = '127.0.0.1') {
+  const bind = String(bindHost).toLowerCase();
+  const allowed = new Set([...LOOPBACK, bind.includes(':') && !bind.startsWith('[') ? `[${bind}]` : bind]);
+  const host = hostnameOf(headers.host || '');
+  if (!WILDCARD.has(bind) && !allowed.has(host)) return false;
+  const origin = headers.origin;
+  if (origin === undefined) return true;
+  try {
+    return allowed.has(new URL(origin).hostname.toLowerCase());
+  } catch {
+    return false; // "null" など
+  }
+}
+
 // inboxDir は文字列でも「現在の inbox を返す関数」でも良い（実行時に inbox を差し替えられるように）。
 // entryStore を渡すと、MCP は disk 直読みではなく store 抽象を通して context/image を取得する。
 // token を渡すと /shot|/raw 画像配信が有効化される（クエリ ?token= を定数時間比較）。未指定なら画像配信は 401。
-export function createHttpServer({ inboxDir, entryStore, token, path = '/mcp', latestWindowMs, nowMs, bridgeStatus, executeActions } = {}) {
+export function createHttpServer({ inboxDir, entryStore, token, path = '/mcp', latestWindowMs, nowMs, bridgeStatus, executeActions, host } = {}) {
   const currentInbox = () => (typeof inboxDir === 'function' ? inboxDir() : inboxDir);
   // 画像配信用の lookup store。entryStore が無ければ disk store を都度生成（現在の inbox を読む）。
   const lookupStore = () => entryStore || createDiskEntryStore(currentInbox());
 
   return http.createServer(async (req, res) => {
+    if (!isAllowedRequest(req.headers, host)) {
+      res.writeHead(403, { 'content-type': 'text/plain' });
+      res.end('Forbidden: Host/Origin must be loopback');
+      return;
+    }
     const url = (req.url || '').split('?')[0];
     if (url === '/healthz') {
       res.writeHead(200, { 'content-type': 'application/json' });
