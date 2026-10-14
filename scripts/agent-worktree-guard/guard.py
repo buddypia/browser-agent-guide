@@ -581,75 +581,30 @@ def clipped_lines(text: str | None, limit: int) -> list[str]:
     return [*lines[:limit], f"... ({len(lines) - limit} more)"]
 
 
-def safe_branch_key(branch: str | None) -> str:
-    """branch を REVIEW.md ディレクトリ名の安全キーに変換 (`/`,`\\` → `__`)。
-    SSOT は .claude/scripts/lib/worktree-plan-path.mjs#safeBranchKey。Python から REVIEW.md を
-    読むため経路算出のみを最小複製する (検証ロジック本体は review-report.mjs のまま)。"""
-    return re.sub(r"[/\\]", "__", branch or "staged")
-
-
-def find_review_report(worktree_path: Path, branch: str | None) -> tuple[Path | None, str | None]:
-    """worktree-local の REVIEW.md (`.tmp/worktree-<safeBranch>/REVIEW.md`) を探す。
-    branch から導いたパスを最優先し、無ければ `.tmp/worktree-*/REVIEW.md` を glob で補完する
-    (branch 推論差異への頑健性)。中身が空のものは無視する。"""
-    candidates: list[Path] = []
-    if branch:
-        candidates.append(worktree_path / ".tmp" / f"worktree-{safe_branch_key(branch)}" / "REVIEW.md")
-    tmp_dir = worktree_path / ".tmp"
-    if tmp_dir.is_dir():
-        for sub in sorted(tmp_dir.glob("worktree-*/REVIEW.md")):
-            if sub not in candidates:
-                candidates.append(sub)
-    for path in candidates:
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        if text.strip():
-            return path, text
-    return None, None
-
-
-def strip_review_stamp(content: str) -> str:
-    """REVIEW.md の HEAD stamp は gate 用メタデータなので human briefing からは外す。"""
-    return re.sub(r"<!--\s*bag-review:\s*head\s*=[0-9a-fA-F_]+[^>]*-->\n?", "", content).strip()
-
-
-def render_review_brief(root: Path, wt_path: Path, branch: str | None) -> list[str]:
-    """worktree の REVIEW.md(= 承認依頼レビュー)を briefing 用に出力。
-    存在すれば 11 セクション本文をそのまま出し、無ければ scaffold 作成を促す
-    (Stop の review gate が完成まで block する)。"""
-    review_path, review_text = find_review_report(wt_path, branch)
-    if review_text:
-        body = strip_review_stamp(review_text)
-        return [
-            f"REVIEW.md: {relative_display(review_path, root)}",
-            "",
-            body,
-        ]
-    scaffold_branch = branch if branch else "<branch>"
-    return [
-        "# Worktree 承認依頼レビュー",
-        "",
-        f"REVIEW.md: 未作成 — {relative_display(wt_path, root)}",
-        "",
-        "11 セクションの承認依頼レビューを作成してください:",
-        f"  node .claude/scripts/mark-worktree-reviewed.mjs {scaffold_branch} --scaffold",
-        "  (Stop の worktree-review-report-guard が REVIEW.md 完成まで停止を block します)",
-    ]
-
-
 def render_worktree_brief(root: Path, item: dict[str, Any]) -> list[str]:
+    """briefing は git から取れる事実だけ (branch / commits / 変更ファイル)。説明は AI がチャットで補う。"""
     wt_path = Path(str(item["path"]))
-    branch_raw = item.get("branch")
-    return render_review_brief(root, wt_path, branch_raw if isinstance(branch_raw, str) and branch_raw else None)
+    base, commit_count = first_git_range(wt_path, item)
+    lines = [
+        f"- branch: {item.get('branch') or '(detached)'}",
+        f"  path: {relative_display(wt_path, root)}",
+        f"  commits ahead of {base}: {commit_count}" if base else "  commits ahead: unavailable",
+    ]
+    if base:
+        log = clipped_lines(git_text(["log", "--oneline", "--max-count=5", f"{base}..HEAD"], wt_path), 5)
+        if log:
+            lines.append("  recent commits:")
+            lines.extend(f"    {line}" for line in log)
+        changed = clipped_lines(git_text(["diff", "--name-status", f"{base}...HEAD"], wt_path), 12)
+        if changed:
+            lines.append("  changed files:")
+            lines.extend(f"    {line}" for line in changed)
+    return lines
 
 
 def build_pr_briefing(root: Path, items: list[dict[str, Any]]) -> str:
-    lines = []
+    lines = [PROMPT_QUESTION, ""]
     for item in items:
-        if lines:
-            lines.extend(["", "---", ""])
         lines.extend(render_worktree_brief(root, item))
     lines.extend(
         [

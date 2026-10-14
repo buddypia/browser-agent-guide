@@ -47,11 +47,6 @@
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/antigravity/worktree-shipping-guard.mjs\"",
             "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/antigravity/worktree-review-report-guard.mjs\"",
-            "timeout": 10
           }
         ]
       }

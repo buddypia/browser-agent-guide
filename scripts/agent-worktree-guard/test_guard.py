@@ -90,8 +90,8 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         self.assertIn("- [x]", status)
 
         audit = run(["audit"], self.repo)
-        self.assertIn("Worktree 承認依頼レビュー", audit.stdout)
-        self.assertIn("11 セクション", audit.stdout)
+        self.assertIn("以下の worktree 作業は完了状態です", audit.stdout)
+        self.assertIn("feature.txt", audit.stdout)
         self.assertIn("agent-worktree-guard confirm-pr --confirmed", audit.stdout)
 
         pr_create_payload = json.dumps(
@@ -380,31 +380,15 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         run(["mark-done", str(wt), "--reason", "manual"], self.repo)
         return wt
 
-    def test_briefing_includes_review_report(self) -> None:
+    def test_briefing_lists_git_facts(self) -> None:
         run(["init"], self.repo)
-        wt = self._make_committed_worktree("reviewed")
-        review_dir = wt / ".tmp" / "worktree-feature__reviewed"
-        review_dir.mkdir(parents=True, exist_ok=True)
-        (review_dir / "REVIEW.md").write_text(
-            "# Worktree 承認依頼レビュー — feature/reviewed\n\n"
-            "## Summary / 概要 (作業内容)\nクリーンアップ強化の要点。\n\n"
-            "## Trade-offs / トレードオフ\nstash 全消しではなく branch 一致のみ。\n",
-            encoding="utf-8",
-        )
+        self._make_committed_worktree("briefed")
 
         audit = run(["audit"], self.repo)
-        self.assertIn("REVIEW.md:", audit.stdout)
-        self.assertIn("概要", audit.stdout)
-        self.assertIn("クリーンアップ強化の要点", audit.stdout)
-        self.assertIn("トレードオフ", audit.stdout)
-
-    def test_briefing_notes_missing_review(self) -> None:
-        run(["init"], self.repo)
-        self._make_committed_worktree("noreview")
-
-        audit = run(["audit"], self.repo)
-        self.assertIn("REVIEW.md: 未作成", audit.stdout)
-        self.assertIn("mark-worktree-reviewed.mjs", audit.stdout)
+        self.assertIn("branch: feature/briefed", audit.stdout)
+        self.assertIn("work", audit.stdout)  # commit subject
+        self.assertIn("f.txt", audit.stdout)  # changed file
+        self.assertNotIn("REVIEW.md", audit.stdout)
 
     def test_resolve_guard_root_from_unregistered_worktree_returns_main_root(self) -> None:
         # Regression: a linked worktree created OUTSIDE the guard (raw `git worktree add`)
