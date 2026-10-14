@@ -31,12 +31,12 @@ test('evaluate: 依存注入なしの本番経路で例外を出さず、未マ�
   try {
     const git = (...args) => execFileSync('git', ['-C', repo, ...args], { stdio: 'pipe' });
     git('init', '-q', '-b', 'main');
-    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'base');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'base');
     git('worktree', 'add', '-q', '-b', 'fix/x', join(repo, '.worktrees', 'fix', 'x'));
     const wt = join(repo, '.worktrees', 'fix', 'x');
     writeFileSync(join(wt, 'a.txt'), 'x');
     execFileSync('git', ['-C', wt, 'add', 'a.txt']);
-    execFileSync('git', ['-C', wt, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'work']);
+    execFileSync('git', ['-C', wt, '-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'work']);
     const r = evaluate(repo);
     assert.equal(typeof r.block, 'boolean');
     const all = [...r.candidates, ...(r.not_owned || []), ...(r.skipped_attempt || [])];
