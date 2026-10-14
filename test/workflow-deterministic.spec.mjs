@@ -308,6 +308,26 @@ test.describe('決定的ワークフロー: RUN_STEP', () => {
     expect(await state(page)).toBe('new');
   });
 
+  test('代替候補のテキストに入力欄の今の値を含めない(候補は外部 AI に送られる)', async ({ page }) => {
+    await load(page);
+    // ラベル手がかり(placeholder/title/name)の無い欄に、直前の手順で値が入っている状況。
+    await page.evaluate(() => {
+      const i = document.createElement('input');
+      i.type = 'text';
+      i.value = 'typed-secret-123';
+      document.body.append(i);
+    });
+    const step = {
+      action: { verb: 'fill', value: 'x' },
+      target: 'メモ',
+      locator: { kind: 'fixed', anchor: { selector: '#gone', tag: 'input', role: 'input-text', testid: 'gone' } },
+    };
+    const res = await runStep(page, step, { timeoutMs: 300 });
+    expect(res.status).toBe('missing');
+    expect(res.candidates.length).toBeGreaterThan(0);
+    expect(JSON.stringify(res.candidates)).not.toContain('typed-secret-123');
+  });
+
   test('試走(dryRun)は操作せず対象だけ返す / 古い候補トークンは stale', async ({ page }) => {
     await load(page, { recording: true });
     await page.click('#confirm');

@@ -236,10 +236,12 @@
       const visibleValue = el.value || el.getAttribute('value') || el.getAttribute('alt') || '';
       if (visibleValue.trim()) return visibleValue.trim();
     }
+    // 入力欄の今の値(ユーザーが入れたパスワードや {var} の値)はラベルにしない。ラベルは手順・候補・ページ文脈として
+    // 外部 AI に渡るため。ページ側の初期値(value 属性)だけを使う。
     return (
       el.getAttribute('placeholder') ||
       el.getAttribute('title') ||
-      el.value ||
+      el.getAttribute('value') ||
       el.getAttribute('name') ||
       ''
     ).trim();
@@ -4853,7 +4855,10 @@
     }
 
     // 3) 承認ゲート: 手順単位のゲート、または実行時に確定系ラベルへ変わったクリックは人間の承認まで止める。
-    if (verb === 'click' && !opts.approved) {
+    //    承認は「人間に示した候補」(expectText)に束縛される。今回の対象がそれと違えば承認は効かない。
+    const norm = (x) => String(x ?? '').replace(/\s+/g, ' ').trim();
+    const approved = Boolean(opts.approved) && (!opts.expectText || norm(chosenText) === norm(opts.expectText));
+    if (verb === 'click' && !approved) {
       const changedToRisky =
         !opts.allowIrreversibleClicks && isIrreversibleLabel(label) && !isIrreversibleLabel(step.target || '');
       if (step.gate || changedToRisky) {
