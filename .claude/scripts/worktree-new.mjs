@@ -14,6 +14,9 @@
  *      가 등록되어 있고 동일하면 멱등 SKIP; 다른 branch/path 충돌은 STOP)
  *   4) `node .claude/scripts/worktree-init.mjs --worktree <path>` chain
  *      (local CLI env + PLAN.md)
+ *   4b) package-lock.json を持つ npm プロジェクト(root + 直下の子)で node_modules が無ければ
+ *      `npm ci` (新しい worktree で check が「パッケージが無い」と誤った理由で落ちるのを防ぐ。
+ *      失敗は warning。--no-install で省略)
  *   5) JSON 보고: { ok, branch, base, base_sha, worktree_path, plan_path,
  *                   actions: [...], warnings: [...] }
  *
@@ -33,7 +36,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -48,13 +51,14 @@ const KNOWN_BRANCH_PREFIXES = ['feature', 'fix', 'hotfix', 'chore', 'refactor', 
  * ============================================================ */
 
 function parseArgs(argv) {
-  const args = { branch: null, base: 'main', dryRun: false, path: null, json: true };
+  const args = { branch: null, base: 'main', dryRun: false, path: null, json: true, install: true };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--branch' || a === '-b') args.branch = argv[++i] || null;
     else if (a === '--base') args.base = argv[++i] || 'main';
     else if (a === '--path' || a === '-p') args.path = argv[++i] || null;
     else if (a === '--dry-run') args.dryRun = true;
+    else if (a === '--no-install') args.install = false;
     else if (a === '--no-json') args.json = false;
     else if (a === '--help' || a === '-h') args.help = true;
     else if (a.startsWith('-')) {
@@ -74,6 +78,7 @@ Options:
   --base <name>         원격 base 브랜치 (default: main). fetch + worktree base.
   --path, -p <dir>      worktree 경로 (default: .worktrees/<branch>).
   --dry-run             실행하지 않고 계획만 출력.
+  --no-install          npm 의존성 설치(npm ci)를 생략.
   --no-json             보고 JSON 대신 사람-읽기 텍스트만 stderr 로.
   --help, -h            본 메시지 출력.
 
@@ -105,6 +110,34 @@ export function defaultNodeFn(args, opts = {}) {
 
 export function defaultExistsFn(p) {
   return existsSync(p);
+}
+
+export function defaultNpmFn(args, opts = {}) {
+  return execFileSync('npm', args, {
+    cwd: opts.cwd || REPO_ROOT,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: opts.timeout || 300_000,
+  });
+}
+
+export function defaultReaddirFn(dir) {
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
+}
+
+/** worktree 内で依存の入っていない npm プロジェクト(root + 直下の子のうち package-lock.json を持つもの)。 */
+export function npmProjectsMissingDeps(wtPath, { existsFn = defaultExistsFn, readdirFn = defaultReaddirFn } = {}) {
+  let children = [];
+  try {
+    children = readdirFn(wtPath).filter((n) => n !== 'node_modules' && !n.startsWith('.'));
+  } catch {
+    /* 読めなければ root だけ */
+  }
+  return [wtPath, ...children.map((n) => join(wtPath, n))].filter(
+    (dir) => existsFn(join(dir, 'package-lock.json')) && !existsFn(join(dir, 'node_modules')),
+  );
 }
 
 /* ============================================================
@@ -230,6 +263,9 @@ export function runWorktreeNew(opts) {
     gitFn = defaultGitFn,
     nodeFn = defaultNodeFn,
     existsFn = defaultExistsFn,
+    npmFn = defaultNpmFn,
+    readdirFn = defaultReaddirFn,
+    install = true,
   } = opts;
 
   const result = {
@@ -442,6 +478,25 @@ export function runWorktreeNew(opts) {
     }
   }
 
+  // Step 4b: 依存の導入。無いまま check すると「パッケージが無い」で落ち、AI が自分の変更の不具合と誤認しうる。
+  if (install) {
+    if (dryRun) {
+      result.actions.push('npm ci (package-lock.json を持ち node_modules が無いプロジェクトごと)');
+    } else {
+      for (const dir of npmProjectsMissingDeps(wtPathAbs, { existsFn, readdirFn })) {
+        const rel = dir === wtPathAbs ? '.' : dir.slice(wtPathAbs.length + 1);
+        result.actions.push(`npm ci (${rel})`);
+        try {
+          npmFn(['ci', '--prefer-offline', '--no-audit', '--no-fund'], { cwd: dir });
+        } catch (e) {
+          result.warnings.push(
+            `npm ci failed in ${rel} — run it there before \`npm run check\`: ${(e.stderr || e.message || '').toString().trim().slice(0, 300)}`,
+          );
+        }
+      }
+    }
+  }
+
   result.ok = true;
   return result;
 }
@@ -485,6 +540,7 @@ if (isMain()) {
     base: args.base,
     path: args.path,
     dryRun: args.dryRun,
+    install: args.install,
     cwd: mainRoot,
   });
 
