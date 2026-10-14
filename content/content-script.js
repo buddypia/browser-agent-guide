@@ -255,7 +255,7 @@
     const secret =
       el.type === 'password' ||
       /\b(cc-|one-time-code|current-password|new-password)/.test(ac) ||
-      /cvv|cvc|card.?num|cc.?num|security.?code|(^|[^a-z])(csc|otp)([^a-z]|$)/.test(hint);
+      /cvv|cvc|card.?num|cc.?num|security.?code|(^|[^a-z])(csc|otp)(code|[^a-z]|$)/.test(hint);
     return secret && v ? '***' : v;
   }
 
