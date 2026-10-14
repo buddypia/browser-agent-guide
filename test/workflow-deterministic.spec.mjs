@@ -354,3 +354,30 @@ test.describe('決定的ワークフロー: RUN_STEP', () => {
     expect(res.error).toContain('注文番号');
   });
 });
+
+test.describe('ページ文脈(COLLECT_CONTEXT)', () => {
+  test('秘密の入力欄の値は LLM に渡す affordance に出さず、入力済みかどうかだけ示す', async ({ page }) => {
+    await load(page);
+    await page.evaluate(() => {
+      const add = (attrs, value) => {
+        const i = document.createElement('input');
+        Object.assign(i, attrs);
+        if (attrs.autocomplete) i.setAttribute('autocomplete', attrs.autocomplete);
+        i.value = value;
+        document.body.append(i);
+      };
+      add({ type: 'password', name: 'pw' }, 'hunter2-pass');
+      add({ type: 'text', name: 'card', autocomplete: 'cc-number' }, '4111111111111111');
+      add({ type: 'text', name: 'otp', autocomplete: 'one-time-code' }, '987654');
+      add({ type: 'password', name: 'empty' }, '');
+    });
+    await page.fill('#qty', '3');
+    const ctx = await send(page, { type: 'COLLECT_CONTEXT' });
+    const json = JSON.stringify(ctx.affordances);
+    for (const secret of ['hunter2-pass', '4111111111111111', '987654']) expect(json).not.toContain(secret);
+    const byName = (n) => ctx.affordances.find((a) => a.label === n);
+    expect(byName('pw').value).toBe('***');
+    expect(byName('empty').value).toBe('');
+    expect(byName('qty').value).toBe('3'); // 通常の欄は従来どおり値を渡す
+  });
+});
