@@ -3,7 +3,7 @@
  * worktree-init.mjs — linked worktree local setup helper
  *
  * Purpose: normalize repo-local hook config, inject per-worktree Git env for
- * local AI CLIs, and create the standard PLAN.md when missing.
+ * local AI CLIs.
  *
  * Usage:
  *   node .claude/scripts/worktree-init.mjs
@@ -14,7 +14,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname, join, relative } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { ensureWorktreePlan } from './lib/worktree-plan-template.mjs';
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
@@ -88,20 +87,6 @@ if (!mainRoot) {
 }
 
 normalizeHooksPath(WORKTREE);
-
-function ensurePlanIfApplicable() {
-  if (DRY_RUN) return;
-  try {
-    const result = ensureWorktreePlan(WORKTREE);
-    if (result.created) {
-      info(`[worktree-init] PLAN.md created: ${relative(WORKTREE, result.path)}`);
-    } else {
-      info(`[worktree-init] PLAN.md already exists: ${relative(WORKTREE, result.path)}`);
-    }
-  } catch (e) {
-    info(`[worktree-init] PLAN.md setup skipped: ${e.message}`);
-  }
-}
 
 const MAIN_LOG_LINES = 5;
 
@@ -224,6 +209,5 @@ function injectGitEnv(worktreePath) {
 }
 
 injectGitEnv(WORKTREE);
-ensurePlanIfApplicable();
 showMainRecentCommits();
 process.exit(0);

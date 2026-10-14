@@ -46,7 +46,6 @@ import {
 } from '../scripts/lib/utils.mjs';
 import { HookOutput } from '../scripts/lib/hook-output.mjs';
 import {
-  resolveWorktreePlanPath,
   parseWorktreeList,
   worktreeOwnerPath,
 } from '../scripts/lib/worktree-plan-path.mjs';
@@ -175,23 +174,6 @@ export function touchAttemptMarker(projectDir, branch) {
 }
 
 /**
- * Stop hook 핵심 판정.
- *   @param {string} projectDir - main repo path
- *   @returns {{ block: boolean, candidates: Array<{path, branch, commits, uncommitted, commit_required?: boolean}>, reason: string }}
- */
-/**
- * worktree 안에 PLAN.md 가 존재하는지 검사 (M1 — stop loop 회피용 사전 안내).
- *   ship (mark-pre-ship-confirmed) 은 PLAN.md 부재/미체크박스 시 거부 → 5분 마커 후 재차단 무한 반복 위험.
- *   본 검사는 BLOCK 메시지에 plan_missing 정보를 실어 AI 가 자동 작성하도록 유도.
- */
-export function isPlanPresent(worktreePath, opts = {}) {
-  const _existsSync = opts._existsSync || existsSync;
-  // PLAN.md 위치: .tmp/worktree-<safeBranch>/PLAN.md (worktree-plan-path.mjs SSOT).
-  // 기존 worktree 루트 PLAN.md 는 머지 누출 차단 위해 폐기.
-  return _existsSync(resolveWorktreePlanPath(worktreePath));
-}
-
-/**
  * worktree 의 `.session-owner` 사이드카 첫 줄(session_id). 부재/실패/빈 파일 → null.
  *   R-CM-036 의 worktree-session-owner-guard.readSessionOwner 와 동일 의미. 사이드카 경로 SSOT 는
  *   worktree-plan-path.mjs#worktreeOwnerPath — hook 간 직접 import 금지(R-CM-006)라 lib 만 공유한다.
@@ -243,13 +225,17 @@ export function classifyOwnership(wtPath, branch, opts = {}) {
   return 'orphan';
 }
 
+/**
+ * Stop hook 핵심 판정.
+ *   @param {string} projectDir - main repo path
+ *   @returns {{ block: boolean, candidates: Array<{path, branch, commits, uncommitted, commit_required?: boolean}>, reason: string }}
+ */
 export function evaluate(projectDir, opts = {}) {
   const _now = opts._now || Date.now;
   const _isFresh = opts._isFresh || isFresh;
   const _safeGit = opts._safeGit || safeGit;
   const _countUnmerged = opts._countUnmerged || countUnmergedCommits;
   const _countUncommitted = opts._countUncommitted || countUncommittedChanges;
-  const _isPlanPresent = opts._isPlanPresent || ((p) => isPlanPresent(p, opts));
   const _measureStaleness =
     opts._measureStaleness || ((p) => measureStaleness(p, { _safeGit, _now }));
   // R-CM-036 세션 소유권 필터 — 본 Stop 세션이 소유하지 않는 worktree 는 차단 대상에서 제외.
@@ -296,7 +282,6 @@ export function evaluate(projectDir, opts = {}) {
         commits,
         uncommitted,
         commit_required: true,
-        plan_missing: commits > 0 ? !_isPlanPresent(wt.path) : false,
         staleness,
         stale_reasons,
       });
@@ -323,7 +308,6 @@ export function evaluate(projectDir, opts = {}) {
       commits,
       uncommitted,
       commit_required: false,
-      plan_missing: !_isPlanPresent(wt.path), // M1
       staleness,
       stale_reasons,
     });
@@ -354,16 +338,15 @@ export function buildBlockMessage(projectDir, candidates) {
     '[worktree-shipping-guard] Stop 차단: 완료되지 않은 worktree 작업이 있습니다.',
     '',
     '사용자 정책 (R-CM-030): worktree 에서 시스템 코드 변경을 수행했다면 최종 응답 전 반드시 commit 을 남겨야 합니다.',
-    'commit 된 작업은 사용자 컨펌 후 gh pr create → gh pr merge (squash) → cleanup 까지 진행되어야 합니다.',
+    'commit 된 작업은 make ship 으로 테스트 → AI 리뷰 → PR → (게이트 통과 시) merge → cleanup 까지 진행되어야 합니다.',
     '',
     '대상 worktree:',
   ];
   for (const c of candidates) {
     const rel = relativizePath(c.path, projectDir);
-    const planTag = c.plan_missing ? ' [PLAN.md 부재 — 자동 작성 필요]' : '';
     const dirtyTag = c.uncommitted > 0 ? `, uncommitted=${c.uncommitted} file(s)` : '';
     const actionTag = c.commit_required ? ' [commit 필요]' : '';
-    lines.push(`  - ${rel}  (branch=${c.branch}, unmerged=${c.commits} commit${dirtyTag})${actionTag}${planTag}`);
+    lines.push(`  - ${rel}  (branch=${c.branch}, unmerged=${c.commits} commit${dirtyTag})${actionTag}`);
   }
   if (candidates.some((c) => c.commit_required)) {
     lines.push('');
@@ -371,31 +354,20 @@ export function buildBlockMessage(projectDir, candidates) {
     lines.push('먼저 본인이 만든 변경만 stage/commit 하세요:');
     lines.push('');
     for (const c of candidates.filter((item) => item.commit_required)) {
-      lines.push(`  cd "${relativizePath(c.path, projectDir)}"`);
-      lines.push('  git status --short');
-      lines.push('  git add <owned-files-only>');
-      lines.push('  git commit -m "<Conventional Commits>"');
+      const wt = relativizePath(c.path, projectDir);
+      lines.push(`  git -C "${wt}" status --short`);
+      lines.push(`  git -C "${wt}" add <owned-files-only>`);
+      lines.push(`  git -C "${wt}" commit -m "<Conventional Commits>"`);
     }
   }
-  if (candidates.some((c) => c.plan_missing)) {
-    lines.push('');
-    lines.push('PLAN.md 부재 worktree (M1 stop loop 회피):');
-    lines.push('  - mark-pre-ship-confirmed.mjs 가 PLAN.md 미체크박스 검증을 수행 — PLAN.md 부재/미체크 시 거부.');
-    lines.push('  - 위치: `.tmp/worktree-<safeBranch>/PLAN.md` (worktree 루트 아님, R-CM-008/R-CM-030 — 머지 누출 차단).');
-    lines.push('  - 위 worktree 에 PLAN.md 를 먼저 작성 (목표 / 체크리스트 / 검증 / handoff) 후 ship 호출.');
-    lines.push('  - 또는 사용자에게 작업 의도 확인 후 worktree 자체 폐기.');
-  }
   lines.push('');
-  lines.push('commit 이 이미 있는 worktree 는 먼저 사용자에게 PR/merge 진행 여부를 확인하세요.');
-  lines.push('사용자가 "yes" / "진행" 으로 명시 컨펌한 후에만 다음 명령을 실행합니다 (멱등 — 이미 PR 있으면 재사용):');
-  lines.push('');
-  lines.push('  질문: PR을 생성하고 squash merge 후 worktree/branch/stash cleanup까지 진행할까요?');
+  lines.push('commit 이 이미 있는 worktree 는 make ship 으로 출하합니다 (AGENTS.md Git workflow — 테스트·AI 리뷰·게이트 통과 시에만 자동 머지, 멱등).');
+  lines.push('AUTO_SHIP NEEDS_HUMAN 이면 PR URL 과 사유를 보고하고, 머지는 사용자 컨펌 후 수동 경로로 진행합니다:');
   lines.push('');
   for (const c of candidates.filter((item) => item.commits > 0 && !item.commit_required)) {
     const rel = relativizePath(c.path, projectDir);
-    lines.push(`  # Verify PLAN.md checklist in "${rel}" before shipping.`);
-    lines.push(`  node .claude/scripts/mark-pre-ship-confirmed.mjs "${c.branch}" --quality self_review_pass`);
-    lines.push(`  # Then open the PR and merge only after user confirmation.`);
+    // 既定の出荷経路(AGENTS.md Git workflow)。ゲートで止まれば NEEDS_HUMAN で PR を残す。
+    lines.push(`  make -C "${rel}" ship`);
   }
   // Layer 2 — base staleness 경고 (BLOCK 추가 X — ship 시점 non-FF 가 차단 담당)
   const stale = candidates.filter((c) => Array.isArray(c.stale_reasons) && c.stale_reasons.length);
