@@ -605,7 +605,7 @@ def render_worktree_brief(root: Path, item: dict[str, Any]) -> list[str]:
 def build_pr_briefing(root: Path, items: list[dict[str, Any]]) -> str:
     lines = [PROMPT_QUESTION, ""]
     for item in items:
-        lines.extend(render_worktree_brief(root, item))
+        lines.extend([*render_worktree_brief(root, item), ""])
     lines.extend(
         [
             "",

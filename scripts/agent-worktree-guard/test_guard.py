@@ -386,7 +386,7 @@ class AgentWorktreeGuardTest(unittest.TestCase):
 
         audit = run(["audit"], self.repo)
         self.assertIn("branch: feature/briefed", audit.stdout)
-        self.assertIn("work", audit.stdout)  # commit subject
+        self.assertRegex(audit.stdout, r"\n    [0-9a-f]{7,} work\n")  # commit subject
         self.assertIn("f.txt", audit.stdout)  # changed file
         self.assertNotIn("REVIEW.md", audit.stdout)
 
