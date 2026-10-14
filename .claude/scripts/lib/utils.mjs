@@ -255,49 +255,6 @@ export function isUserAbort(data) {
 }
 
 /**
- * Markdown Plan 파일 체크박스 파싱
- * - [ ] = 미완료, - [x] 또는 - [X] = 완료
- * 코드 블록(```) 내부 무시
- *
- * @param {string} planFilePath
- * @returns {{ total: number, completed: number, uncheckedItems: string[] } | null}
- */
-export function parsePlanProgress(planFilePath) {
-  if (!existsSync(planFilePath)) return null;
-
-  try {
-    const content = readFileSync(planFilePath, 'utf-8');
-    const lines = content.split('\n');
-    let inCodeBlock = false;
-    let total = 0;
-    let completed = 0;
-    const uncheckedItems = [];
-
-    for (const line of lines) {
-      if (line.trim().startsWith('```')) {
-        inCodeBlock = !inCodeBlock;
-        continue;
-      }
-      if (inCodeBlock) continue;
-
-      const match = line.match(/^(\s*)- \[([ xX])\]\s+(.+)/);
-      if (match) {
-        total++;
-        if (match[2].toLowerCase() === 'x') {
-          completed++;
-        } else {
-          uncheckedItems.push(match[3].trim());
-        }
-      }
-    }
-
-    return { total, completed, uncheckedItems };
-  } catch {
-    return null;
-  }
-}
-
-/**
  * 파이프라인 산출물의 progress를 실제 파일 존재 여부와 교차 검증.
  * 파일이 존재하지만 status가 "pending"인 항목을 불일치로 감지.
  *
