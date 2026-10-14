@@ -174,6 +174,58 @@ export function touchAttemptMarker(projectDir, branch) {
 }
 
 /**
+ * worktree 의 `.session-owner` 사이드카 첫 줄(session_id). 부재/실패/빈 파일 → null.
+ *   R-CM-036 의 worktree-session-owner-guard.readSessionOwner 와 동일 의미. 사이드카 경로 SSOT 는
+ *   worktree-plan-path.mjs#worktreeOwnerPath — hook 간 직접 import 금지(R-CM-006)라 lib 만 공유한다.
+ *   `worktree-owner-tracker` (PostToolUse) 가 worktree 생성 시 1줄 기록.
+ */
+export function readSessionOwner(worktreePath, branch = null) {
+  try {
+    const id = readFileSync(worktreeOwnerPath(worktreePath, branch), 'utf-8').split('\n')[0].trim();
+    return id || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 본 Stop 세션이 worktree 를 소유하는지 판정 (R-CM-036 2-Layer 모델을 Stop 시점에 정합 적용).
+ *   Layer 1 — cwd-confinement (session_id 무관, 결정론적): 현재 cwd 가 이 worktree 내부면 'owned'.
+ *     Codex/Antigravity 는 worktree 로 cd 하여 작업하므로(cwd=worktree) 이 축으로 자기 worktree 를
+ *     판정한다. session_id 가 stdin 에 없는 CLI 에서도 shipping nag 가 유지되는 핵심.
+ *   Layer 2 — session_id 사이드카: `.session-owner` === 현재 session_id 면 'owned'.
+ *     Some CLI sessions run from main, so the sidecar is the ownership signal.
+ *     `make wt.new` leaves the sidecar, so a single session is normally 'owned'.
+ *   사이드카 owner 가 존재하나 현재 session_id 와 불일치 → 'other' (타 세션 소유).
+ *   둘 다 미확정(사이드카 부재 + cwd 불일치, 또는 session_id 부재) → 'orphan'.
+ *
+ *   판정의 목적: 타 세션/orphan worktree 의 미완료 작업으로 본 세션 Stop 을 차단하지 않는다.
+ *   R-CM-036 Anti-Pattern "모든 worktree 검사 Stop hook" 의 cross-session 오차단 회피.
+ *
+ *   @param {string} wtPath - worktree 루트 절대 경로 (git worktree list porcelain 기준)
+ *   @param {string|null} branch - branch 명 (사이드카 경로 추론용)
+ *   @param {{sessionId?: string, cwd?: string, _resolveWorktreeRoot?: Function, _readSessionOwner?: Function}} opts
+ *   @returns {'owned'|'other'|'orphan'}
+ */
+export function classifyOwnership(wtPath, branch, opts = {}) {
+  const _resolveWorktreeRoot = opts._resolveWorktreeRoot || resolveWorktreeRoot;
+  const _readSessionOwner = opts._readSessionOwner || readSessionOwner;
+  const sessionId = opts.sessionId;
+
+  // Layer 1 — cwd-confinement (결정론적, session_id 무관)
+  const cwdWt = _resolveWorktreeRoot(opts.cwd || '');
+  if (cwdWt && cwdWt === wtPath) return 'owned';
+
+  // Layer 2 — session_id 사이드카
+  const owner = _readSessionOwner(wtPath, branch);
+  if (owner && sessionId) {
+    return owner === sessionId ? 'owned' : 'other';
+  }
+  // 사이드카 부재(orphan) 또는 session_id 부재 → 소유 미확정
+  return 'orphan';
+}
+
+/**
  * Stop hook 핵심 판정.
  *   @param {string} projectDir - main repo path
  *   @returns {{ block: boolean, candidates: Array<{path, branch, commits, uncommitted, commit_required?: boolean}>, reason: string }}
