@@ -381,6 +381,8 @@ test.describe('ページ文脈(COLLECT_CONTEXT)', () => {
     for (const secret of ['hunter2-pass', '4111111111111111', '987654', '737', '5555444433331111', '246810', '135791']) expect(json).not.toContain(secret);
     const byName = (n) => ctx.affordances.find((a) => a.label === n);
     expect(byName('pw').value).toBe('***');
+    expect(byName('card_cvv').value).toBe('***'); // name/id 判定でも欄自体は残り、入力済みと分かる
+    expect(byName('otp_code').value).toBe('***');
     expect(byName('empty').value).toBe('');
     expect(byName('qty').value).toBe('3'); // 通常の欄は従来どおり値を渡す
   });
