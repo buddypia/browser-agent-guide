@@ -33,6 +33,13 @@ export function decide({ files, lines, review }) {
 }
 
 /** Parse `claude -p --output-format json` stdout; anything unexpected fails closed. */
+// The squash-merge commit takes the PR title, so use the first (oldest) commit's subject — the change itself —
+// rather than the branch name. `commits` is `git log --format='- %s'` output (newest first).
+export function prTitle(commits, branch) {
+  const subjects = commits.split('\n').filter(Boolean);
+  return subjects.length ? subjects.at(-1).replace(/^- /, '') : branch;
+}
+
 export function parseReview(stdout) {
   try {
     const out = JSON.parse(stdout).structured_output;
@@ -115,8 +122,7 @@ ${diff}
   const openPr = () => JSON.parse(sh('gh', ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number,url'], wt))[0];
   let pr = openPr();
   if (!pr) {
-    const subjects = commits.split('\n');
-    sh('gh', ['pr', 'create', '--base', 'main', '--head', branch, '--title', subjects.length === 1 ? subjects[0].slice(2) : branch, '--body', body], wt);
+    sh('gh', ['pr', 'create', '--base', 'main', '--head', branch, '--title', prTitle(commits, branch), '--body', body], wt);
     pr = openPr();
   }
   if (reasons.length) stop('NEEDS_HUMAN', `${pr.url} — ${reasons.join('; ')}`);

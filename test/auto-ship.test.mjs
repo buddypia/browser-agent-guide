@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { decide, parseReview } from '../scripts/auto-ship.mjs';
+import { decide, parseReview, prTitle } from '../scripts/auto-ship.mjs';
 
 const ok = { verdict: 'approve', scope: 'small', summary: '', issues: [] };
 
@@ -31,4 +31,10 @@ test('unparseable or missing review fails closed', () => {
     assert.notDeepEqual(decide({ files: ['a.js'], lines: 1, review: parseReview(out) }), [], out);
   }
   assert.deepEqual(parseReview(JSON.stringify({ structured_output: ok })), ok);
+});
+
+test('PR title is the oldest commit subject, not the branch name', () => {
+  assert.equal(prTitle('- Fix follow-up\n- Add the feature', 'feat/x'), 'Add the feature');
+  assert.equal(prTitle('- Only commit', 'feat/x'), 'Only commit');
+  assert.equal(prTitle('', 'feat/x'), 'feat/x');
 });
