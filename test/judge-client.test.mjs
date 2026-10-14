@@ -8,6 +8,7 @@ import {
   validateJudgeBaseUrl,
   buildJudgeRequest,
   parseJudgeAnswer,
+  judgeMinConfidence,
   callJudgeChoice,
 } from '../lib/judge-client.js';
 import { DEFAULT_SETTINGS } from '../lib/storage.js';
@@ -100,13 +101,40 @@ async function run() {
     assert.equal(surelyNone.choice, 'none');
     assert.equal(surelyNone.confident, true);
 
+    // 範囲外のキーは採らず、pick.choice ではなく確率表の最大で決める。
     const foreign = parseJudgeAnswer({ answers: { pick: { choice: 'evil', confidence: 1, probabilities: { evil: 1, c2: 0.2 } } } }, keys, 0.7);
     assert.equal(foreign.choice, 'c2');
     assert.equal(foreign.confident, false);
+    const lying = parseJudgeAnswer({ answers: { pick: { choice: 'c0', probabilities: { c0: 0.1, c1: 0.8, none: 0.1 } } } }, keys, 0.7);
+    assert.equal(lying.choice, 'c1');
+    ok('answer parsing is closed-set, argmax-based and confidence-gated');
+  }
 
-    const broken = parseJudgeAnswer({}, keys, 0.7);
-    assert.deepEqual(broken, { choice: 'none', probability: 0, confident: false, best: '', bestProbability: 0 });
-    ok('answer parsing is closed-set and confidence-gated');
+  // 契約外の応答は「該当なし」と誤読せず例外(真実の失敗理由で止める)。
+  {
+    const keys = ['c0', 'c1'];
+    assert.throws(() => parseJudgeAnswer({}, keys), /no usable probabilities/);
+    assert.throws(() => parseJudgeAnswer({ answers: { pick: { choice: 'c0', confidence: 0.9 } } }, keys), /no usable/);
+    assert.throws(() => parseJudgeAnswer({ answers: { pick: { probabilities: { c0: 85, c1: 15 } } } }, keys), /no usable/, 'percent scale is not trusted');
+    assert.throws(() => parseJudgeAnswer({ answers: { pick: { probabilities: { evil: 1 } } } }, keys), /no usable/);
+    ok('malformed Jev responses throw instead of reading as "no match"');
+  }
+
+  // しきい値の保存値が壊れていたら既定値(空欄を 0 と読んで常に自信ありにしない)。
+  {
+    assert.equal(judgeMinConfidence({ minConfidence: 0.85 }), 0.85);
+    for (const bad of [null, '', '0.9', -1, 2, NaN, undefined]) assert.equal(judgeMinConfidence({ minConfidence: bad }), DEFAULT_JUDGE.minConfidence);
+    ok('minConfidence falls back to the default unless it is a number in 0..1');
+  }
+
+  // 入力値(変数を埋めた後はパスワード等になりうる)は外部 AI へ送らない。
+  {
+    const fill = { ...pickStep, action: { verb: 'fill', value: 'hunter2-secret' }, locator: { kind: 'fixed', anchor: { css: '#pw' } }, choice: null };
+    const body = JSON.stringify(buildJudgeRequest({ step: fill, candidates: candidates.slice(0, 2), reason: 'missing' }));
+    assert.ok(!body.includes('hunter2-secret'), body);
+    const sel = { ...fill, action: { verb: 'select', value: 'secret-option' } };
+    assert.ok(!JSON.stringify(buildJudgeRequest({ step: sel, candidates, reason: 'missing' })).includes('secret-option'));
+    ok('step values are never sent to the judge');
   }
 
   // 呼び出し: エンドポイント/認証/モデル/本文、HTTP エラーは例外。
@@ -136,9 +164,11 @@ async function run() {
 
   // 実行セッション/手順メモの新フィールドは保存形を往復できる。
   {
-    const r = normalizeRun({ heldKind: 'judge', judgeApprovedStepId: 's1' });
+    const r = normalizeRun({ heldKind: 'judge', judgeApprovedStepId: 's1', heldLabel: 'A', approvedLabel: 'B' });
     assert.equal(r.heldKind, 'judge');
     assert.equal(r.judgeApprovedStepId, 's1');
+    assert.equal(r.heldLabel, 'A');
+    assert.equal(r.approvedLabel, 'B');
     assert.equal(normalizeRun({ heldKind: 'bogus' }).heldKind, '');
     const s = normalizeStep({ ...pickStep, suggestion: { kind: 'choice', label: 'x', pending: true } });
     assert.equal(s.suggestion.pending, true);

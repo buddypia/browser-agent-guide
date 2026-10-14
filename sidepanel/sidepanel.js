@@ -1610,7 +1610,12 @@ function renderWorkflowRun(run) {
   // 承認ゲートで止まっている時だけ「承認して続行」を出す。
   const held = !run.active && run.heldStepId ? (state.workflow?.steps || []).find((s) => s.id === run.heldStepId) : null;
   if (els.workflowHeld) els.workflowHeld.hidden = !held;
-  if (held && els.workflowHeldText) els.workflowHeldText.textContent = t('workflow.heldText', { text: stepTitle(held) });
+  // 承認は保留時に示した候補に束縛されるので、何を承認するのかを常に見える場所に出す。
+  if (held && els.workflowHeldText) {
+    els.workflowHeldText.textContent = run.heldLabel
+      ? t('workflow.heldTextTarget', { text: stepTitle(held), label: run.heldLabel })
+      : t('workflow.heldText', { text: stepTitle(held) });
+  }
   if (els.btnWorkflowDryRun) els.btnWorkflowDryRun.disabled = run.active || !(state.workflow?.steps || []).length;
   // 実行状況(完了/保留)を手順の行にも反映する。
   if (els.workflowSteps && state.workflow?.steps?.length) {

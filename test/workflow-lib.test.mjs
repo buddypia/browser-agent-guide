@@ -131,7 +131,7 @@ const ok = (name) => {
   assert.equal(RUN_KEY, 'aiAdvisorWorkflowRun');
   assert.deepEqual(normalizeRun(null), {
     active: false, doneStepIds: [], tabId: null, navCount: 0, startedAt: '', vars: {}, heldStepId: '', approvedStepId: '',
-    heldKind: '', judgeApprovedStepId: '',
+    heldKind: '', judgeApprovedStepId: '', heldLabel: '', approvedLabel: '',
   });
   const r = normalizeRun({ active: true, doneStepIds: ['a', 1, 'b'], tabId: 7, navCount: 3, startedAt: 't' });
   assert.equal(r.active, true);
@@ -376,7 +376,14 @@ const ok = (name) => {
   assert.match(msgs[1].content, /c1: チャーター便/);
   assert.match(msgs[1].content, /20kg以上ならチャーター便/);
   assert.equal(describeStepAction({ action: { verb: 'fill', value: '12' }, target: '数量' }), '「数量」に「12」を入力');
-  ok('buildChoiceMessages は閉じた選択の指示を組み立てる');
+  // 外部 AI へは入力値(変数を埋めた後のパスワード等)を送らない。
+  const secret = buildChoiceMessages({
+    step: { action: { verb: 'fill', value: 'hunter2-secret' }, target: 'パスワード', locator: { kind: 'fixed', anchor: {} } },
+    candidates: [{ key: 'c0', text: 'Password' }], reason: 'missing',
+  });
+  assert.ok(!JSON.stringify(secret).includes('hunter2-secret'));
+  assert.equal(describeStepAction({ action: { verb: 'fill', value: 'x' }, target: '数量' }, { withValue: false }), '「数量」に入力');
+  ok('buildChoiceMessages は閉じた選択の指示を組み立てる(入力値は送らない)');
 }
 
 // (20) nextPendingStep は記録順で最初の未実行手順を返す(1手ずつ進める基準)。actionable に構造化手順を含む。
