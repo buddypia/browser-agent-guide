@@ -236,10 +236,12 @@
       const visibleValue = el.value || el.getAttribute('value') || el.getAttribute('alt') || '';
       if (visibleValue.trim()) return visibleValue.trim();
     }
+    // 入力欄の今の値(ユーザーが入れたパスワードや {var} の値)はラベルにしない。ラベルは手順・候補・ページ文脈として
+    // 外部 AI に渡るため。ページ側の初期値(value 属性)だけを使う。
     return (
       el.getAttribute('placeholder') ||
       el.getAttribute('title') ||
-      el.value ||
+      el.getAttribute('value') ||
       el.getAttribute('name') ||
       ''
     ).trim();

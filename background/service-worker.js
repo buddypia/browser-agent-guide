@@ -758,8 +758,9 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
     } catch (e) {
       return { failed: { status: 'failed', error: t('sw.wf.aiError', { error: String(e?.message || e) }) } };
     }
-    // 判断待ちの間にユーザーが停止していたら、何も押さず保留も書かない。
-    if (!dryRun && !(await readWorkflowRun()).active) return { failed: { status: 'stopped' } };
+    // 判断待ちの間にユーザーが停止していたら(停止→再開始で別の run になった場合も)、何も押さず保留も書かない。
+    const now = dryRun ? null : await readWorkflowRun();
+    if (now && (!now.active || now.startedAt !== run.startedAt)) return { failed: { status: 'stopped' } };
     return { r };
   };
   // 判断AIが迷った(または要素の差し替え) → 最有力の候補を手順メモに残し、その候補に束縛して保留する。
@@ -783,7 +784,9 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
       via = 'approved';
       aiReason = t('sw.wf.approvedReason');
       // 承認して押した候補を、提案(pending)に代わる実行済みメモとして残す(「次回から固定」で確定できる)。
-      suggestion = { kind: res.status === 'missing' ? 'anchor' : 'choice' };
+      // ルールでも同じ候補になる(ルールで選んだ確定系の承認)なら、学習するものは無い。
+      const rule = res.status === 'choose' ? pickCandidate(res.candidates, step.choice) : null;
+      if (!(rule?.status === 'ok' && res.candidates[rule.index].key === key)) suggestion = { kind: res.status === 'missing' ? 'anchor' : 'choice' };
     } else if (res.status === 'choose') {
       const pick = pickCandidate(res.candidates, step.choice);
       if (pick.status === 'ok') {
@@ -819,8 +822,9 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
   }
   if (!res || !res.status) return { status: 'failed', error: t('sw.autorun.failed') };
   if (res.status === 'held') {
-    // ルールで決まった候補は再解決も決定的なので従来どおり。AI/承認で選んだ候補は、承認をその候補に束縛する。
-    if (via === 'rule') return { ...res, via, aiReason };
+    // 承認は保留時に示した候補に束縛する。ルールで選んだ候補も、承認までに一覧が並び替わりうるので同じ扱い。
+    // ルールの候補が一意に示せない(候補なし/同じ表記が複数)ときだけ、従来どおり束縛しない。
+    if (via === 'rule') return { ...res, via, aiReason, heldLabel: uniqueCandidateByText(sentFrom, sentText) ? normCandidateText(sentText) : '' };
     if (!uniqueCandidateByText(sentFrom, sentText)) return unbindable(sentText);
     return { ...res, via, aiReason, heldLabel: normCandidateText(sentText) };
   }

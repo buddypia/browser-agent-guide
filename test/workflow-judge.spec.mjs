@@ -276,6 +276,24 @@ test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
     await page.close();
   });
 
+  test('ルールで選んだ確定系の承認も示した候補に束縛される: 承認前に並びが変わっても、示した項目を押す', async () => {
+    await setSteps([{ ...recorded, gate: true, choice: { by: 'first', value: '' } }]);
+    const { page, tabId } = await openList('rec');
+    const callsBefore = state.jevCalls.length;
+    expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+    await expect.poll(async () => (await runOf())?.heldStepId || '', { timeout: 15_000 }).toBe(recorded.id);
+    expect((await runOf()).heldLabel).toMatch(/^Belkin USB-C ケーブル 2m/);
+    // 承認までに一覧が並び替わる(先頭が別の項目になる)。
+    await page.evaluate(() => {
+      const ul = document.getElementById('list');
+      ul.append(ul.firstElementChild);
+    });
+    expect(await sendToSw({ type: 'APPROVE_WORKFLOW_STEP', tabId })).toMatchObject({ active: true });
+    await expect(page.locator('#state')).toHaveText('picked:Belkin USB-C ケーブル 2m', { timeout: 15_000 });
+    expect(state.jevCalls.length).toBe(callsBefore); // ルールで決まったので判断AIは呼ばない
+    await page.close();
+  });
+
   test('Jev が失敗したら「該当なし」と誤読せず、手順番号つきの失敗で止まる', async () => {
     await setSteps([recorded]);
     const { page, tabId } = await openList('relabeled');
