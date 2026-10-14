@@ -358,7 +358,7 @@ node scripts/probe.mjs ~/Downloads/ai-inbox --image             # 必要時の�
 - **画像配信 `/shot|/raw/<id>.png` も同じトークン必須**（定数時間比較、不一致/無しは 401）。loopback の
   他プロセスへキャプチャ内容を漏らさないため。`id` は slug 文字種のみ許可しパス traversal を排除する。
   `/mcp` は従来どおり loopback バインド前提（認証なし）。
-- **全ルートで Host/Origin を検証する(DNS rebinding 対策)**。Host が loopback(か `--host` の名前)でない、または
+- **HTTP の全ルートで Host/Origin を検証する(DNS rebinding 対策。`/ws` は upgrade なので対象外で、トークンで守る)**。Host が loopback(か `--host` の名前)でない、または
   Origin が loopback 以外のリクエストは 403。悪性ページが自ドメインを 127.0.0.1 へ向け直すと、ブラウザからは
   同一オリジンとして `/mcp` を叩け、`execute_actions` でユーザーのタブを操作できてしまうため(MCP 仕様の要求)。
   CLI は Origin を送らないので影響しない。`--host 0.0.0.0` は外部公開を選んだとみなし Host は問わない。
