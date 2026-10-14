@@ -16,7 +16,7 @@
  * 순수 lib (파일/네트워크/전역상태 0 — content 문자열만 입력). hook + helper CLI +
  * tests 가 import 하는 SSOT. hook 간 직접 import 금지(R-CM-006)이므로 본 lib 만 공유.
  *
- * 위치 컨벤션은 PLAN.md(`worktree-plan-path.mjs`)와 동형:
+ * 위치 컨벤션(`worktree-plan-path.mjs`):
  *   `.tmp/worktree-<safeBranch>/REVIEW.md` (`.gitignore` 의 `.tmp/` 로 머지 누출 차단).
  *
  * Boundary (R-CM-028): 관점 1 (brief2dev 자체 / 본 transplant) 전용.
@@ -199,8 +199,6 @@ export function renderTemplate(opts = {}) {
     '- Worktree path:',
     '- Branch:',
     '- Base branch:',
-    '- PLAN.md:',
-    '- PLAN.md checklist:',
     '- Worktree status:',
     '- Quality Gate:',
     '- Test / verify:',

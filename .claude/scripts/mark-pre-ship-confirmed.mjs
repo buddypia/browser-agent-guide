@@ -41,7 +41,6 @@ import { dirname, join, resolve } from 'node:path';
 import {
   inferBranchFromWorktreePath,
   preShipMarkerPath,
-  resolveWorktreePlanPath,
   safeBranchKey,
 } from './lib/worktree-plan-path.mjs';
 import { VALID_QUALITY_LABELS } from './lib/quality-gate-labels.mjs';
@@ -130,7 +129,7 @@ export function createMarker(path, content = '') {
 
 /**
  * branch 명으로부터 worktree 절대 경로를 탐색 (slash variant + escape variant).
- * checkPlanCheckboxes / checkBaseFreshness 공유 SSOT — worktree 부재 시 null.
+ * checkBaseFreshness 용 — worktree 부재 시 null.
  *
  * @param {string} mainRoot
  * @param {string} branch
@@ -143,62 +142,6 @@ export function resolveWorktreePath(mainRoot, branch) {
     join(mainRoot, '.worktrees', safeKey),
   ];
   return candidates.find((c) => existsSync(c)) || null;
-}
-
-/**
- * PLAN.md 미완료 체크박스 사전 검사.
- *
- * Why (R-CM-029 Rule 3 Proposal-stage 의무):
- *   (a) 위협: PLAN.md `- [ ]` 토글 누락 후 marker 생성까지 진행되어, 이후 단계에서
- *       뒤늦게 차단될 수 있다.
- *   (b) 대응: marker 생성 시점に PLAN.md を先に検査する。
- *
- * 정책:
- *   - branch=null (staged 모드) → skip (ship-feature 모드, worktree 부재)
- *   - force=true → skip (의도적 우회, ops.mjs --force-plan 정합)
- *   - worktree path 후보 2개 자동 탐색: slash variant + escape variant
- *   - worktree / PLAN.md 부재 → skip (fail-open)
- *   - 미완료 체크박스 0건 → ok
- *   - 미완료 체크박스 1+건 → fail (unchecked 라인 + planPath 반환)
- *
- * @param {string} mainRoot — main project root 절대 경로
- * @param {string|null} branch — resolveBranch() 결과
- * @param {boolean} force — --force 플래그
- * @returns {{ok: boolean, skipped?: string, unchecked?: string[], planPath?: string}}
- */
-export function checkPlanCheckboxes(mainRoot, branch, force) {
-  if (!branch) return { ok: true, skipped: 'staged_mode' };
-  if (force) return { ok: true, skipped: 'force_flag' };
-
-  const wtPath = resolveWorktreePath(mainRoot, branch);
-  if (!wtPath) return { ok: true, skipped: 'worktree_absent' };
-
-  const planPath = resolveWorktreePlanPath(wtPath);
-  if (!existsSync(planPath)) return { ok: true, skipped: 'plan_absent' };
-
-  // readFileSync fail-open — 인코딩 / symlink / 동시 접근 예외 시 skip (R-CM-006 Rule 2).
-  let content;
-  try {
-    content = readFileSync(planPath, 'utf-8');
-  } catch {
-    return { ok: true, skipped: 'plan_unreadable' };
-  }
-  const unchecked = parseUnchecked(content);
-  if (unchecked.length === 0) return { ok: true };
-  return { ok: false, unchecked, planPath };
-}
-
-function stripIgnoredSections(content) {
-  return content
-    .replace(/```[\s\S]*?```/g, '')
-    .replace(/<!--[\s\S]*?-->/g, '');
-}
-
-const UNCHECKED_RE =
-  /^[\s]*[-*]\s\[\s\](?!.*(?:\(취소됨[^)]*\)|\(dropped[^)]*\)|\(Dropped[^)]*\)|\(deferred[^)]*\)|\(Deferred[^)]*\)|~~)).*$/gm;
-
-export function parseUnchecked(content) {
-  return stripIgnoredSections(content).match(UNCHECKED_RE) || [];
 }
 
 /**
@@ -354,18 +297,6 @@ function main(argv) {
     process.exit(1);
   }
   const branch = resolveBranch(arg);
-
-  // PLAN.md 사전 검사 — 미완료 체크박스 발견 시 마커 생성 차단 (round-trip 회피).
-  const check = checkPlanCheckboxes(mainRoot, branch, force);
-  if (!check.ok) {
-    process.stderr.write(
-      `[mark-pre-ship-confirmed] PLAN.md 미완료 체크박스 ${check.unchecked.length}건:\n` +
-        check.unchecked.map((l) => `  ${l}`).join('\n') +
-        `\n\n우회: --force 플래그 또는 항목에 (취소됨) / (dropped) / (deferred) / ~~취소선~~ 마커 추가.\n` +
-        `PLAN: ${check.planPath}\n`,
-    );
-    process.exit(1);
-  }
 
   // ship-time base-freshness 경고 — best-effort, marker 생성을 막지 않는다.
   checkBaseFreshness(mainRoot, branch, force);
