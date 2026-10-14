@@ -13,11 +13,11 @@
  *   3) `git worktree add <path> -b <branch> origin/<base>` (이미 같은 path/branch
  *      가 등록되어 있고 동일하면 멱등 SKIP; 다른 branch/path 충돌은 STOP)
  *   4) `node .claude/scripts/worktree-init.mjs --worktree <path>` chain
- *      (local CLI env + PLAN.md)
+ *      (local CLI env)
  *   4b) package-lock.json を持つ npm プロジェクト(root + 直下の子)で node_modules が無ければ
  *      `npm ci` (新しい worktree で check が「パッケージが無い」と誤った理由で落ちるのを防ぐ。
  *      失敗は warning。--no-install で省略)
- *   5) JSON 보고: { ok, branch, base, base_sha, worktree_path, plan_path,
+ *   5) JSON 보고: { ok, branch, base, base_sha, worktree_path,
  *                   actions: [...], warnings: [...] }
  *
  * 사용:
@@ -274,7 +274,6 @@ export function runWorktreeNew(opts) {
     base,
     base_sha: null,
     worktree_path: null,
-    plan_path: null,
     actions: [],
     warnings: [],
     errors: [],
@@ -457,18 +456,13 @@ export function runWorktreeNew(opts) {
   const initScript = join(REPO_ROOT, '.claude/scripts/worktree-init.mjs');
   if (!existsFn(initScript)) {
     result.warnings.push(
-      `worktree-init.mjs not found at ${initScript} — skipped local env + PLAN.md setup.`,
+      `worktree-init.mjs not found at ${initScript} — skipped local env setup.`,
     );
   } else {
     result.actions.push(`node worktree-init.mjs --worktree ${wtPathRel}`);
     if (!dryRun) {
       try {
-        const out = nodeFn([initScript, '--worktree', wtPathAbs], { cwd, timeout: 30_000 });
-        // worktree-init prints PLAN.md path on creation — parse for reporting.
-        const planMatch = out.match(/PLAN\.md (?:자동 생성|이미 존재[^:]*): (.+)/);
-        if (planMatch) {
-          result.plan_path = resolve(wtPathAbs, planMatch[1].trim());
-        }
+        nodeFn([initScript, '--worktree', wtPathAbs], { cwd, timeout: 30_000 });
       } catch (e) {
         result.errors.push(
           `worktree-init.mjs failed: ${(e.stderr || e.message || '').toString().trim()}`,

@@ -1,11 +1,7 @@
 /**
- * worktree-plan-path.mjs — worktree PLAN.md 위치 SSOT 헬퍼
- *
- * Why: PLAN.md 가 worktree 루트에 있으면 한 번 tracked 되는 순간 .gitignore 가
- * 무력화되어 main 으로 머지된다. `.tmp/worktree-<safeBranch>/PLAN.md` 위치는
- * .gitignore 의 `.tmp/` 패턴으로 git tracking 자체가 봉쇄된다.
- *
- * branch namespace 격리로 병렬 worktree 작업 충돌도 자연스럽게 해소된다.
+ * worktree-plan-path.mjs — worktree 경로/브랜치 키/마커 위치 SSOT 헬퍼
+ *   (파일명은 과거 PLAN.md 위치 헬퍼였던 흔적. PLAN.md 게이트는 2026-10-14 폐기 —
+ *   검증은 npm run check + AI 리뷰 + Pre-Ship 패널이 담당한다.)
  *
  * This helper applies to local worktree sessions in this repository.
  */
@@ -75,14 +71,6 @@ export function inferBranchFromWorktreePath(wtPath) {
 }
 
 /**
- * worktree 안에서의 PLAN.md 상대 경로 (worktree 루트 기준).
- * `.tmp/worktree-<safeBranch>/PLAN.md`.
- */
-export function planRelPath(branch) {
-  return join('.tmp', `worktree-${safeBranchKey(branch)}`, 'PLAN.md');
-}
-
-/**
  * Pre-Ship Review Panel 컨펌 마커 절대 경로.
  * pre-ship-review-guard.mjs (hook) + mark-pre-ship-confirmed.mjs (CLI) 양쪽에서 import.
  * 양 호출 경로가 동일 키 산출 보장 → marker create/check 정합성 SSOT (R-CM-024).
@@ -95,20 +83,11 @@ export function preShipMarkerPath(mainRoot, branch) {
 }
 
 /**
- * worktree 절대 경로로부터 PLAN.md 절대 경로를 반환.
- * branch 미명시 시 worktree path 에서 추론.
- */
-export function resolveWorktreePlanPath(worktreePath, branch = null) {
-  const inferred = branch || inferBranchFromWorktreePath(worktreePath) || basename(worktreePath);
-  return join(worktreePath, planRelPath(inferred));
-}
-
-/**
  * worktree 의 세션 소유권 사이드카 (`.session-owner`) 절대 경로 (R-CM-036).
  * `worktree-owner-tracker` (PostToolUse) 가 생성 시 현재 session_id 를 1줄 기록하고,
  * `worktree-session-owner-guard` (PreToolUse Layer 2) 가 읽어 소유권을 판정한다.
  *
- * PLAN.md 와 같은 `.tmp/worktree-<safeBranch>/` 디렉토리에 둔다 — `.gitignore` 의
+ * REVIEW.md 와 같은 `.tmp/worktree-<safeBranch>/` 디렉토리에 둔다 — `.gitignore` 의
  * `.tmp/` 패턴으로 git tracking 봉쇄 + branch namespace 격리로 병렬 worktree 충돌 해소.
  *
  * @param {string} worktreePath — worktree 루트 절대 경로
