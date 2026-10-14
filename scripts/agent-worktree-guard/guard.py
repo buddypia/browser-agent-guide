@@ -608,7 +608,6 @@ def build_pr_briefing(root: Path, items: list[dict[str, Any]]) -> str:
         lines.extend([*render_worktree_brief(root, item), ""])
     lines.extend(
         [
-            "",
             "Human decision required / ユーザー確認:",
             "  - 承認して進める: AI は `agent-worktree-guard confirm-pr --confirmed` を実行してから `gh pr create` へ進む。",
             "  - 修正が必要: worktree に戻って追加修正する。",
