@@ -1,4 +1,4 @@
-// DNS rebinding 対策: Host/Origin が loopback 以外のリクエストは /mcp を含む全ルートで 403。
+// DNS rebinding 対策: Host/Origin が loopback 以外のリクエストは /mcp を含む HTTP の全ルートで 403(/ws はトークンで守る)。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
