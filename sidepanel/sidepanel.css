@@ -1,98 +1,33 @@
 :root {
   /* 赤ペン校正: 紙 × 墨 × 朱。朱は「AIに渡す印」だけに使う */
-  --bg: #f5f2ec;
-  --panel: #f5f2ec;
-  --panel-2: #fffdf9;
-  --panel-3: #ebe6dc;
-  --text: #1c1a17;
-  --muted: #5d574d;
-  --accent: #b9321b;
-  --accent-hover: #9c2914;
-  --accent-soft: #f6dfd8;
-  --ok: #2f7a4b;
-  --ok-soft: #e3f1e7;
-  --err: #b42318;
-  --err-soft: #fbe4e0;
-  --warn-bg: #fbf0d5;
-  --warn-text: #6b4700;
-  --wf: #5a3fa0;
-  --wf-soft: #ece6f6;
-  --border: #d9d2c4;
-  --border-strong: #b8ae9c;
-  --shadow: 0 10px 30px rgba(40, 30, 10, 0.14);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #181715;
-    --panel: #1e1d19;
-    --panel-2: #272520;
-    --panel-3: #32302a;
-    --text: #f0ede6;
-    --muted: #a8a295;
-    --accent: #f26a50;
-    --accent-btn: #b9321b;
-    --accent-btn-hover: #9c2914;
-    --accent-hover: #f0684e;
-    --accent-soft: rgba(242, 106, 80, 0.2);
-    --ok: #48a86c;
-    --ok-soft: rgba(72, 168, 108, 0.2);
-    --err: #f87171;
-    --err-soft: rgba(248, 113, 113, 0.2);
-    --warn-bg: #3d2f10;
-    --warn-text: #fcd34d;
-    --wf: #9d80e8;
-    --wf-soft: rgba(157, 128, 232, 0.2);
-    --border: #3d3932;
-    --border-strong: #575147;
-    --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  }
-}
-
-:root[data-theme="dark"] {
-  --bg: #181715;
-  --panel: #1e1d19;
-  --panel-2: #272520;
-  --panel-3: #32302a;
-  --text: #f0ede6;
-  --muted: #a8a295;
-  --accent: #f26a50;
+  /* 各色は light-dark(ライト, ダーク)。既定は OS に従い、設定のテーマは data-theme で color-scheme を固定する */
+  color-scheme: light dark;
+  --bg: light-dark(#f5f2ec, #181715);
+  --panel: light-dark(#f5f2ec, #1e1d19);
+  --panel-2: light-dark(#fffdf9, #272520);
+  --panel-3: light-dark(#ebe6dc, #32302a);
+  --text: light-dark(#1c1a17, #f0ede6);
+  --muted: light-dark(#5d574d, #a8a295);
+  --accent: light-dark(#b9321b, #f26a50);
+  --accent-hover: light-dark(#9c2914, #f0684e);
+  --accent-soft: light-dark(#f6dfd8, rgba(242, 106, 80, 0.2));
+  --ok: light-dark(#2f7a4b, #48a86c);
+  --ok-soft: light-dark(#e3f1e7, rgba(72, 168, 108, 0.2));
+  --err: light-dark(#b42318, #f87171);
+  --err-soft: light-dark(#fbe4e0, rgba(248, 113, 113, 0.2));
+  --warn-bg: light-dark(#fbf0d5, #3d2f10);
+  --warn-text: light-dark(#6b4700, #fcd34d);
+  --wf: light-dark(#5a3fa0, #9d80e8);
+  --wf-soft: light-dark(#ece6f6, rgba(157, 128, 232, 0.2));
+  --border: light-dark(#d9d2c4, #3d3932);
+  --border-strong: light-dark(#b8ae9c, #575147);
+  --shadow: 0 10px 30px light-dark(rgba(40, 30, 10, 0.14), rgba(0, 0, 0, 0.5));
   --accent-btn: #b9321b;
   --accent-btn-hover: #9c2914;
-  --accent-hover: #f0684e;
-  --accent-soft: rgba(242, 106, 80, 0.2);
-  --ok: #48a86c;
-  --ok-soft: rgba(72, 168, 108, 0.2);
-  --err: #f87171;
-  --err-soft: rgba(248, 113, 113, 0.2);
-  --warn-bg: #3d2f10;
-  --warn-text: #fcd34d;
-  --wf: #9d80e8;
-  --wf-soft: rgba(157, 128, 232, 0.2);
-  --border: #3d3932;
-  --border-strong: #575147;
-  --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    color-scheme: light;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-  }
-}
-
-:root[data-theme="light"] {
-  color-scheme: light;
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 
@@ -419,7 +354,7 @@ textarea:focus-visible {
 
 .workspace-tab:hover:not([aria-selected="true"]) {
   color: var(--text);
-  background: rgba(28, 26, 23, 0.03);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
 }
 
 .workspace-tab:focus-visible {
@@ -1164,7 +1099,7 @@ textarea:focus-visible {
 }
 
 .msg-copy:hover {
-  background: rgba(28, 26, 23, 0.08);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--text);
 }
 

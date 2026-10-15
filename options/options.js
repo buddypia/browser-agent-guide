@@ -563,12 +563,6 @@ function bindEvents() {
     if (e.target.files[0]) importSettings(e.target.files[0]);
   });
 
-  window.matchMedia?.('(prefers-color-scheme: dark)')?.addEventListener('change', () => {
-    if (normalizeTheme(settings.ui?.theme) === 'system') {
-      applyTheme('system');
-    }
-  });
-
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area === 'local' && changes.aiAdvisorSettings?.newValue?.ui?.theme !== undefined) {
       const newTheme = changes.aiAdvisorSettings.newValue.ui.theme;
