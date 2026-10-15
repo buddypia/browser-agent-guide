@@ -570,8 +570,9 @@ test.describe('UI quality gates', () => {
   test('options page passes axe on the default settings state', async ({ page }, testInfo) => {
     await page.goto(pageUrl('options/options.html'));
 
-    // 既定の言語はブラウザ UI 言語依存。テストを決定的にするため日本語へ切り替えて検証する。
+    // 既定の言語・テーマはブラウザ UI 環境依存。テストを決定的にするため日本語・ライトへ切り替えて検証する。
     await page.locator('#ui-language').selectOption('ja');
+    await page.locator('#theme-select').selectOption('light');
 
     await expect(page.getByRole('heading', { name: 'Browser Agent Guide 設定' })).toBeVisible();
     await expect(page.getByLabel('プロバイダ')).toBeVisible();
@@ -581,6 +582,12 @@ test.describe('UI quality gates', () => {
     await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(245, 242, 236)');
     await page.screenshot({ path: testInfo.outputPath('options-paper.png'), fullPage: true });
 
+    await expectNoAxeViolations(page);
+
+    // ダークテーマへの切替と axe 適合も検証する。
+    await page.locator('#theme-select').selectOption('dark');
+    await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(24, 23, 21)');
+    await expect(page.locator('#save-daemon')).toHaveCSS('background-color', 'rgb(240, 237, 230)');
     await expectNoAxeViolations(page);
   });
 });

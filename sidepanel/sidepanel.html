@@ -81,6 +81,17 @@
               <option value="zh">🇨🇳</option>
             </select>
           </label>
+          <label class="theme-control menu-field" title="Theme" data-i18n-title="theme.title">
+            <svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1Z" />
+            </svg>
+            <span data-i18n="theme.label">Theme</span>
+            <select id="theme-select" aria-label="Theme" data-i18n-aria-label="theme.label">
+              <option value="system" data-i18n="theme.system">System</option>
+              <option value="light" data-i18n="theme.light">Light</option>
+              <option value="dark" data-i18n="theme.dark">Dark</option>
+            </select>
+          </label>
           <hr />
           <button
             id="btn-download-chat"
@@ -232,6 +243,20 @@
         <div class="workflow-entry">
           <p class="workflow-entry-title" data-i18n="workspace.workflowEntryTitle">Build a reusable workflow</p>
           <p class="workflow-entry-hint" data-i18n="workspace.workflowEntryHint">Record notes across pages in URL order, then save or auto-run the steps.</p>
+          <div class="workflow-manage">
+            <div class="workflow-select-row">
+              <label class="sr-only" for="workflow-select" data-i18n="workflow.selectLabel">Select workflow</label>
+              <select id="workflow-select" class="workflow-select" aria-label="Select workflow" data-i18n-aria-label="workflow.selectLabel">
+                <option value="" data-i18n="workflow.newOption">+ New workflow</option>
+              </select>
+              <button id="btn-workflow-new" type="button" class="workflow-new-btn" title="Create new workflow" data-i18n-title="workflow.newTitle" data-i18n="workflow.new">+ New</button>
+            </div>
+            <div class="workflow-name-row">
+              <label class="sr-only" for="workflow-name" data-i18n="workflow.nameLabel">Workflow name</label>
+              <input id="workflow-name" type="text" class="workflow-name" placeholder="Workflow name" data-i18n-placeholder="workflow.namePlaceholder" />
+              <button id="btn-workflow-save" type="button" class="workflow-save-btn" title="Save or register workflow" data-i18n-title="workflow.saveTitle" data-i18n="workflow.save">Save workflow</button>
+            </div>
+          </div>
           <div class="quick-actions one" aria-label="Workflow" data-i18n-aria-label="toolbar.workflowGroup">
             <button
               id="btn-workflow"
@@ -247,7 +272,7 @@
                 <circle cx="12" cy="12" r="6" />
                 <path d="M12 12h.01" />
               </svg>
-              <span data-i18n="actions.workflow">Record workflow</span>
+              <span id="workflow-rec-label" data-i18n="actions.workflow">Record workflow</span>
               <span id="workflow-count-badge" class="memo-count-badge" aria-hidden="true" hidden></span>
             </button>
           </div>
@@ -324,10 +349,8 @@
           </button>
           <span id="workflow-autorun-state" class="workflow-autorun-state" aria-live="polite"></span>
         </div>
-        <div class="workflow-save">
-          <label class="sr-only" for="workflow-name" data-i18n="workflow.nameLabel">Workflow name</label>
-          <input id="workflow-name" type="text" class="workflow-name" placeholder="Workflow name" data-i18n-placeholder="workflow.namePlaceholder" />
-          <button id="btn-workflow-save" type="button" class="workflow-save-btn" title="Save these steps as a named workflow" data-i18n-title="workflow.saveTitle" data-i18n="workflow.save">Save workflow</button>
+        <div class="workflow-foot-actions">
+          <button id="btn-workflow-save-copy" type="button" class="workflow-save-copy-btn" title="Save current steps as a new workflow copy" data-i18n-title="workflow.saveAsNewTitle" data-i18n="workflow.saveAsNew">Save as copy</button>
         </div>
         <div id="workflow-saved" class="workflow-saved"></div>
       </div>

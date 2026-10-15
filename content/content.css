@@ -11,6 +11,45 @@
   --bag-accent-soft: #dff5f1;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bag-surface: #1a2421;
+    --bag-surface-muted: #24302c;
+    --bag-text: #e6edea;
+    --bag-muted: #95a39f;
+    --bag-border: #33433e;
+    --bag-accent: #14b8a6;
+    --bag-accent-hover: #2dd4bf;
+    --bag-accent-soft: #134e4a;
+  }
+
+  .bag-author-target-q code {
+    color: var(--bag-text);
+  }
+  .bag-author-row > span {
+    color: var(--bag-text);
+  }
+  .bag-author-row select,
+  .bag-author-row input,
+  .bag-author-row textarea,
+  .bag-author-actions button,
+  .bag-memo-text,
+  .bag-memo-del,
+  .bag-draw-tool,
+  .bag-draw-op {
+    background: var(--bag-surface);
+    color: var(--bag-text);
+    border-color: var(--bag-border);
+  }
+  .bag-author-actions button.primary,
+  .bag-memo-save,
+  .bag-draw-op.primary {
+    background: var(--bag-accent);
+    color: #fff;
+    border-color: var(--bag-accent);
+  }
+}
+
 .bag-floating-host {
   position: fixed;
   right: 16px;

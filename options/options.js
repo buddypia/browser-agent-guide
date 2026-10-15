@@ -42,6 +42,8 @@ async function init() {
   settings = await getSettings();
   i18n = await createI18n(resolveLocale(settings.ui?.language));
   $('ui-language').value = normalizeRememberLanguage(settings.ui?.language);
+  if ($('theme-select')) $('theme-select').value = normalizeTheme(settings.ui?.theme);
+  applyTheme(settings.ui?.theme);
   applyI18n();
   fillAiForm();
   fillMemoryForm();
@@ -53,6 +55,26 @@ async function init() {
   renderRecipeSites();
   toggleProviderFields();
   bindEvents();
+}
+
+function normalizeTheme(theme) {
+  return ['system', 'light', 'dark'].includes(theme) ? theme : 'system';
+}
+
+function applyTheme(theme) {
+  const norm = normalizeTheme(theme);
+  if (norm === 'dark' || norm === 'light') {
+    document.documentElement.setAttribute('data-theme', norm);
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+}
+
+async function changeTheme(nextTheme) {
+  const theme = normalizeTheme(nextTheme);
+  applyTheme(theme);
+  settings.ui = { ...(settings.ui || {}), theme };
+  await saveSettings(settings);
 }
 
 // UI言語セレクタの値（保存値そのまま。未設定/不正は 'auto'）。
@@ -520,6 +542,7 @@ function normalizeRememberScope(scope) {
 // ---- イベント結線 ----
 function bindEvents() {
   $('ui-language').addEventListener('change', (e) => changeLanguage(e.target.value));
+  $('theme-select')?.addEventListener('change', (e) => changeTheme(e.target.value));
   $('provider').addEventListener('change', toggleProviderFields);
   $('save-ai').addEventListener('click', saveAi);
   $('save-memory').addEventListener('click', saveMemory);
@@ -538,6 +561,20 @@ function bindEvents() {
   $('import').addEventListener('click', () => $('import-file').click());
   $('import-file').addEventListener('change', (e) => {
     if (e.target.files[0]) importSettings(e.target.files[0]);
+  });
+
+  window.matchMedia?.('(prefers-color-scheme: dark)')?.addEventListener('change', () => {
+    if (normalizeTheme(settings.ui?.theme) === 'system') {
+      applyTheme('system');
+    }
+  });
+
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area === 'local' && changes.aiAdvisorSettings?.newValue?.ui?.theme !== undefined) {
+      const newTheme = changes.aiAdvisorSettings.newValue.ui.theme;
+      if ($('theme-select')) $('theme-select').value = normalizeTheme(newTheme);
+      applyTheme(newTheme);
+    }
   });
 }
 

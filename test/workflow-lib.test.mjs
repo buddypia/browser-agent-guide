@@ -35,6 +35,11 @@ import {
   describeStepAction,
   buildChoiceMessages,
   nextPendingStep,
+  normalizeSaved,
+  createWorkflowEntry,
+  saveWorkflow,
+  setActiveWorkflow,
+  deleteSavedWorkflow,
 } from '../lib/workflow.js';
 
 let passed = 0;
@@ -401,6 +406,110 @@ const ok = (name) => {
   assert.equal(prompt.count, 2);
   assert.match(prompt.steps[0].action, /クリック/);
   ok('nextPendingStep は記録順に1手ずつ返す');
+}
+
+// (21) normalizeSaved と createWorkflowEntry は保存エントリの整合性を保証する。
+{
+  assert.deepEqual(normalizeSaved(null), { id: '', name: '', createdAt: '', steps: [] });
+  const entry = createWorkflowEntry('ログイン手順', [{ text: 'ボタン押下', url: 'https://test/login' }], 'wf-1');
+  assert.equal(entry.id, 'wf-1');
+  assert.equal(entry.name, 'ログイン手順');
+  assert.equal(entry.steps.length, 1);
+  assert.equal(entry.steps[0].text, 'ボタン押下');
+  ok('normalizeSaved と createWorkflowEntry は保存エントリを作る');
+}
+
+// (22) saveWorkflow は新規追加と既存更新(id一致)を正しく処理する。
+{
+  let wf = normalizeWorkflow({ recording: false, steps: [{ id: 's1', text: 'Step 1' }] });
+  // 新規保存
+  wf = saveWorkflow(wf, { name: 'Workflow A' });
+  assert.ok(wf.activeId);
+  assert.equal(wf.name, 'Workflow A');
+  assert.equal(wf.saved.length, 1);
+  assert.equal(wf.saved[0].id, wf.activeId);
+  assert.equal(wf.saved[0].name, 'Workflow A');
+  assert.equal(wf.saved[0].steps.length, 1);
+
+  // 既存の更新
+  const origId = wf.activeId;
+  wf.steps.push({ id: 's2', text: 'Step 2' });
+  wf = saveWorkflow(wf, { name: 'Workflow A (改)' });
+  assert.equal(wf.activeId, origId);
+  assert.equal(wf.name, 'Workflow A (改)');
+  assert.equal(wf.saved.length, 1);
+  assert.equal(wf.saved[0].steps.length, 2);
+  assert.equal(wf.saved[0].name, 'Workflow A (改)');
+
+  // 別名(新規)保存
+  wf = saveWorkflow(wf, { id: null, name: 'Workflow B' });
+  assert.notEqual(wf.activeId, origId);
+  assert.equal(wf.name, 'Workflow B');
+  assert.equal(wf.saved.length, 2);
+  assert.equal(wf.saved[0].name, 'Workflow B');
+  assert.equal(wf.saved[1].name, 'Workflow A (改)');
+  ok('saveWorkflow は新規保存と更新を正しく処理する');
+}
+
+// (23) setActiveWorkflow は対象ワークフローをアクティブ化しステップを復元する。
+{
+  const savedA = createWorkflowEntry('Workflow A', [{ id: 's1', text: 'Step A' }], 'wf-a');
+  const savedB = createWorkflowEntry('Workflow B', [{ id: 's2', text: 'Step B' }, { id: 's3', text: 'Step B2' }], 'wf-b');
+  const raw = {
+    recording: false,
+    activeId: 'wf-a',
+    name: 'Workflow A',
+    steps: [{ id: 's1', text: 'Step A' }],
+    saved: [savedA, savedB],
+  };
+
+  // wf-b に切り替え
+  let wf = setActiveWorkflow(raw, 'wf-b');
+  assert.equal(wf.activeId, 'wf-b');
+  assert.equal(wf.name, 'Workflow B');
+  assert.equal(wf.steps.length, 2);
+  assert.equal(wf.steps[0].id, 's2');
+
+  // 新規(空)にリセット
+  wf = setActiveWorkflow(wf, '');
+  assert.equal(wf.activeId, '');
+  assert.equal(wf.name, '');
+  assert.equal(wf.steps.length, 0);
+
+  // 存在しない id の場合も空状態にリセット
+  wf = setActiveWorkflow(raw, 'nonexistent');
+  assert.equal(wf.activeId, '');
+  assert.equal(wf.name, '');
+  assert.equal(wf.steps.length, 0);
+  ok('setActiveWorkflow は対象ワークフローの切替と新規リセットを行う');
+}
+
+// (24) deleteSavedWorkflow は対象を削除し、アクティブ中だった場合は状態をリセットする。
+{
+  const savedA = createWorkflowEntry('Workflow A', [{ id: 's1', text: 'Step A' }], 'wf-a');
+  const savedB = createWorkflowEntry('Workflow B', [{ id: 's2', text: 'Step B' }], 'wf-b');
+  const raw = {
+    recording: false,
+    activeId: 'wf-a',
+    name: 'Workflow A',
+    steps: [{ id: 's1', text: 'Step A' }],
+    saved: [savedA, savedB],
+  };
+
+  // 非アクティブの wf-b を削除
+  let wf = deleteSavedWorkflow(raw, 'wf-b');
+  assert.equal(wf.saved.length, 1);
+  assert.equal(wf.saved[0].id, 'wf-a');
+  assert.equal(wf.activeId, 'wf-a');
+  assert.equal(wf.steps.length, 1);
+
+  // アクティブの wf-a を削除 -> アクティブ解除・ステップクリア
+  wf = deleteSavedWorkflow(wf, 'wf-a');
+  assert.equal(wf.saved.length, 0);
+  assert.equal(wf.activeId, '');
+  assert.equal(wf.name, '');
+  assert.equal(wf.steps.length, 0);
+  ok('deleteSavedWorkflow は指定ワークフローを削除しアクティブ状態を適切に更新する');
 }
 
 console.log(`\n${passed} passed`);

@@ -13,6 +13,56 @@
   --border: #d9d2c4;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #181715;
+    --panel: #24221e;
+    --panel-2: #2e2b26;
+    --text: #f0ede6;
+    --ink-hover: #e0dcd4;
+    --muted: #9e988c;
+    --accent: #e05338;
+    --ok: #48a86c;
+    --err: #f04438;
+    --err-soft: rgba(240, 68, 56, 0.2);
+    --border: #3d3932;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #181715;
+  --panel: #24221e;
+  --panel-2: #2e2b26;
+  --text: #f0ede6;
+  --ink-hover: #e0dcd4;
+  --muted: #9e988c;
+  --accent: #e05338;
+  --ok: #48a86c;
+  --err: #f04438;
+  --err-soft: rgba(240, 68, 56, 0.2);
+  --border: #3d3932;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
 * { box-sizing: border-box; }
 
 body {
@@ -20,7 +70,6 @@ body {
   min-height: 100dvh;
   background: var(--bg);
   color: var(--text);
-  color-scheme: light;
   font: 14px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif;
 }
 
@@ -38,6 +87,13 @@ body {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.head-controls {
+  display: inline-flex;
+  align-items: center;
   gap: 16px;
   flex-wrap: wrap;
 }
