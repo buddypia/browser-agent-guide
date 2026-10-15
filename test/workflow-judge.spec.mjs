@@ -44,7 +44,15 @@ const FORM_HTML = (label) => `<!doctype html><html><head><meta charset="utf-8"><
 
 // 偽 Jev: 本文の候補から prefer(正規表現)に合うものを選ぶ。1つなら高確信、複数なら迷う(最初を最有力に)。
 // flip: 迷う時の最有力を入れ替える(承認後に問い直すと別の候補を選んでしまう状況を作る)。
-function fakeJev(body, { prefer = 'Anker', flip = false } = {}) {
+function fakeJev(body, { prefer = 'Anker', flip = false, visualPass = true } = {}) {
+  if (body?.questions?.visual) {
+    const pass = visualPass ? 0.94 : 0.12;
+    const fail = Number((1 - pass).toFixed(2));
+    return {
+      model: 'jev-fake',
+      answers: { visual: { type: 'choice', choice: visualPass ? 'pass' : 'fail', probabilities: { pass, fail } } },
+    };
+  }
   const criteria = body?.questions?.pick?.criteria || {};
   const anker = Object.keys(criteria).filter((k) => k !== 'none' && new RegExp(prefer).test(criteria[k]));
   if (flip) anker.reverse();
@@ -72,13 +80,47 @@ function startServer(state) {
         req.on('data', (c) => (raw += c));
         req.on('end', () => {
           const body = JSON.parse(raw);
-          state.jevCalls.push({ auth: req.headers.authorization, body });
+          state.jevCalls.push({ auth: req.headers.authorization, headers: req.headers, body });
           res.setHeader('content-type', 'application/json');
           if (state.fail) {
             res.statusCode = 500;
             return res.end('{"error":"boom"}');
           }
           res.end(JSON.stringify(fakeJev(body, state)));
+        });
+        return;
+      }
+      if (url.pathname === '/v1/embeddings' && req.method === 'POST') {
+        let raw = '';
+        req.on('data', (c) => (raw += c));
+        req.on('end', () => {
+          const body = JSON.parse(raw);
+          state.eg2Calls.push({ path: '/v1/embeddings', body });
+          res.setHeader('content-type', 'application/json');
+          const inputs = Array.isArray(body.input) ? body.input : [];
+          const data = inputs.map((txt, index) => ({
+            index,
+            embedding: body.input_type === 'query' || new RegExp(state.prefer).test(String(txt)) ? [0.98, 0.2] : [0.1, 0.99],
+          }));
+          res.end(JSON.stringify({ data }));
+        });
+        return;
+      }
+      if (url.pathname === '/v1/evaluate' && req.method === 'POST') {
+        let raw = '';
+        req.on('data', (c) => (raw += c));
+        req.on('end', () => {
+          const body = JSON.parse(raw);
+          state.eg2Calls.push({ path: '/v1/evaluate', body });
+          res.setHeader('content-type', 'application/json');
+          const pass = state.visualPass !== false;
+          res.end(
+            JSON.stringify({
+              choice: pass ? 'pass' : 'fail',
+              score: pass ? 0.93 : 0.89,
+              scores: pass ? { pass: 0.93, fail: 0.07 } : { pass: 0.11, fail: 0.89 },
+            })
+          );
         });
         return;
       }
@@ -101,9 +143,9 @@ async function getServiceWorker(context) {
 
 const readStore = (sw, key) => sw.evaluate(async (k) => (await chrome.storage.local.get(k))[k], key);
 
-test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
+test.describe('判断AI(Jev / eg2) E2E (拡張ロード)', () => {
   test.describe.configure({ mode: 'serial' });
-  const state = { variant: 'rec', button: '選ぶ', formLabel: '保存する', jevCalls: [], prefer: 'Anker', flip: false, fail: false };
+  const state = { variant: 'rec', button: '選ぶ', formLabel: '保存する', jevCalls: [], eg2Calls: [], prefer: 'Anker', flip: false, fail: false, visualPass: true };
   let server;
   let origin;
   let context;
@@ -396,4 +438,78 @@ test.describe('判断AI(Jev) E2E (拡張ロード)', () => {
       state.formLabel = '保存する';
     }
   });
+
+  test('eg2 選択時: ローカル EmbeddingGemma 2 (/v1/embeddings) で表記変更後の候補を選んで完走する', async () => {
+    await sw.evaluate(async (base) => {
+      const k = 'aiAdvisorSettings';
+      const cur = (await chrome.storage.local.get(k))[k] || {};
+      await chrome.storage.local.set({
+        [k]: {
+          ...cur,
+          judge: { provider: 'eg2', apiKey: '', baseUrl: `${base}/v1`, model: 'jev-fake', minConfidence: 0.7 },
+          eg2: { enabled: true, url: base, model: '270m', urlVersion: 2 },
+        },
+      });
+    }, origin);
+    try {
+      await setSteps([recorded]);
+      const { page, tabId } = await openList('relabeled');
+      state.eg2Calls.length = 0;
+      expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+      await expect(page.locator('#state')).toHaveText('picked:【新パッケージ】Anker USB-C to USB-C ケーブル (1m)', { timeout: 15_000 });
+      await expect.poll(async () => (await runOf())?.doneStepIds?.length ?? 0).toBe(1);
+      expect(state.eg2Calls.filter((c) => c.path === '/v1/embeddings')).toHaveLength(2);
+      const sg = (await stepOf()).suggestion;
+      expect(sg.label).toContain('新パッケージ');
+      expect(sg.reason).toContain('eg2-270m');
+      await page.close();
+    } finally {
+      await sw.evaluate(async (base) => {
+        const k = 'aiAdvisorSettings';
+        const cur = (await chrome.storage.local.get(k))[k] || {};
+        await chrome.storage.local.set({
+          [k]: {
+            ...cur,
+            judge: { provider: 'jev', apiKey: 'test-key', baseUrl: `${base}/v1`, model: 'jev-fake', minConfidence: 0.7 },
+          },
+        });
+      }, origin);
+    }
+  });
+
+  test('check.type === "visual": ステップ後の画面状態・UI崩れを System 1 で視覚確認し、NG 時は停止する', async () => {
+    const stepWithVisual = {
+      ...recorded,
+      choice: { by: 'first', value: '' },
+      check: { type: 'visual', value: '選択結果が表示され画面崩れがない' },
+    };
+    await setSteps([stepWithVisual]);
+    const { page, tabId } = await openList('rec');
+    await page.bringToFront();
+
+    // 1) 視覚確認 OK → 完走
+    state.visualPass = true;
+    state.jevCalls.length = 0;
+    expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+    await expect.poll(async () => (await runOf())?.doneStepIds?.length ?? 0, { timeout: 15_000 }).toBe(1);
+    const visualCalls = state.jevCalls.filter((c) => c.body?.questions?.visual);
+    expect(visualCalls).toHaveLength(1);
+    expect(visualCalls[0].headers['typesafe-danger-zone-images']).toBe('true');
+
+    // 2) 視覚確認 NG (画面崩れ/エラー検出) → 停止し failed メッセージを出す
+    state.visualPass = false;
+    await extPage.evaluate(() => (window.__autorun.length = 0));
+    try {
+      expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+      await expect.poll(async () => (await runOf())?.active, { timeout: 15_000 }).toBe(false);
+      expect((await runOf()).doneStepIds).toEqual([]);
+      const msgs = await extPage.evaluate(() => window.__autorun.join('\n'));
+      expect(msgs).toMatch(/visual check failed|視覚確認に失敗しました/);
+      expect(msgs).toContain('12%');
+    } finally {
+      state.visualPass = true;
+    }
+    await page.close();
+  });
 });
+

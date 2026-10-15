@@ -250,6 +250,35 @@ async function runTests() {
     ok('eg2 default URL avoids the daemon port and legacy saved URL migrates');
   }
 
+  // 7. evaluateVisualWithEg2: スクリーンショットの視覚・UI崩れ判定 (POST /v1/evaluate)
+  {
+    const { evaluateVisualWithEg2 } = await import('../lib/eg2-client.js');
+    let reqBody;
+    const mockFetch = async (_url, init) => {
+      reqBody = JSON.parse(init.body);
+      return {
+        ok: true,
+        json: async () => ({ choice: 'pass', score: 0.92, scores: { pass: 0.92, fail: 0.08 } }),
+      };
+    };
+    const r = await evaluateVisualWithEg2({
+      url: 'http://127.0.0.1:38765',
+      imageBase64: 'data:image/png;base64,iVBORw0KGgo=',
+      goal: 'モーダルが閉じている',
+      fetchImpl: mockFetch,
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.choice, 'pass');
+    assert.equal(r.score, 0.92);
+    assert.deepEqual(reqBody.images, ['iVBORw0KGgo=']);
+    assert.match(reqBody.choices.pass, /モーダルが閉じている/);
+
+    const bad = await evaluateVisualWithEg2({ url: 'http://10.0.0.1:38765', imageBase64: 'AA==', goal: 'x' });
+    assert.equal(bad.ok, false);
+    assert.match(bad.error, /loopback/);
+    ok('evaluateVisualWithEg2 posts to /v1/evaluate and strips data URL prefix');
+  }
+
   console.log(`\nAll ${passed} tests passed.`);
 }
 

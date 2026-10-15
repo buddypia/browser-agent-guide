@@ -193,10 +193,10 @@ function fillWorkflowForm() {
   $('autorun-allow-irreversible').checked = Boolean(settings.workflow?.allowIrreversibleClicks);
 }
 
-// ---- 判断AI (Jev) ----
+// ---- 判断AI (Jev / EmbeddingGemma 2) ----
 function fillJudgeForm() {
   const j = { ...DEFAULT_SETTINGS.judge, ...(settings.judge || {}) };
-  $('judge-provider').value = j.provider === 'jev' ? 'jev' : 'llm';
+  $('judge-provider').value = j.provider === 'jev' ? 'jev' : j.provider === 'eg2' ? 'eg2' : 'llm';
   $('judge-apiKey').value = j.apiKey;
   $('judge-model').value = j.model;
   $('judge-minConfidence').value = j.minConfidence;
@@ -204,10 +204,12 @@ function fillJudgeForm() {
 
 function readJudgeForm() {
   const min = Number.parseFloat($('judge-minConfidence').value);
+  const rawProv = $('judge-provider').value;
+  const provider = rawProv === 'jev' ? 'jev' : rawProv === 'eg2' ? 'eg2' : 'llm';
   return {
     ...DEFAULT_SETTINGS.judge,
     ...(settings.judge || {}),
-    provider: $('judge-provider').value === 'jev' ? 'jev' : 'llm',
+    provider,
     apiKey: $('judge-apiKey').value.trim(),
     model: $('judge-model').value.trim() || DEFAULT_SETTINGS.judge.model,
     minConfidence: Number.isFinite(min) ? Math.min(1, Math.max(0, min)) : DEFAULT_SETTINGS.judge.minConfidence,
@@ -220,9 +222,20 @@ async function saveJudge() {
   setStatus('judge-status', t('opt.status.saved'), true);
 }
 
-// 課金される実リクエストを1回だけ送る(ユーザー操作時のみ)。
+// ユーザー操作時のみ接続テストを送る(eg2 選択時はローカル eg2 サーバーのヘルスチェック)。
 async function testJudge() {
   const judge = readJudgeForm();
+  if (judge.provider === 'eg2') {
+    const url = $('eg2-url').value.trim() || settings.eg2?.url || DEFAULT_SETTINGS.eg2.url;
+    setStatus('judge-status', t('opt.eg2.connecting'), true);
+    const res = await checkEg2Health({ url });
+    if (res.ok) {
+      setStatus('judge-status', t('opt.eg2.testOk', { status: res.status }), true);
+    } else {
+      setStatus('judge-status', t('opt.eg2.testFailed', { error: res.error || 'unreachable' }), false);
+    }
+    return;
+  }
   if (!judge.apiKey) {
     setStatus('judge-status', t('opt.judge.enterKey'), false);
     return;
