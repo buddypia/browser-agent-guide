@@ -31,7 +31,7 @@ import {
 } from '../lib/workflow.js';
 import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18n.js';
 import { matchAffordanceFastPath, resolveFastPathAction } from '../lib/eg2-client.js';
-import { isJudgeReady, callJudgeChoice } from '../lib/judge-client.js';
+import { isJudgeReady, callJudgeChoice, callJudgeVisualCheck } from '../lib/judge-client.js';
 
 // ---- 設定ブロブのメモリキャッシュ ----
 // 1メッセージ処理で getSettings が複数回(例: handleMessage 冒頭の ensureI18n と
@@ -682,6 +682,37 @@ async function driveWorkflow(tabId) {
       }
     }
 
+    // 3b) 視覚・画面状態確認(スクリーンショットを撮り System 1 (Jev または eg2) で判定)
+    //     不変条件: 対象タブが読込完了かつアクティブなときだけ撮影し、入力欄の値は透明マスクして送らない。
+    if (structured && step.check.type === 'visual' && step.check.value) {
+      const goal = applyVars(step.check.value, run.vars);
+      try {
+        const curTab = (await waitForTab(tabId, (x) => x.status === 'complete', WF_LOAD_WAIT_MS)) || (await getTab(tabId)) || tab;
+        if (!curTab?.active) {
+          return stop('failed', t('sw.wf.failed', { n, error: t('sw.err.captureTabNotActive') }));
+        }
+        await ensureContentAndSend(tabId, { type: 'PREPARE_VISUAL_CHECK' });
+        let shot;
+        try {
+          shot = await chrome.tabs.captureVisibleTab(curTab.windowId, { format: 'png' });
+        } finally {
+          await ensureContentAndSend(tabId, { type: 'FINISH_VISUAL_CHECK' }).catch(() => {});
+        }
+        const vRes = await callJudgeVisualCheck({
+          judge: settings.judge,
+          eg2: settings.eg2,
+          imageDataUrl: shot,
+          goal,
+        });
+        if (!vRes.passed) {
+          const pct = `${Math.round((vRes.probability || 0) * 100)}%`;
+          return stop('failed', t('sw.wf.failed', { n, error: t('sw.wf.checkVisual', { goal, pct, model: vRes.model || '' }) }));
+        }
+      } catch (e) {
+        return stop('failed', t('sw.wf.failed', { n, error: t('sw.wf.aiError', { error: String(e?.message || e) }) }));
+      }
+    }
+
     // 4) 前進(途中で停止されていたら記録しない)
     const latest = await readWorkflowRun();
     if (!latest.active) return;
@@ -712,12 +743,12 @@ function uniqueCandidateByText(candidates, text) {
   return hits.length === 1 ? hits[0] : null;
 }
 
-// AI に候補キーを1つ選ばせる(閉じた選択)。判断AI(Jev)が設定済みならそれを使い、確率で
+// AI に候補キーを1つ選ばせる(閉じた選択)。判断AI(Jev / eg2)が設定済みならそれを使い、確信度で
 // 「選んで進む / 人間に確認する(choice:'hold', key=最有力)」を分ける。未設定なら従来どおり LLM。
 // 記録した要素が無い(missing)時の差し替えはページ全体から候補を拾うので、確信度に関わらず確認に回す。
 async function chooseCandidateWithAI({ settings, step, candidates, reason, url, title }) {
   if (isJudgeReady(settings.judge)) {
-    const r = await callJudgeChoice({ judge: settings.judge, step, candidates, reason, url, title });
+    const r = await callJudgeChoice({ judge: settings.judge, eg2: settings.eg2, step, candidates, reason, url, title });
     const pct = (p) => `${Math.round(p * 100)}%`;
     const model = r.model || settings.judge.model;
     if (!r.best || (r.confident && r.choice === 'none')) return { choice: 'none', reason: t('sw.wf.judgeNone', { pct: pct(r.probability), model }) };

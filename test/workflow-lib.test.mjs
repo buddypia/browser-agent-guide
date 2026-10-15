@@ -535,4 +535,18 @@ const ok = (name) => {
   ok('deleteSavedWorkflow は指定ワークフローを削除しアクティブ状態を適切に更新する');
 }
 
+// (26) check.type === 'visual' の正規化と変数({name})展開。
+{
+  const s = normalizeStep({
+    id: 'v1',
+    url: 'https://shop.example.com/cart',
+    action: { verb: 'click' },
+    check: { type: 'visual', value: '{item} がカートに入り画面崩れがない' },
+  });
+  assert.deepEqual(s.check, { type: 'visual', value: '{item} がカートに入り画面崩れがない' });
+  assert.deepEqual(stepVariables([s]), ['item']);
+  assert.equal(resolveStepVars(s, { item: 'ケーブル' }).check.value, 'ケーブル がカートに入り画面崩れがない');
+  ok('check.type === "visual" はそのまま保持され変数展開に対応する');
+}
+
 console.log(`\n${passed} passed`);

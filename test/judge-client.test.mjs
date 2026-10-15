@@ -10,6 +10,7 @@ import {
   parseJudgeAnswer,
   judgeMinConfidence,
   callJudgeChoice,
+  callJudgeVisualCheck,
 } from '../lib/judge-client.js';
 import { DEFAULT_SETTINGS } from '../lib/storage.js';
 import { normalizeRun, normalizeStep } from '../lib/workflow.js';
@@ -43,7 +44,8 @@ async function run() {
     assert.equal(isJudgeReady(DEFAULT_JUDGE), false);
     assert.equal(isJudgeReady({ provider: 'jev', apiKey: '' }), false);
     assert.equal(isJudgeReady({ provider: 'jev', apiKey: 'k' }), true);
-    ok('judge is opt-in and needs a key');
+    assert.equal(isJudgeReady({ provider: 'eg2', apiKey: '' }), true);
+    ok('judge is opt-in and supports jev (with key) and eg2');
   }
 
   // キーを送るので https 以外は拒否する。
@@ -160,6 +162,149 @@ async function run() {
     const failing = async () => ({ ok: false, status: 401, text: async () => 'unauthorized' });
     await assert.rejects(() => callJudgeChoice({ judge, step: pickStep, candidates, reason: 'none', fetchImpl: failing }), /401/);
     ok('callJudgeChoice posts to /systemone and surfaces HTTP errors');
+  }
+
+  // provider: 'eg2' の候補選択: 高類似度・僅差(保留)・低類似度(none)・秘密の入力値除外・障害時例外
+  {
+    const seenBodies = [];
+    const makeEg2Fetch = (docVecs) => async (_url, init) => {
+      const body = JSON.parse(init.body);
+      seenBodies.push(body);
+      if (body.input_type === 'query') {
+        return { ok: true, json: async () => ({ data: [{ index: 0, embedding: [1, 0] }] }) };
+      }
+      return {
+        ok: true,
+        json: async () => ({ data: docVecs.map((v, i) => ({ index: i, embedding: v })) }),
+      };
+    };
+    const judge = { ...DEFAULT_JUDGE, provider: 'eg2', minConfidence: 0.7 };
+    const eg2 = { url: 'http://127.0.0.1:38765', model: '270m' };
+
+    // 1) 高類似度で c1 を選ぶ
+    const rHigh = await callJudgeChoice({
+      judge,
+      eg2,
+      step: { ...pickStep, action: { verb: 'fill', value: 'top-secret-pw' } },
+      candidates,
+      reason: 'none',
+      fetchImpl: makeEg2Fetch([
+        [0.1, 0.99],
+        [0.98, 0.2],
+      ]),
+    });
+    assert.equal(rHigh.choice, 'c1');
+    assert.equal(rHigh.confident, true);
+    assert.equal(rHigh.best, 'c1');
+    assert.equal(rHigh.model, 'eg2-270m');
+    assert.ok(!JSON.stringify(seenBodies).includes('top-secret-pw'), 'secret action.value must not be sent to eg2');
+
+    // 2) 僅差で迷う場合は confident: false で best を返す
+    const rTie = await callJudgeChoice({
+      judge,
+      eg2,
+      step: pickStep,
+      candidates: candidates.slice(0, 2),
+      reason: 'ambiguous',
+      fetchImpl: makeEg2Fetch([
+        [0.95, 0.31],
+        [0.94, 0.34],
+      ]),
+    });
+    assert.equal(rTie.confident, false);
+    assert.equal(rTie.best, 'c0');
+
+    // 3) どの候補とも似ていない (< 0.35) 場合は choice: 'none', confident: true
+    const rNone = await callJudgeChoice({
+      judge,
+      eg2,
+      step: pickStep,
+      candidates: candidates.slice(0, 2),
+      reason: 'none',
+      fetchImpl: makeEg2Fetch([
+        [0.1, 0.99],
+        [0.2, 0.98],
+      ]),
+    });
+    assert.equal(rNone.choice, 'none');
+    assert.equal(rNone.confident, true);
+
+    // 4) eg2 エラーは「該当なし」と誤読せず例外にする
+    const failingEg2 = async () => ({ ok: false, status: 500, text: async () => 'eg2 down' });
+    await assert.rejects(() => callJudgeChoice({ judge, eg2, step: pickStep, candidates, reason: 'none', fetchImpl: failingEg2 }), /eg2/);
+    ok('callJudgeChoice supports provider eg2 with confidence/margin gating and secret-free queries');
+  }
+
+  // callJudgeVisualCheck: Jev マルチモーダル と eg2 /v1/evaluate の両方で視覚・UI崩れ判定ができる
+  {
+    let jevReq;
+    const jevFetch = async (url, init) => {
+      jevReq = { url, headers: init.headers, body: JSON.parse(init.body) };
+      return {
+        ok: true,
+        json: async () => ({
+          model: 'jev-1.14.0',
+          answers: { visual: { choice: 'pass', probabilities: { pass: 0.91, fail: 0.09 } } },
+        }),
+      };
+    };
+    const vJev = await callJudgeVisualCheck({
+      judge: { ...DEFAULT_JUDGE, provider: 'jev', apiKey: 'k', minConfidence: 0.7 },
+      imageDataUrl: 'data:image/png;base64,AAAA',
+      goal: 'モーダルが閉じ、画面崩れがない',
+      fetchImpl: jevFetch,
+    });
+    assert.equal(vJev.passed, true);
+    assert.equal(vJev.provider, 'jev');
+    assert.equal(jevReq.headers['TypeSafe-Danger-Zone-Images'], 'true');
+    assert.equal(jevReq.body.assets['<image:page>'].url, 'data:image/png;base64,AAAA');
+
+    let eg2Req;
+    const eg2Fetch = async (url, init) => {
+      eg2Req = { url, body: JSON.parse(init.body) };
+      return {
+        ok: true,
+        json: async () => ({ choice: 'fail', score: 0.88, scores: { pass: 0.12, fail: 0.88 } }),
+      };
+    };
+    const vEg2 = await callJudgeVisualCheck({
+      judge: { ...DEFAULT_JUDGE, provider: 'eg2', minConfidence: 0.7 },
+      eg2: { url: 'http://127.0.0.1:38765' },
+      imageDataUrl: 'data:image/png;base64,BBBB',
+      goal: 'エラーバナーが出ていない',
+      fetchImpl: eg2Fetch,
+    });
+    assert.equal(vEg2.passed, false);
+    assert.equal(vEg2.provider, 'eg2');
+    assert.equal(eg2Req.url, 'http://127.0.0.1:38765/v1/evaluate');
+    assert.deepEqual(eg2Req.body.images, ['BBBB']);
+
+    // provider: 'llm' でも eg2.enabled: true ならローカル eg2 にフォールバックする
+    const vFallback = await callJudgeVisualCheck({
+      judge: { ...DEFAULT_JUDGE, provider: 'llm', minConfidence: 0.7 },
+      eg2: { enabled: true, url: 'http://127.0.0.1:38765' },
+      imageDataUrl: 'data:image/png;base64,CCCC',
+      goal: '正常表示',
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ choice: 'pass', score: 0.92, scores: { pass: 0.92, fail: 0.08 } }),
+      }),
+    });
+    assert.equal(vFallback.passed, true);
+    assert.equal(vFallback.provider, 'eg2');
+
+    // Jev も eg2 も未設定なら例外にする
+    await assert.rejects(
+      () =>
+        callJudgeVisualCheck({
+          judge: { ...DEFAULT_JUDGE, provider: 'llm' },
+          eg2: { enabled: false },
+          imageDataUrl: 'data:image/png;base64,DDDD',
+          goal: '正常表示',
+        }),
+      /視覚確認/
+    );
+    ok('callJudgeVisualCheck supports both Jev multimodal, eg2 fallback, and unconfigured error');
   }
 
   // 実行セッション/手順メモの新フィールドは保存形を往復できる。
