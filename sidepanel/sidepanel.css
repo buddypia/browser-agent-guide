@@ -10,7 +10,9 @@
   --accent-hover: #9c2914;
   --accent-soft: #f6dfd8;
   --ok: #2f7a4b;
+  --ok-soft: #e3f1e7;
   --err: #b42318;
+  --err-soft: #fbe4e0;
   --warn-bg: #fbf0d5;
   --warn-text: #6b4700;
   --wf: #5a3fa0;
@@ -18,6 +20,78 @@
   --border: #d9d2c4;
   --border-strong: #b8ae9c;
   --shadow: 0 10px 30px rgba(40, 30, 10, 0.14);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #181715;
+    --panel: #1e1d19;
+    --panel-2: #272520;
+    --panel-3: #32302a;
+    --text: #f0ede6;
+    --muted: #a8a295;
+    --accent: #f26a50;
+    --accent-btn: #b9321b;
+    --accent-btn-hover: #9c2914;
+    --accent-hover: #f0684e;
+    --accent-soft: rgba(242, 106, 80, 0.2);
+    --ok: #48a86c;
+    --ok-soft: rgba(72, 168, 108, 0.2);
+    --err: #f87171;
+    --err-soft: rgba(248, 113, 113, 0.2);
+    --warn-bg: #3d2f10;
+    --warn-text: #fcd34d;
+    --wf: #9d80e8;
+    --wf-soft: rgba(157, 128, 232, 0.2);
+    --border: #3d3932;
+    --border-strong: #575147;
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #181715;
+  --panel: #1e1d19;
+  --panel-2: #272520;
+  --panel-3: #32302a;
+  --text: #f0ede6;
+  --muted: #a8a295;
+  --accent: #f26a50;
+  --accent-btn: #b9321b;
+  --accent-btn-hover: #9c2914;
+  --accent-hover: #f0684e;
+  --accent-soft: rgba(242, 106, 80, 0.2);
+  --ok: #48a86c;
+  --ok-soft: rgba(72, 168, 108, 0.2);
+  --err: #f87171;
+  --err-soft: rgba(248, 113, 113, 0.2);
+  --warn-bg: #3d2f10;
+  --warn-text: #fcd34d;
+  --wf: #9d80e8;
+  --wf-soft: rgba(157, 128, 232, 0.2);
+  --border: #3d3932;
+  --border-strong: #575147;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -41,7 +115,6 @@ body {
   overflow-x: hidden;
   background: var(--bg);
   color: var(--text);
-  color-scheme: light;
   font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif;
 }
 
@@ -686,8 +759,8 @@ textarea:focus-visible {
   gap: 6px;
   width: 100%;
   min-height: 36px;
-  border: 1px solid var(--accent);
-  background: var(--accent);
+  border: 1px solid var(--accent-btn, var(--accent));
+  background: var(--accent-btn, var(--accent));
   color: #ffffff;
   border-radius: 8px;
   font-size: 13px;
@@ -696,8 +769,8 @@ textarea:focus-visible {
 }
 
 .anno-capture:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: var(--accent-btn-hover, var(--accent-hover));
+  border-color: var(--accent-btn-hover, var(--accent-hover));
 }
 
 .anno-capture:disabled {
@@ -770,7 +843,7 @@ textarea:focus-visible {
 }
 
 .anno-target {
-  opacity: 0.86;
+  opacity: 0.95;
 }
 
 .anno-warn {
@@ -1126,7 +1199,7 @@ textarea:focus-visible {
 }
 
 .msg.error .bubble {
-  background: #fbe4e0;
+  background: var(--err-soft);
   color: var(--err);
   border: 1px solid rgba(180, 35, 24, 0.32);
 }
@@ -1231,8 +1304,9 @@ textarea:focus-visible {
 }
 
 .composer > button:hover {
-  background: #000;
-  border-color: #000;
+  /* 文字色(--panel-2)との対比を保ったまま一段沈める。#000 固定だとダークで文字が見えなくなる。 */
+  background: color-mix(in srgb, var(--text) 82%, #000);
+  border-color: color-mix(in srgb, var(--text) 82%, #000);
 }
 
 .composer > button:disabled {
@@ -1393,7 +1467,7 @@ textarea:focus-visible {
 }
 
 .workflow-autorun-btn:hover {
-  background: #e3f1e7;
+  background: var(--ok-soft);
 }
 
 .workflow-autorun-btn:disabled {
@@ -1414,10 +1488,56 @@ textarea:focus-visible {
   color: var(--err);
 }
 
+.workflow-manage {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.workflow-select-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.workflow-select {
+  min-width: 0;
+  width: 100%;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.workflow-new-btn {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 8px;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.workflow-new-btn:hover {
+  background: var(--panel-3);
+  border-color: var(--border-strong);
+}
+
+.workflow-name-row,
 .workflow-save {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 6px;
+  align-items: center;
 }
 
 .workflow-name {
@@ -1442,6 +1562,7 @@ textarea:focus-visible {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .workflow-save-btn:hover {
@@ -1451,6 +1572,45 @@ textarea:focus-visible {
 .workflow-save-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.workflow-foot-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.workflow-save-copy-btn {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.workflow-save-copy-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--panel-3);
+}
+
+.workflow-save-copy-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.workflow-active-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--wf);
+  background: var(--wf-soft);
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
 }
 
 .workflow-saved {
@@ -1492,6 +1652,19 @@ textarea:focus-visible {
 .workflow-saved-item button:hover {
   background: var(--panel-2);
   border-radius: 6px;
+}
+
+.workflow-saved-item.is-active {
+  background: var(--panel-3);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+
+.workflow-saved-item .wf-saved-load:disabled {
+  color: var(--wf);
+  font-weight: 700;
+  cursor: default;
+  opacity: 0.9;
 }
 
 /* ── Redesign: action-first empty state ───────────────────────────────── */

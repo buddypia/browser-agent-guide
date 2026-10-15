@@ -314,6 +314,48 @@ test.describe('UI quality gates', () => {
     await expect(page.locator('#btn-workspace-memo')).toBeFocused();
   });
 
+  test('switching saved workflows asks before discarding unsaved steps', async ({ page }) => {
+    const step = (id, target) => ({
+      kind: 'action', id, url: 'https://example.com/app', matchType: 'page', pattern: 'https://example.com/app', text: '',
+      target, action: { verb: 'click', value: '' }, locator: { kind: 'fixed', anchor: { selector: `#${id}`, tag: 'button', role: 'button', text: target } },
+    });
+    await installChromeMock(page, {
+      aiAdvisorWorkflow: { recording: false, steps: [step('u1', 'Unsaved')], saved: [{ id: 'wf-a', name: 'Flow A', createdAt: '', steps: [step('a1', 'Saved A')] }] },
+    });
+    await page.setViewportSize({ width: 360, height: 900 });
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+    await page.locator('#btn-workspace-workflow').click();
+    const stored = () => page.evaluate(async () => (await chrome.storage.local.get('aiAdvisorWorkflow')).aiAdvisorWorkflow);
+    const select = page.locator('#workflow-select');
+
+    // 保存先の無い手順は、確認で断れば残る。
+    page.once('dialog', (d) => d.dismiss());
+    await select.selectOption('wf-a');
+    await expect(select).toHaveValue('');
+    expect((await stored()).steps.map((s) => s.id)).toEqual(['u1']);
+
+    page.once('dialog', (d) => d.accept());
+    await select.selectOption('wf-a');
+    await expect.poll(async () => (await stored()).steps.map((s) => s.id)).toEqual(['a1']);
+
+    // content script が作業中の手順だけに足した手順(メモ等)は未保存の変更。切り替えるなら確かめ、断れば残る。
+    await page.evaluate(async (s) => {
+      const { aiAdvisorWorkflow: wf } = await chrome.storage.local.get('aiAdvisorWorkflow');
+      await chrome.storage.local.set({ aiAdvisorWorkflow: { ...wf, steps: [...wf.steps, s] } });
+    }, step('m1', 'Memo'));
+    page.once('dialog', (d) => d.dismiss());
+    await select.selectOption('');
+    await expect(select).toHaveValue('wf-a');
+    expect((await stored()).steps.map((s) => s.id)).toEqual(['a1', 'm1']);
+    // 保存済みの A は「更新」を押すまで変わらない。
+    expect((await stored()).saved.find((w) => w.id === 'wf-a').steps.map((s) => s.id)).toEqual(['a1']);
+    await page.locator('#btn-workflow-save').click();
+    await expect.poll(async () => (await stored()).saved.find((w) => w.id === 'wf-a').steps.map((s) => s.id)).toEqual(['a1', 'm1']);
+    // 保存後は未保存の変更が無いので、確認なしで切り替わる。
+    await select.selectOption('');
+    await expect.poll(async () => (await stored()).steps.length).toBe(0);
+  });
+
   test('side panel shows structured workflow steps at side-panel width and passes axe', async ({ page }, testInfo) => {
     const anchor = (selector, text) => ({ selector, tag: 'button', role: 'button', text });
     const base = { kind: 'action', url: 'https://example.com/app', matchType: 'page', pattern: 'https://example.com/app', text: '' };
@@ -570,8 +612,9 @@ test.describe('UI quality gates', () => {
   test('options page passes axe on the default settings state', async ({ page }, testInfo) => {
     await page.goto(pageUrl('options/options.html'));
 
-    // 既定の言語はブラウザ UI 言語依存。テストを決定的にするため日本語へ切り替えて検証する。
+    // 既定の言語・テーマはブラウザ UI 環境依存。テストを決定的にするため日本語・ライトへ切り替えて検証する。
     await page.locator('#ui-language').selectOption('ja');
+    await page.locator('#theme-select').selectOption('light');
 
     await expect(page.getByRole('heading', { name: 'Browser Agent Guide 設定' })).toBeVisible();
     await expect(page.getByLabel('プロバイダ')).toBeVisible();
@@ -581,6 +624,12 @@ test.describe('UI quality gates', () => {
     await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(245, 242, 236)');
     await page.screenshot({ path: testInfo.outputPath('options-paper.png'), fullPage: true });
 
+    await expectNoAxeViolations(page);
+
+    // ダークテーマへの切替と axe 適合も検証する。
+    await page.locator('#theme-select').selectOption('dark');
+    await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(24, 23, 21)');
+    await expect(page.locator('#save-daemon')).toHaveCSS('background-color', 'rgb(240, 237, 230)');
     await expectNoAxeViolations(page);
   });
 });

@@ -11,16 +11,26 @@
       <header class="page-head">
         <div class="page-head-row">
           <h1 data-i18n="opt.docTitle">Browser Agent Guide 設定</h1>
-          <label class="lang-field">
-            <span data-i18n="language.label">言語</span>
-            <select id="ui-language" aria-label="Language" data-i18n-aria-label="language.label">
-              <option value="auto" data-i18n="language.auto">自動（ブラウザ）</option>
-              <option value="en">English</option>
-              <option value="ko">한국어</option>
-              <option value="ja">日本語</option>
-              <option value="zh">中文</option>
-            </select>
-          </label>
+          <div class="head-controls">
+            <label class="lang-field" for="theme-select">
+              <span data-i18n="opt.ui.theme">テーマ</span>
+              <select id="theme-select" aria-label="Theme" data-i18n-aria-label="opt.ui.theme">
+                <option value="system" data-i18n="opt.ui.themeSystem">システム (自動)</option>
+                <option value="light" data-i18n="opt.ui.themeLight">ライト</option>
+                <option value="dark" data-i18n="opt.ui.themeDark">ダーク</option>
+              </select>
+            </label>
+            <label class="lang-field" for="ui-language">
+              <span data-i18n="language.label">言語</span>
+              <select id="ui-language" aria-label="Language" data-i18n-aria-label="language.label">
+                <option value="auto" data-i18n="language.auto">自動（ブラウザ）</option>
+                <option value="en">English</option>
+                <option value="ko">한국어</option>
+                <option value="ja">日本語</option>
+                <option value="zh">中文</option>
+              </select>
+            </label>
+          </div>
         </div>
         <p data-i18n="opt.head.desc">AI接続、保存範囲、ページごとの記憶ルールを管理します。</p>
       </header>
