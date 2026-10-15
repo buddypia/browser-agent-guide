@@ -278,7 +278,33 @@ async function run() {
     assert.equal(vEg2.provider, 'eg2');
     assert.equal(eg2Req.url, 'http://127.0.0.1:38765/v1/evaluate');
     assert.deepEqual(eg2Req.body.images, ['BBBB']);
-    ok('callJudgeVisualCheck supports both Jev multimodal and eg2 /v1/evaluate');
+
+    // provider: 'llm' でも eg2.enabled: true ならローカル eg2 にフォールバックする
+    const vFallback = await callJudgeVisualCheck({
+      judge: { ...DEFAULT_JUDGE, provider: 'llm', minConfidence: 0.7 },
+      eg2: { enabled: true, url: 'http://127.0.0.1:38765' },
+      imageDataUrl: 'data:image/png;base64,CCCC',
+      goal: '正常表示',
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ choice: 'pass', score: 0.92, scores: { pass: 0.92, fail: 0.08 } }),
+      }),
+    });
+    assert.equal(vFallback.passed, true);
+    assert.equal(vFallback.provider, 'eg2');
+
+    // Jev も eg2 も未設定なら例外にする
+    await assert.rejects(
+      () =>
+        callJudgeVisualCheck({
+          judge: { ...DEFAULT_JUDGE, provider: 'llm' },
+          eg2: { enabled: false },
+          imageDataUrl: 'data:image/png;base64,DDDD',
+          goal: '正常表示',
+        }),
+      /視覚確認/
+    );
+    ok('callJudgeVisualCheck supports both Jev multimodal, eg2 fallback, and unconfigured error');
   }
 
   // 実行セッション/手順メモの新フィールドは保存形を往復できる。

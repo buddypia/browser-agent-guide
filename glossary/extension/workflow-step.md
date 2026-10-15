@@ -52,8 +52,7 @@ confidence: medium
   同じ。承認までに一覧が並び替わりうるため)。AI が選んだ候補を一意に示せない(テキスト無し/同じ表記が複数)時は
   保留せず止める。外部 AI へ手順の入力値も、入力欄の今の値も送らない(`labelOf` は `value` 属性=ページの初期値だけを使う)。
 - `check.type` は `none | url | text | appears | visual`。URL は `urlPattern`(`:id` 汎化)で照合し、
-  `visual` はステップ実行後にタブのスクリーンショットを撮り、`callJudgeVisualCheck`(Jev マルチモーダルまたは
-  eg2 `POST /v1/evaluate`)で画面状態・UI崩れやエラー表示の有無を検証する。
+  `visual` はステップ実行後にタブの読込完了・アクティブ状態を確認し、`PREPARE_VISUAL_CHECK` で入力欄(`input`/`textarea`/`contenteditable`)のライブ値を透明マスクした上でスクリーンショットを撮り、`callJudgeVisualCheck`(Jev マルチモーダルまたは eg2 `POST /v1/evaluate`)で画面状態・UI崩れやエラー表示の有無を検証する。
 - `gate: true`(確定系ラベルは自動付与)の手順は承認まで `held` で止まる。
 
 実行は SW の `driveWorkflow` が1手ずつ: ページ合わせ → `RUN_STEP`(content の `runStep`)→ 確認 →

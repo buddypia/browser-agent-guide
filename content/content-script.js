@@ -5029,6 +5029,28 @@
         case 'FINISH_CAPTURE':
           document.documentElement.classList.remove('bag-capturing');
           return { ok: true };
+        case 'PREPARE_VISUAL_CHECK': {
+          // 視覚確認(check.type==='visual')の撮影直前: 自前UIを隠し、入力欄(input/textarea/contenteditable)の
+          // ライブ値を透明マスクして「手順の入力値も現在の入力値も judge へ送らない」不変条件を守る。
+          let mask = document.getElementById('bag-visual-mask');
+          if (!mask) {
+            mask = document.createElement('style');
+            mask.id = 'bag-visual-mask';
+            mask.setAttribute(ATTR.ui, '1');
+            mask.textContent =
+              'input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]),' +
+              'textarea,[contenteditable="true"],[contenteditable=""]{' +
+              'color:transparent !important;-webkit-text-fill-color:transparent !important;text-shadow:none !important;}';
+            (document.head || document.documentElement).appendChild(mask);
+          }
+          document.documentElement.classList.add('bag-capturing');
+          await nextFrames(2);
+          return { ok: true };
+        }
+        case 'FINISH_VISUAL_CHECK':
+          document.getElementById('bag-visual-mask')?.remove();
+          document.documentElement.classList.remove('bag-capturing');
+          return { ok: true };
         case 'ACTIVATE': {
           annotatePage();
           collectReferenceTargets();

@@ -509,6 +509,15 @@ test.describe('判断AI(Jev / eg2) E2E (拡張ロード)', () => {
     } finally {
       state.visualPass = true;
     }
+
+    // 3) 対象タブが非アクティブな場合は別タブの画面を誤って撮影せず、失敗停止する
+    await extPage.bringToFront();
+    const callsBeforeInactive = state.jevCalls.length;
+    await extPage.evaluate(() => (window.__autorun.length = 0));
+    expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+    await expect.poll(async () => (await runOf())?.active, { timeout: 15_000 }).toBe(false);
+    expect((await runOf()).doneStepIds).toEqual([]);
+    expect(state.jevCalls.length).toBe(callsBeforeInactive);
     await page.close();
   });
 });

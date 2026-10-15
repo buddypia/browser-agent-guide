@@ -683,11 +683,21 @@ async function driveWorkflow(tabId) {
     }
 
     // 3b) 視覚・画面状態確認(スクリーンショットを撮り System 1 (Jev または eg2) で判定)
+    //     不変条件: 対象タブが読込完了かつアクティブなときだけ撮影し、入力欄の値は透明マスクして送らない。
     if (structured && step.check.type === 'visual' && step.check.value) {
       const goal = applyVars(step.check.value, run.vars);
       try {
-        const curTab = (await getTab(tabId)) || tab;
-        const shot = await chrome.tabs.captureVisibleTab(curTab.windowId, { format: 'png' });
+        const curTab = (await waitForTab(tabId, (x) => x.status === 'complete', WF_LOAD_WAIT_MS)) || (await getTab(tabId)) || tab;
+        if (!curTab?.active) {
+          return stop('failed', t('sw.wf.failed', { n, error: t('sw.err.captureTabNotActive') }));
+        }
+        await ensureContentAndSend(tabId, { type: 'PREPARE_VISUAL_CHECK' });
+        let shot;
+        try {
+          shot = await chrome.tabs.captureVisibleTab(curTab.windowId, { format: 'png' });
+        } finally {
+          await ensureContentAndSend(tabId, { type: 'FINISH_VISUAL_CHECK' }).catch(() => {});
+        }
         const vRes = await callJudgeVisualCheck({
           judge: settings.judge,
           eg2: settings.eg2,
