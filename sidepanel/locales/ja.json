@@ -400,7 +400,7 @@
   "workflow.activeBadge": "選択中",
   "workflow.recordingNamed": "記録中: {name}",
   "workflow.deleteConfirm": "ワークフロー「{name}」を削除しますか？",
-  "workflow.discardConfirm": "保存していない現在の手順を破棄しますか? 残す場合は先に保存してください。",
+  "workflow.discardConfirm": "現在の手順の未保存の変更を破棄しますか? 残す場合は先に保存してください。",
   "workflow.hint": "記録中: ページでのクリック・入力・選択がそのまま手順になります(メモも手順として残せます)。実行時は1手ずつ決定的に再生します。",
   "workflow.clearTitle": "記録した手順を消去",
   "workflow.clearConfirm": "記録した手順をすべて消去しますか？",

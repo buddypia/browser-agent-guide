@@ -314,7 +314,7 @@ test.describe('UI quality gates', () => {
     await expect(page.locator('#btn-workspace-memo')).toBeFocused();
   });
 
-  test('switching saved workflows keeps unsaved and newly recorded steps', async ({ page }) => {
+  test('switching saved workflows asks before discarding unsaved steps', async ({ page }) => {
     const step = (id, target) => ({
       kind: 'action', id, url: 'https://example.com/app', matchType: 'page', pattern: 'https://example.com/app', text: '',
       target, action: { verb: 'click', value: '' }, locator: { kind: 'fixed', anchor: { selector: `#${id}`, tag: 'button', role: 'button', text: target } },
@@ -338,13 +338,22 @@ test.describe('UI quality gates', () => {
     await select.selectOption('wf-a');
     await expect.poll(async () => (await stored()).steps.map((s) => s.id)).toEqual(['a1']);
 
-    // content script が作業中の手順だけに足した手順(メモ等)は、切り替えると選択中のエントリへ書き戻される。
+    // content script が作業中の手順だけに足した手順(メモ等)は未保存の変更。切り替えるなら確かめ、断れば残る。
     await page.evaluate(async (s) => {
       const { aiAdvisorWorkflow: wf } = await chrome.storage.local.get('aiAdvisorWorkflow');
       await chrome.storage.local.set({ aiAdvisorWorkflow: { ...wf, steps: [...wf.steps, s] } });
     }, step('m1', 'Memo'));
+    page.once('dialog', (d) => d.dismiss());
     await select.selectOption('');
+    await expect(select).toHaveValue('wf-a');
+    expect((await stored()).steps.map((s) => s.id)).toEqual(['a1', 'm1']);
+    // 保存済みの A は「更新」を押すまで変わらない。
+    expect((await stored()).saved.find((w) => w.id === 'wf-a').steps.map((s) => s.id)).toEqual(['a1']);
+    await page.locator('#btn-workflow-save').click();
     await expect.poll(async () => (await stored()).saved.find((w) => w.id === 'wf-a').steps.map((s) => s.id)).toEqual(['a1', 'm1']);
+    // 保存後は未保存の変更が無いので、確認なしで切り替わる。
+    await select.selectOption('');
+    await expect.poll(async () => (await stored()).steps.length).toBe(0);
   });
 
   test('side panel shows structured workflow steps at side-panel width and passes axe', async ({ page }, testInfo) => {

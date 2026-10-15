@@ -9,6 +9,7 @@ import {
   saveWorkflow as libSaveWorkflow,
   setActiveWorkflow as libSetActiveWorkflow,
   deleteSavedWorkflow as libDeleteSavedWorkflow,
+  hasUnsavedSteps as libHasUnsavedSteps,
 } from '../lib/workflow.js';
 import { createI18n, DEFAULT_LOCALE, LANGUAGE_OPTIONS, languageName, localeToIntl, normalizeLocale, resolveLocale } from './i18n.js';
 
@@ -1764,10 +1765,6 @@ async function updateWorkflowStep(stepId, patch) {
   renderWorkflow(
     await mutateWorkflow((w) => {
       w.steps = w.steps.map((s) => (s.id === stepId ? { ...s, ...(typeof patch === 'function' ? patch(s) : patch) } : s));
-      if (w.activeId) {
-        const idx = w.saved.findIndex((x) => x.id === w.activeId);
-        if (idx >= 0) w.saved[idx].steps = w.steps.slice();
-      }
       return w;
     })
   );
@@ -2122,12 +2119,11 @@ async function removeWorkflowStep(stepId) {
   );
 }
 
-// 切替・新規で作業中の手順を置き換えてよいか。選択中のエントリが無い手順は書き戻し先が無いので確かめる。
+// 切替・新規で作業中の手順を置き換えてよいか。未保存の変更があれば捨ててよいか確かめる。
 // 自動実行中は実行対象の手順が差し替わるので切り替えない。
 async function canReplaceWorkingSteps() {
   if (state.workflowRun?.active) return false;
-  const current = await readWorkflow();
-  return current.activeId || !current.steps.length || confirm(t('workflow.discardConfirm'));
+  return !libHasUnsavedSteps(await readWorkflow()) || confirm(t('workflow.discardConfirm'));
 }
 
 async function createNewWorkflow() {

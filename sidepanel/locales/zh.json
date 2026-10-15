@@ -400,7 +400,7 @@
   "workflow.activeBadge": "当前选中",
   "workflow.recordingNamed": "录制中: {name}",
   "workflow.deleteConfirm": "确定要删除工作流“{name}”吗？",
-  "workflow.discardConfirm": "要丢弃当前未保存的步骤吗？如需保留，请先保存。",
+  "workflow.discardConfirm": "要丢弃当前步骤中未保存的更改吗？如需保留，请先保存。",
   "workflow.hint": "录制中：你在页面上的点击、输入和选择会直接成为步骤（也可以留下备注）。运行时逐步确定性地重放。",
   "workflow.clearTitle": "清除已记录的步骤",
   "workflow.clearConfirm": "要清除所有已记录的步骤吗？",

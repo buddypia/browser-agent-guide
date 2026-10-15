@@ -29,8 +29,8 @@ confidence: medium
 記録ワークフロー(`chrome.storage.local` キー `aiAdvisorWorkflow`)の1手順を、
 **対象(locator)・操作(action)・確認(check)** に分けた構造化データ。記録 ON 中の
 実際のクリック/入力/選択/チェックを content script がそのまま手順にする(観察記録)。
-名前付きで複数保存できる(`saved[]`、最大50件)。記録・メモ・学習候補は作業中の `steps` だけに書かれ、保存時と
-切替時(`setActiveWorkflow`)に選択中のエントリ(`activeId`)へ書き戻される。
+名前付きで複数保存できる(`saved[]`、最大50件)。記録・メモ・編集・学習候補は作業中の `steps` だけに書かれ、
+保存済みエントリは明示的な保存(`saveWorkflow`)でだけ変わる。未保存の変更(`hasUnsavedSteps`)を切替で捨てる前に確認する。
 
 - `action.verb` は閉じた集合 `click | fill | select | check`。`value` は `{name}` 変数を含められる
   (パスワードは値を保存せず `{password}` に置換)。

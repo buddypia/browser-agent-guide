@@ -40,6 +40,7 @@ import {
   saveWorkflow,
   setActiveWorkflow,
   deleteSavedWorkflow,
+  hasUnsavedSteps,
 } from '../lib/workflow.js';
 
 let passed = 0;
@@ -481,11 +482,14 @@ const ok = (name) => {
   assert.equal(wf.activeId, '');
   assert.equal(wf.name, '');
   assert.equal(wf.steps.length, 0);
-  // 作業中の手順(メモ等で足された分も)は、切り替える前に選択中のエントリへ書き戻される。
-  wf = setActiveWorkflow({ ...raw, steps: [...raw.steps, { id: 'm1', text: 'Memo' }] }, 'wf-b');
-  assert.deepEqual(wf.saved.find((w) => w.id === 'wf-a').steps.map((s) => s.id), ['s1', 'm1']);
-  wf = setActiveWorkflow(wf, 'wf-a');
-  assert.deepEqual(wf.steps.map((s) => s.id), ['s1', 'm1']);
+  // 保存済みエントリは切替では変わらない(明示的な保存だけが書く)。未保存の変更は hasUnsavedSteps で分かる。
+  const edited = { ...raw, steps: [...raw.steps, { id: 'm1', text: 'Memo' }] };
+  assert.equal(hasUnsavedSteps(raw), false);
+  assert.equal(hasUnsavedSteps(edited), true);
+  assert.equal(hasUnsavedSteps({ ...raw, activeId: '' }), true); // 保存先の無い手順
+  assert.equal(hasUnsavedSteps({ ...raw, activeId: '', steps: [] }), false);
+  wf = setActiveWorkflow(edited, 'wf-b');
+  assert.deepEqual(wf.saved.find((w) => w.id === 'wf-a').steps.map((s) => s.id), ['s1']);
   ok('setActiveWorkflow は対象ワークフローの切替と新規リセットを行う');
 }
 
@@ -508,12 +512,12 @@ const ok = (name) => {
   assert.equal(wf.activeId, 'wf-a');
   assert.equal(wf.steps.length, 1);
 
-  // アクティブの wf-a を削除 -> アクティブ解除・ステップクリア
+  // アクティブの wf-a を削除 -> 選択は外れるが、作業中の手順は未保存として残る
   wf = deleteSavedWorkflow(wf, 'wf-a');
   assert.equal(wf.saved.length, 0);
   assert.equal(wf.activeId, '');
-  assert.equal(wf.name, '');
-  assert.equal(wf.steps.length, 0);
+  assert.equal(wf.steps.length, 1);
+  assert.equal(hasUnsavedSteps(wf), true);
   ok('deleteSavedWorkflow は指定ワークフローを削除しアクティブ状態を適切に更新する');
 }
 

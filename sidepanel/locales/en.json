@@ -400,7 +400,7 @@
   "workflow.activeBadge": "Active",
   "workflow.recordingNamed": "Recording: {name}",
   "workflow.deleteConfirm": "Delete workflow “{name}”?",
-  "workflow.discardConfirm": "Discard the current unsaved steps? Save them first to keep them.",
+  "workflow.discardConfirm": "Discard unsaved changes to the current steps? Save first to keep them.",
   "workflow.hint": "Recording on: your clicks, typing and selections on the page become steps (notes too). Runs replay them deterministically, one step at a time.",
   "workflow.clearTitle": "Clear recorded steps",
   "workflow.clearConfirm": "Clear all recorded steps?",
