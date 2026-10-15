@@ -386,6 +386,33 @@ test.describe('UI quality gates', () => {
     expect(stored.saved.map((w) => w.id)).toEqual(saved.map((w) => w.id));
   });
 
+  test('switching workflows while a run waits for approval abandons that run', async ({ page }) => {
+    const step = { kind: 'action', id: 's1', url: 'https://example.com/app', matchType: 'page', pattern: 'https://example.com/app', text: '', target: 'Place order', action: { verb: 'click', value: '' } };
+    // コピーは手順 id を共有するので、切り替え後も保留中の手順が見つかってしまう組み合わせ。
+    const saved = [
+      { id: 'wf-a', name: 'Flow A', createdAt: '', steps: [step] },
+      { id: 'wf-b', name: 'Flow B', createdAt: '', steps: [step] },
+    ];
+    await installChromeMock(page, {
+      aiAdvisorWorkflow: { recording: false, activeId: 'wf-a', name: 'Flow A', steps: [step], saved },
+      aiAdvisorWorkflowRun: { active: false, doneStepIds: [], heldStepId: 's1', heldKind: 'gate', heldLabel: 'Place order' },
+    });
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+    await page.evaluate(() => {
+      window.__sentTypes = [];
+      const original = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = (message, callback) => {
+        window.__sentTypes.push(message?.type);
+        return original(message, callback);
+      };
+    });
+    await page.locator('#btn-workspace-workflow').click();
+    await expect(page.locator('#workflow-held')).toBeVisible();
+
+    await page.locator('#workflow-saved .workflow-saved-item').filter({ hasText: 'Flow B' }).locator('.wf-saved-load').click();
+    await expect.poll(() => page.evaluate(() => window.__sentTypes)).toContain('STOP_WORKFLOW_AUTORUN');
+  });
+
   test('side panel shows structured workflow steps at side-panel width and passes axe', async ({ page }, testInfo) => {
     const anchor = (selector, text) => ({ selector, tag: 'button', role: 'button', text });
     const base = { kind: 'action', url: 'https://example.com/app', matchType: 'page', pattern: 'https://example.com/app', text: '' };
