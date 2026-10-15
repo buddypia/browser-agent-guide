@@ -1304,8 +1304,9 @@ textarea:focus-visible {
 }
 
 .composer > button:hover {
-  background: #000;
-  border-color: #000;
+  /* 文字色(--panel-2)との対比を保ったまま一段沈める。#000 固定だとダークで文字が見えなくなる。 */
+  background: color-mix(in srgb, var(--text) 82%, #000);
+  border-color: color-mix(in srgb, var(--text) 82%, #000);
 }
 
 .composer > button:disabled {

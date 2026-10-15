@@ -1725,7 +1725,8 @@ function renderWorkflow(wf) {
     wf.saved.forEach((s) => {
       const opt = document.createElement('option');
       opt.value = s.id;
-      opt.textContent = `${s.name || t('workflow.untitled')} (${s.steps.length})`;
+      const count = s.id === wf.activeId ? wf.steps.length : s.steps.length; // 選択中は作業中の手順数
+      opt.textContent = `${s.name || t('workflow.untitled')} (${count})`;
       els.workflowSelect.appendChild(opt);
     });
     els.workflowSelect.value = wf.activeId || '';
@@ -1735,7 +1736,7 @@ function renderWorkflow(wf) {
     els.workflowSteps.innerHTML = '';
     wf.steps.forEach((s, i) => els.workflowSteps.appendChild(renderWorkflowStep(s, i + 1)));
   }
-  renderSavedWorkflows(wf.saved, wf.activeId);
+  renderSavedWorkflows(wf);
   renderWorkflowVars(wf);
   applyWorkspaceVisibility();
   // 手順数が変わると自動実行ボタンの可否も変わるので追従させる。
@@ -2034,7 +2035,7 @@ async function approveWorkflowStepNow() {
   await send({ type: 'APPROVE_WORKFLOW_STEP', tabId: state.tabId });
 }
 
-function renderSavedWorkflows(saved, activeId) {
+function renderSavedWorkflows({ saved, activeId, steps }) {
   if (!els.workflowSaved) return;
   els.workflowSaved.innerHTML = '';
   if (!saved.length) return;
@@ -2050,7 +2051,7 @@ function renderSavedWorkflows(saved, activeId) {
 
     const name = document.createElement('span');
     name.className = 'wf-name';
-    name.textContent = `${w.name || t('workflow.untitled')} (${w.steps.length})`;
+    name.textContent = `${w.name || t('workflow.untitled')} (${isActive ? steps.length : w.steps.length})`;
     name.title = name.textContent;
     row.appendChild(name);
 
@@ -2107,10 +2108,6 @@ async function clearWorkflowSteps() {
   renderWorkflow(
     await mutateWorkflow((w) => {
       w.steps = [];
-      if (w.activeId) {
-        const idx = w.saved.findIndex((x) => x.id === w.activeId);
-        if (idx >= 0) w.saved[idx].steps = [];
-      }
       return w;
     })
   );
@@ -2120,16 +2117,21 @@ async function removeWorkflowStep(stepId) {
   renderWorkflow(
     await mutateWorkflow((w) => {
       w.steps = w.steps.filter((s) => s.id !== stepId);
-      if (w.activeId) {
-        const idx = w.saved.findIndex((x) => x.id === w.activeId);
-        if (idx >= 0) w.saved[idx].steps = w.steps.slice();
-      }
       return w;
     })
   );
 }
 
+// 切替・新規で作業中の手順を置き換えてよいか。選択中のエントリが無い手順は書き戻し先が無いので確かめる。
+// 自動実行中は実行対象の手順が差し替わるので切り替えない。
+async function canReplaceWorkingSteps() {
+  if (state.workflowRun?.active) return false;
+  const current = await readWorkflow();
+  return current.activeId || !current.steps.length || confirm(t('workflow.discardConfirm'));
+}
+
 async function createNewWorkflow() {
+  if (!(await canReplaceWorkingSteps())) return renderWorkflow(state.workflow);
   const wf = await mutateWorkflow((w) => libSetActiveWorkflow(w, ''));
   if (els.workflowName) {
     els.workflowName.value = '';
@@ -2160,6 +2162,7 @@ async function saveCurrentWorkflow(asNew = false) {
 }
 
 async function loadSavedWorkflow(id) {
+  if (!(await canReplaceWorkingSteps())) return renderWorkflow(state.workflow);
   const wf = await mutateWorkflow((w) => libSetActiveWorkflow(w, id));
   renderWorkflow(wf);
   addMessage('assistant', t('workflow.loadedMsg'));
@@ -2169,6 +2172,7 @@ async function deleteSavedWorkflow(id) {
   const current = await readWorkflow();
   const target = current.saved.find((x) => x.id === id);
   const name = target?.name || t('workflow.untitled');
+  if (state.workflowRun?.active) return;
   if (!confirm(t('workflow.deleteConfirm', { name }))) return;
   const wf = await mutateWorkflow((w) => libDeleteSavedWorkflow(w, id));
   renderWorkflow(wf);

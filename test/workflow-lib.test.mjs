@@ -481,6 +481,11 @@ const ok = (name) => {
   assert.equal(wf.activeId, '');
   assert.equal(wf.name, '');
   assert.equal(wf.steps.length, 0);
+  // 作業中の手順(メモ等で足された分も)は、切り替える前に選択中のエントリへ書き戻される。
+  wf = setActiveWorkflow({ ...raw, steps: [...raw.steps, { id: 'm1', text: 'Memo' }] }, 'wf-b');
+  assert.deepEqual(wf.saved.find((w) => w.id === 'wf-a').steps.map((s) => s.id), ['s1', 'm1']);
+  wf = setActiveWorkflow(wf, 'wf-a');
+  assert.deepEqual(wf.steps.map((s) => s.id), ['s1', 'm1']);
   ok('setActiveWorkflow は対象ワークフローの切替と新規リセットを行う');
 }
 

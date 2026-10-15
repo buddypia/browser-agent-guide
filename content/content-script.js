@@ -4448,12 +4448,6 @@
     const wf = { ...(wfCache || {}) };
     wf.steps = Array.isArray(wf.steps) ? wf.steps.slice() : [];
     if (mutate(wf) === false) return;
-    if (wf.activeId && Array.isArray(wf.saved)) {
-      const idx = wf.saved.findIndex((x) => x && x.id === wf.activeId);
-      if (idx >= 0) {
-        wf.saved[idx] = { ...wf.saved[idx], steps: wf.steps.slice() };
-      }
-    }
     wfCache = wf;
     try {
       chrome.storage.local.set({ [WF_KEY]: wf });

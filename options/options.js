@@ -572,6 +572,8 @@ function bindEvents() {
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area === 'local' && changes.aiAdvisorSettings?.newValue?.ui?.theme !== undefined) {
       const newTheme = changes.aiAdvisorSettings.newValue.ui.theme;
+      // 手元の settings も更新する。古いままだと、次の保存(saveSettings(settings))で旧テーマを書き戻す。
+      settings.ui = { ...(settings.ui || {}), theme: newTheme };
       if ($('theme-select')) $('theme-select').value = normalizeTheme(newTheme);
       applyTheme(newTheme);
     }

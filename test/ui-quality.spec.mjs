@@ -314,6 +314,39 @@ test.describe('UI quality gates', () => {
     await expect(page.locator('#btn-workspace-memo')).toBeFocused();
   });
 
+  test('switching saved workflows keeps unsaved and newly recorded steps', async ({ page }) => {
+    const step = (id, target) => ({
+      kind: 'action', id, url: 'https://example.com/app', matchType: 'page', pattern: 'https://example.com/app', text: '',
+      target, action: { verb: 'click', value: '' }, locator: { kind: 'fixed', anchor: { selector: `#${id}`, tag: 'button', role: 'button', text: target } },
+    });
+    await installChromeMock(page, {
+      aiAdvisorWorkflow: { recording: false, steps: [step('u1', 'Unsaved')], saved: [{ id: 'wf-a', name: 'Flow A', createdAt: '', steps: [step('a1', 'Saved A')] }] },
+    });
+    await page.setViewportSize({ width: 360, height: 900 });
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+    await page.locator('#btn-workspace-workflow').click();
+    const stored = () => page.evaluate(async () => (await chrome.storage.local.get('aiAdvisorWorkflow')).aiAdvisorWorkflow);
+    const select = page.locator('#workflow-select');
+
+    // 保存先の無い手順は、確認で断れば残る。
+    page.once('dialog', (d) => d.dismiss());
+    await select.selectOption('wf-a');
+    await expect(select).toHaveValue('');
+    expect((await stored()).steps.map((s) => s.id)).toEqual(['u1']);
+
+    page.once('dialog', (d) => d.accept());
+    await select.selectOption('wf-a');
+    await expect.poll(async () => (await stored()).steps.map((s) => s.id)).toEqual(['a1']);
+
+    // content script が作業中の手順だけに足した手順(メモ等)は、切り替えると選択中のエントリへ書き戻される。
+    await page.evaluate(async (s) => {
+      const { aiAdvisorWorkflow: wf } = await chrome.storage.local.get('aiAdvisorWorkflow');
+      await chrome.storage.local.set({ aiAdvisorWorkflow: { ...wf, steps: [...wf.steps, s] } });
+    }, step('m1', 'Memo'));
+    await select.selectOption('');
+    await expect.poll(async () => (await stored()).saved.find((w) => w.id === 'wf-a').steps.map((s) => s.id)).toEqual(['a1', 'm1']);
+  });
+
   test('side panel shows structured workflow steps at side-panel width and passes axe', async ({ page }, testInfo) => {
     const anchor = (selector, text) => ({ selector, tag: 'button', role: 'button', text });
     const base = { kind: 'action', url: 'https://example.com/app', matchType: 'page', pattern: 'https://example.com/app', text: '' };
