@@ -9,6 +9,7 @@ import {
   saveWorkflow as libSaveWorkflow,
   setActiveWorkflow as libSetActiveWorkflow,
   deleteSavedWorkflow as libDeleteSavedWorkflow,
+  MAX_SAVED_WORKFLOWS,
   hasUnsavedSteps as libHasUnsavedSteps,
 } from '../lib/workflow.js';
 import { createI18n, DEFAULT_LOCALE, LANGUAGE_OPTIONS, languageName, localeToIntl, normalizeLocale, resolveLocale } from './i18n.js';
@@ -1659,6 +1660,15 @@ function renderWorkflowRun(run) {
       : t('workflow.heldText', { text: stepTitle(held) });
   }
   if (els.btnWorkflowDryRun) els.btnWorkflowDryRun.disabled = run.active || !(state.workflow?.steps || []).length;
+  // 自動実行中は実行対象の手順を差し替えられないので、切替・新規・削除は押せなくする(押しても無反応にしない)。
+  if (els.workflowSelect) els.workflowSelect.disabled = run.active;
+  if (els.btnWorkflowNew) els.btnWorkflowNew.disabled = run.active;
+  els.workflowSaved?.querySelectorAll('.workflow-saved-item').forEach((row) => {
+    const load = row.querySelector('.wf-saved-load');
+    if (load) load.disabled = run.active || row.classList.contains('is-active');
+    const del = row.querySelector('.wf-saved-del');
+    if (del) del.disabled = run.active;
+  });
   // 実行状況(完了/保留)を手順の行にも反映する。
   if (els.workflowSteps && state.workflow?.steps?.length) {
     els.workflowSteps.querySelectorAll('.workflow-step').forEach((row, i) => {
@@ -2144,13 +2154,14 @@ async function saveCurrentWorkflow(asNew = false) {
   const name = inputName || fallbackName;
   const targetId = asNew ? null : (current.activeId || null);
 
-  const wf = await mutateWorkflow((w) => {
-    return libSaveWorkflow(w, {
-      id: targetId,
-      name,
-      steps: w.steps,
-    });
-  });
+  let wf;
+  try {
+    wf = await mutateWorkflow((w) => libSaveWorkflow(w, { id: targetId, name, steps: w.steps }));
+  } catch (e) {
+    if (!(e instanceof RangeError)) throw e;
+    addMessage('error', t('workflow.savedLimit', { max: MAX_SAVED_WORKFLOWS }));
+    return;
+  }
 
   renderWorkflow(wf);
   const active = wf.saved.find((x) => x.id === wf.activeId) || { name, steps: wf.steps };

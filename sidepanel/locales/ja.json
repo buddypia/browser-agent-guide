@@ -415,6 +415,7 @@
   "workflow.removeStep": "この手順を削除",
   "workflow.emptyStep": "(メモなし)",
   "workflow.recordingBanner": "ワークフロー記録中 — いつもどおりページを操作してください。クリック・入力・選択が手順として取り込まれます。",
+  "workflow.savedLimit": "保存できるワークフローは{max}件までです。不要なものを削除してから保存してください。",
   "workflow.savedMsg": "ワークフロー「{name}」を保存しました（{count}手順）。",
   "workflow.loadedMsg": "ワークフローを現在の手順に読み込みました。AIに実行を依頼してください。",
   "theme.title": "外観テーマ",
