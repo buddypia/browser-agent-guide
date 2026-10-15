@@ -20,7 +20,7 @@ code_refs:
 api_refs: []
 db_refs: []
 related: ["verb-registry", "affordance"]
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 confidence: medium
 ---
 
@@ -29,6 +29,7 @@ confidence: medium
 記録ワークフロー(`chrome.storage.local` キー `aiAdvisorWorkflow`)の1手順を、
 **対象(locator)・操作(action)・確認(check)** に分けた構造化データ。記録 ON 中の
 実際のクリック/入力/選択/チェックを content script がそのまま手順にする(観察記録)。
+名前付きで複数保存でき(`saved[]`、最大50件)、選択中のもの(`activeId`)には記録した手順がそのまま同期される。
 
 - `action.verb` は閉じた集合 `click | fill | select | check`。`value` は `{name}` 変数を含められる
   (パスワードは値を保存せず `{password}` に置換)。
