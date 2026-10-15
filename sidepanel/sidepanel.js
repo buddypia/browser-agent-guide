@@ -2136,8 +2136,15 @@ async function canReplaceWorkingSteps() {
   return !libHasUnsavedSteps(await readWorkflow()) || confirm(t('workflow.discardConfirm'));
 }
 
+// 承認待ちで止まった実行は手順を差し替えると破棄する。SW は再開時に作業中の手順を読み直すので、
+// 残すと別のワークフロー(コピーは手順 id を共有する)が前の進捗のまま再開されてしまう。
+async function abandonHeldRun() {
+  if ((await readWorkflowRun()).heldStepId) await send({ type: 'STOP_WORKFLOW_AUTORUN' });
+}
+
 async function createNewWorkflow() {
   if (!(await canReplaceWorkingSteps())) return renderWorkflow(state.workflow);
+  await abandonHeldRun();
   const wf = await mutateWorkflow((w) => libSetActiveWorkflow(w, ''));
   if (els.workflowName) {
     els.workflowName.value = '';
@@ -2170,6 +2177,7 @@ async function saveCurrentWorkflow(asNew = false) {
 
 async function loadSavedWorkflow(id) {
   if (!(await canReplaceWorkingSteps())) return renderWorkflow(state.workflow);
+  await abandonHeldRun();
   const wf = await mutateWorkflow((w) => libSetActiveWorkflow(w, id));
   renderWorkflow(wf);
   addMessage('assistant', t('workflow.loadedMsg'));
