@@ -415,6 +415,7 @@
   "workflow.removeStep": "删除此步骤",
   "workflow.emptyStep": "（无批注）",
   "workflow.recordingBanner": "正在录制工作流 — 像平常一样操作页面，每次点击、输入和选择都会记录为步骤。",
+  "workflow.savedLimit": "最多可保存 {max} 个工作流。请先删除不需要的工作流，然后再保存。",
   "workflow.savedMsg": "已保存工作流“{name}”（{count} 个步骤）。",
   "workflow.loadedMsg": "已把工作流载入当前步骤。请让 AI 执行。",
   "theme.title": "外观主题",

@@ -415,6 +415,7 @@
   "workflow.removeStep": "이 단계 삭제",
   "workflow.emptyStep": "(메모 없음)",
   "workflow.recordingBanner": "워크플로 기록 중 — 평소처럼 페이지를 조작하세요. 클릭·입력·선택이 단계로 기록됩니다.",
+  "workflow.savedLimit": "저장할 수 있는 워크플로는 최대 {max}개입니다. 필요 없는 것을 삭제한 뒤 다시 저장하세요.",
   "workflow.savedMsg": "워크플로 '{name}'을(를) 저장했습니다 ({count}단계).",
   "workflow.loadedMsg": "워크플로를 현재 단계로 불러왔습니다. AI에게 실행을 요청하세요.",
   "theme.title": "외관 테마",

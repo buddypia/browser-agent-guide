@@ -356,6 +356,36 @@ test.describe('UI quality gates', () => {
     await expect.poll(async () => (await stored()).steps.length).toBe(0);
   });
 
+  test('workflow switch controls are disabled during auto-run, and saving past the limit says why', async ({ page }) => {
+    const step = (id) => ({ kind: 'action', id, url: 'https://example.com/app', matchType: 'page', pattern: 'https://example.com/app', text: '', target: id, action: { verb: 'click', value: '' } });
+    const saved = Array.from({ length: 50 }, (_, i) => ({ id: `wf-${i}`, name: `Flow ${i}`, createdAt: '', steps: [step(`s${i}`)] }));
+    await installChromeMock(page, {
+      aiAdvisorWorkflow: { recording: false, activeId: 'wf-0', name: 'Flow 0', steps: [step('s0')], saved },
+      aiAdvisorWorkflowRun: { active: true, doneStepIds: [], heldStepId: '' },
+    });
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+    await page.locator('#btn-workspace-workflow').click();
+    const del = page.locator('.wf-saved-del').first();
+    await expect(page.locator('#workflow-select')).toBeDisabled();
+    await expect(page.locator('#btn-workflow-new')).toBeDisabled();
+    await expect(del).toBeDisabled();
+    await expect(page.locator('.wf-saved-load').nth(1)).toBeDisabled();
+
+    // 停止すると戻る(選択中の行の「読み込み」だけは押せないまま)。
+    await page.evaluate(() => chrome.storage.local.set({ aiAdvisorWorkflowRun: { active: false, doneStepIds: [], heldStepId: '' } }));
+    await expect(page.locator('#workflow-select')).toBeEnabled();
+    await expect(page.locator('#btn-workflow-new')).toBeEnabled();
+    await expect(del).toBeEnabled();
+    await expect(page.locator('.wf-saved-load').first()).toBeDisabled();
+    await expect(page.locator('.wf-saved-load').nth(1)).toBeEnabled();
+
+    // 上限(50件)では別名保存を断って理由を出し、どれも消さない。
+    await page.locator('#btn-workflow-save-copy').click();
+    await expect(page.locator('.msg.error').last()).toContainText('50');
+    const stored = await page.evaluate(async () => (await chrome.storage.local.get('aiAdvisorWorkflow')).aiAdvisorWorkflow);
+    expect(stored.saved.map((w) => w.id)).toEqual(saved.map((w) => w.id));
+  });
+
   test('side panel shows structured workflow steps at side-panel width and passes axe', async ({ page }, testInfo) => {
     const anchor = (selector, text) => ({ selector, tag: 'button', role: 'button', text });
     const base = { kind: 'action', url: 'https://example.com/app', matchType: 'page', pattern: 'https://example.com/app', text: '' };

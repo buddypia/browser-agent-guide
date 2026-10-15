@@ -415,6 +415,7 @@
   "workflow.removeStep": "Remove step",
   "workflow.emptyStep": "(no note)",
   "workflow.recordingBanner": "Recording workflow — operate the page as usual; each click, input and selection is captured as a step.",
+  "workflow.savedLimit": "You can keep up to {max} saved workflows. Delete one you no longer need, then save again.",
   "workflow.savedMsg": "Saved workflow “{name}” ({count} steps).",
   "workflow.loadedMsg": "Loaded workflow into current steps. Ask the AI to run it.",
   "theme.title": "Appearance theme",

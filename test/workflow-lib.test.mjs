@@ -41,6 +41,7 @@ import {
   setActiveWorkflow,
   deleteSavedWorkflow,
   hasUnsavedSteps,
+  MAX_SAVED_WORKFLOWS,
 } from '../lib/workflow.js';
 
 let passed = 0;
@@ -491,6 +492,19 @@ const ok = (name) => {
   wf = setActiveWorkflow(edited, 'wf-b');
   assert.deepEqual(wf.saved.find((w) => w.id === 'wf-a').steps.map((s) => s.id), ['s1']);
   ok('setActiveWorkflow は対象ワークフローの切替と新規リセットを行う');
+}
+
+// (25) 上限に達したら新規保存は断り、古いエントリを黙って消さない。既存の更新は上限でもできる。
+{
+  const full = Array.from({ length: MAX_SAVED_WORKFLOWS }, (_, i) => createWorkflowEntry(`W${i}`, [{ id: `s${i}` }], `wf-${i}`));
+  const raw = { recording: false, activeId: 'wf-0', name: 'W0', steps: [{ id: 'x' }], saved: full };
+  assert.throws(() => saveWorkflow(raw, { id: null, name: 'New' }), RangeError);
+  assert.throws(() => saveWorkflow({ ...raw, activeId: '' }, { name: 'New' }), RangeError);
+  const updated = saveWorkflow(raw, { name: 'W0' });
+  assert.equal(updated.saved.length, MAX_SAVED_WORKFLOWS);
+  assert.deepEqual(updated.saved[0].steps.map((s) => s.id), ['x']);
+  assert.equal(updated.saved.at(-1).id, `wf-${MAX_SAVED_WORKFLOWS - 1}`);
+  ok('saveWorkflow は上限で新規保存を断り、既存の更新は通す');
 }
 
 // (24) deleteSavedWorkflow は対象を削除し、アクティブ中だった場合は状態をリセットする。
