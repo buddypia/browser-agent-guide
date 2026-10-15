@@ -609,6 +609,34 @@ test.describe('UI quality gates', () => {
     expect(msg.markdown).toContain('Reply to: First change');
   });
 
+  test('side panel theme follows the OS until the setting pins it, and hover stays visible in dark', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+    await expect(page.getByLabel('Target tab')).toContainText('Example App');
+    const body = page.locator('body');
+    await expect(body).toHaveCSS('background-color', 'rgb(24, 23, 21)');
+
+    await openMoreMenu(page);
+    await page.locator('#theme-select').selectOption('light');
+    await expect(body).toHaveCSS('background-color', 'rgb(245, 242, 236)');
+
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.locator('#theme-select').selectOption('dark');
+    await expect(body).toHaveCSS('background-color', 'rgb(24, 23, 21)');
+
+    // 選択していないタブの hover 地は文字色(ダークでは明るい色)から作る。墨色の固定値だと暗い地に消える。
+    await page.keyboard.press('Escape');
+    const tab = page.locator('.workspace-tab:not([aria-selected="true"])').first();
+    await tab.hover();
+    // 地は transition で変わるので落ち着くまで待つ。値は rgb()/oklab()/color(srgb) のどれでも先頭が明度に相当する。
+    await expect
+      .poll(async () => {
+        const [first] = (await tab.evaluate((el) => getComputedStyle(el).backgroundColor)).match(/[\d.]+/g).map(Number);
+        return first > 1 ? first / 255 : first;
+      })
+      .toBeGreaterThan(0.5);
+  });
+
   test('options page passes axe on the default settings state', async ({ page }, testInfo) => {
     await page.goto(pageUrl('options/options.html'));
 
