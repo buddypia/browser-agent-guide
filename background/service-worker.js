@@ -1971,18 +1971,27 @@ async function connectDaemonWebSocket() {
   }
 }
 
-// 指定 id のお描き/メモを「AI対応済み」にして「AIに渡す」を外す。そのページを開いているタブがあれば
-// content に任せて表示もその場で変え、閉じた/別ページへ移った分は保存済みの注釈を直接書き換える(id は全ページで一意)。
-async function markAnnotationsDone({ tabId, ids }) {
+// 指定 id のお描き/メモを「AI対応済み」にして「AIに渡す」を外す。content は注釈をメモリに持ち、保存時に
+// 自分のページ分を丸ごと書き戻すので、そのページを開いている全タブの content に任せる(同じページを2つ開いて
+// いても、どちらも古い forAI:true で送ったり上書きで消したりしない)。どのタブも持っていない分(閉じたページ)
+// だけ保存済みの注釈を直接書き換える(id は全ページで一意)。
+async function markAnnotationsDone({ ids }) {
   const want = (Array.isArray(ids) ? ids : []).map(String);
   const at = new Date().toISOString();
-  const marked = [];
-  if (Number.isInteger(tabId) && (await getTab(tabId))) {
-    const res = await ensureContentAndSend(tabId, { type: 'MARK_ANNOTATIONS_DONE', ids: want, at }).catch(() => null);
-    if (Array.isArray(res?.marked)) marked.push(...res.marked);
-  }
-  const rest = want.filter((id) => !marked.includes(id));
-  if (!rest.length) return marked;
+  const marked = new Set();
+  const tabs = await chrome.tabs.query({});
+  await Promise.all(
+    tabs.map(async (tab) => {
+      try {
+        const res = await chrome.tabs.sendMessage(tab.id, { type: 'MARK_ANNOTATIONS_DONE', ids: want, at }, { frameId: 0 });
+        for (const id of Array.isArray(res?.marked) ? res.marked : []) marked.add(id);
+      } catch {
+        /* content の居ないタブ(chrome:// 等)は対象外 */
+      }
+    }),
+  );
+  const rest = want.filter((id) => !marked.has(id));
+  if (!rest.length) return [...marked];
   const key = 'aiAdvisorAnnotations';
   const map = (await chrome.storage.local.get(key))[key] || {};
   let changed = false;
@@ -1991,12 +2000,12 @@ async function markAnnotationsDone({ tabId, ids }) {
       if (!a || !rest.includes(a.id) || (a.kind !== 'drawing' && a.kind !== 'note')) continue;
       a.doneAt = at;
       a.forAI = false;
-      marked.push(a.id);
+      marked.add(a.id);
       changed = true;
     }
   }
   if (changed) await chrome.storage.local.set({ [key]: map });
-  return marked;
+  return [...marked];
 }
 
 function scheduleReconnect() {

@@ -225,14 +225,21 @@ test.describe('Milestone 2 Integration', () => {
       },
       { scope: pageUrl.split('?')[0], anchor },
     );
+    // 同じページを2つのタブで開いている。どちらも対応済みになり、古い状態で送ったり上書きしたりしない。
     const page = await context.newPage();
     await page.goto(pageUrl);
-    await expect(page.locator('.bag-step-caption')).toHaveCount(1);
+    const twin = await context.newPage();
+    await twin.goto(pageUrl);
+    for (const p of [page, twin]) await expect(p.locator('.bag-step-caption')).toHaveCount(1);
     const tabId = await sw.evaluate(async (u) => (await chrome.tabs.query({})).find((t) => t.url === u)?.id, pageUrl);
 
     const res = await daemonWss.request('mark_annotations_done', { tabId, ids: ['note-open', 'note-closed'] });
     expect(res.marked.sort()).toEqual(['note-closed', 'note-open']);
-    await expect(page.locator('.bag-step-caption--done')).toContainText('AI');
+    for (const p of [page, twin]) await expect(p.locator('.bag-step-caption--done')).toContainText('AI');
+    const twinTabId = await sw.evaluate(async (u) => (await chrome.tabs.query({})).filter((t) => t.url === u).at(-1)?.id, pageUrl);
+    const collected = await sw.evaluate((t) => chrome.tabs.sendMessage(t, { type: 'COLLECT_PAGE_FEEDBACK' }), twinTabId);
+    expect(collected.items).toEqual([]);
+    await twin.close();
     const stored = await sw.evaluate(async () => (await chrome.storage.local.get('aiAdvisorAnnotations')).aiAdvisorAnnotations);
     const all = Object.values(stored).flat();
     for (const id of ['note-open', 'note-closed']) {

@@ -53,8 +53,6 @@ This project lets AI coding CLIs act on the user's tabs through the extension, a
   }
   ```
   `ok:false` at the top level means the request itself failed (no matching tab, content script unreachable); the message is in `error`.
-- **Mark memos done (Daemon -> Extension)**: `{ "type": "mark_annotations_done", "requestId", "tabId", "ids": ["anno-…"] }`. The service worker asks the tab's content script to set `doneAt` and uncheck 「AIに渡す」 on those memos, and rewrites stored annotations directly for ids no open tab has. It answers `{ "type": "mark_annotations_done_result", "requestId", "ok": true, "marked": [...] }`, or `ok:false` when this browser has none of the ids.
-- Every request goes to all connected extensions (`wss.request(type, params)` in `daemon/src/ws.js`); the first `<type>_result` with `ok:true` wins, so an extension without the tab or memos answers `ok:false`.
 
 ## Code Layout
 - `background/service-worker.js`: WebSocket relay client; finds the tab and forwards `RUN_ACTIONS`.
