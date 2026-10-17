@@ -21,6 +21,7 @@ code_refs:
 api_refs:
   - { name: "MCP: get_latest_feedback_context", spec: "daemon/src/server.js" }
   - { name: "MCP: get_latest_feedback_image", spec: "daemon/src/server.js" }
+  - { name: "MCP: resolve_feedback", spec: "daemon/src/server.js" }
 db_refs: []
 related: ["entry-store", "affordance"]
 last_verified: 2026-10-17
@@ -41,6 +42,16 @@ Canvas 2D で注釈を合成 → daemon が有効なら WS push、無効なら `
 対象要素の矩形を bbox にして吹き出し＋番号バッジだけを焼き込む。daemon は既定 OFF で、daemon が
 無効な間はメモ/お描きは**サイドパネルの「画像でAIへ送る」を押す**まで inbox に届かない。daemon を
 有効化すると（旧 autoSync トグルは廃止し `daemon.enabled` に一本化）、本文ありメモは残すだけで自動送信される。
+
+## 対応済み（resolve_feedback）
+
+AI がメモ/お描きの指示に対応し終えたら MCP `resolve_feedback({id, summary})` を呼ぶ。daemon はその entry に
+`resolution {at, summary}` を付け(disk/hybrid は `<slug>/resolution.json` に残し再起動後も保つ)、
+`get_latest_feedback_*` は対応済みの最新を返さず「対応済み」と案内する(同じメモへの二重対応を防ぐ。
+top-level に id を載せない)。拡張が繋がっていれば WS `mark_annotations_done`(該当メモを持たない拡張は ok:false)
+で SW へ id を渡し、SW は開いているタブの content(`MARK_ANNOTATIONS_DONE`)か保存済みの注釈を直接書き換えて、
+各メモに `doneAt` を付け「AIに渡す」を外す。ページ上とサイドパネルには「AI対応済み」と出る。メモは消さない。
+人が「AIに渡す」を付け直すと `doneAt` が消えて未対応へ戻り、次の送信で再び届く。
 
 ## メモのみ同期（text-only; 画像なし entry）
 

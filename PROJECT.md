@@ -19,6 +19,7 @@ This project lets AI coding CLIs act on the user's tabs through the extension, a
 | 1 | M1: Exploration & Proposal | Analyze existing WebSocket & background structures, propose exact schemas/interfaces. | None | DONE |
 | 2 | M2: Integrated Implementation & Verification | Implement the Bidirectional WebSocket Relay, Fallback CDP Bridge CLI, Clipboard Interceptor, and Test Verification. | M1 | DONE |
 | 3 | M3: Agent allow-list | Limit `execute_actions` / CDP bridge to an allow-list and hold irreversible clicks. | M2 | DONE |
+| 4 | M4: Done state | `resolve_feedback` marks a capture handled; the extension shows the memo as done and stops resending it. | M2 | DONE |
 
 ## Interface Contracts
 ### WebSocket Command Protocol (Primary Relay)
@@ -53,15 +54,21 @@ This project lets AI coding CLIs act on the user's tabs through the extension, a
   }
   ```
   `ok:false` at the top level means the request itself failed (no matching tab, content script unreachable); the message is in `error`.
+- **Generic requests**. `wss.request(type, params)` sends `{...params, type, requestId}` to every connected extension and resolves on the first `<type>_result` with `ok:true`; an extension that has nothing to act on answers `ok:false`, and the request rejects only when every extension did. `resolve_feedback` uses it as `mark_annotations_done`:
+  ```json
+  { "type": "mark_annotations_done", "requestId": "unique-id", "tabId": 123, "url": "https://…", "ids": ["note-…", "drawing-…"] }
+  { "type": "mark_annotations_done_result", "requestId": "unique-id", "ok": true, "marked": ["note-…"] }
+  ```
+  The service worker matches by annotation id only (ids are unique across pages; `tabId`/`url` are informational). It patches the stored annotations once (`doneAt`, `forAI:false`) and then tells every open tab to update its in-memory copy, so a tab holding a stale list cannot write it back over another tab's memo.
 
 ## Code Layout
 - `background/service-worker.js`: WebSocket relay client; finds the tab and forwards `RUN_ACTIONS`.
 - `content/content-script.js`: runs the verbs; `AGENT_ALLOWED_VERBS` and the click guard for external agents.
 - `content/clipboard-hook.js`: MAIN-world hook that records clipboard writes.
-- `daemon/src/ws.js`: WebSocket server; sends `run_actions` to the extension and resolves the matching result.
-- `daemon/src/server.js`: MCP server; the `execute_actions` tool and `EXECUTE_ACTIONS_VERBS`.
-- `daemon/src/http.js`: passes the actions executor to the MCP server.
-- `daemon/src/index.js`: wires the WebSocket server's executor into the HTTP server.
+- `daemon/src/ws.js`: WebSocket server; `request(type, params)` sends a command to the extension and resolves the matching result.
+- `daemon/src/server.js`: MCP server; the `execute_actions` tool and `EXECUTE_ACTIONS_VERBS`, and `resolve_feedback`.
+- `daemon/src/http.js`: passes the actions executor and the generic extension request to the MCP server.
+- `daemon/src/index.js`: wires the WebSocket server's executor and request into the HTTP server.
 - `manifest.json`: registers the clipboard hook in the MAIN world.
 - `scripts/cdp-bridge.mjs`: fallback CLI that drives the extension over CDP.
 - `test/m2-integration.spec.mjs`, `test/agent-verbs.test.mjs`, `daemon/test/mcp.test.mjs`: relay, allow-list and parity tests.

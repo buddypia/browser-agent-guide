@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { findEntry as findDiskEntry, matchesFilter, queryEntries as queryDiskEntries } from './inbox.js';
 import { slugFromCapture } from './slug.js';
-import { decodeBase64, writeEntry } from './writer.js';
+import { decodeBase64, writeEntry, writeResolution } from './writer.js';
 
 const DEFAULT_MEMORY_LIMIT = 50;
 
@@ -32,7 +32,17 @@ export function createDiskEntryStore(inboxDir) {
     materialize(entry) {
       return entry;
     },
+    markResolved(id, resolution) {
+      return markDiskResolved(currentInbox(), id, resolution);
+    },
   };
+}
+
+function markDiskResolved(inboxDir, id, resolution) {
+  const entry = findDiskEntry(inboxDir, id);
+  if (!entry) return null;
+  writeResolution(entry.dir, resolution);
+  return { ...entry, resolution };
 }
 
 export function createPageFeedbackStore({ inboxDir, storageMode = 'disk', memoryLimit = DEFAULT_MEMORY_LIMIT } = {}) {
@@ -95,6 +105,16 @@ function createMemoryBackedStore({ inboxDir, mode, memoryLimit }) {
       entry.shot = written.files.includes('shot.png') ? join(written.dir, 'shot.png') : '';
       entry.files = written.files;
       entry.materialized = true;
+      // 書き出す前に対応済みにされていたら、その記録も残す(hybrid の再起動後も対応済みのまま)。
+      if (entry.resolution) writeResolution(written.dir, entry.resolution);
+      return entry;
+    },
+    // メモリの entry は RAM に記録する(hybrid で inbox に書き出し済みなら再起動後も残るよう書く)。
+    markResolved(id, resolution) {
+      const entry = memory.find((e) => e.id === id);
+      if (!entry) return markDiskResolved(currentInbox(), id, resolution);
+      entry.resolution = resolution;
+      if (mode === 'hybrid' && entry.materialized) writeResolution(entry.dir, resolution);
       return entry;
     },
     // memory モードの一時 materialize 先を破棄する（プロセス終了時に index.js が呼ぶ）。

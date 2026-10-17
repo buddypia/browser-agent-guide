@@ -12,7 +12,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, resolve, isAbsolute, sep } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { decodeBase64 } from './writer.js';
+import { decodeBase64, RESOLUTION } from './writer.js';
 import { hostSlug } from './slug.js';
 
 export const SHOT = 'shot.png';
@@ -139,7 +139,19 @@ function readEntryDirent(dir, id) {
   } catch {
     /* stat 失敗は 0 のまま */
   }
-  return { id, dir, shot: hasShot ? shot : '', mtime };
+  return { id, dir, shot: hasShot ? shot : '', mtime, resolution: readResolution(dir) };
+}
+
+// 対応済みの記録({at, summary})。無い・壊れている時は null(=未対応)。
+function readResolution(dir) {
+  const p = join(dir, RESOLUTION);
+  if (!existsSync(p)) return null;
+  try {
+    const r = JSON.parse(readFileSync(p, 'utf8'));
+    return r && typeof r.at === 'string' ? { at: r.at, summary: String(r.summary || '') } : null;
+  } catch {
+    return null;
+  }
 }
 
 // inbox 配下の <slug>/（shot.png か annotation.json を持つもの）を新しい順に列挙する。done/ は除外。
@@ -266,6 +278,7 @@ export function peekDistinctRecent(rows, { windowMs = 90 * 60 * 1000 } = {}) {
     host,
     title: e.title || '',
     capturedAt: e.capturedAt || '',
+    ...(e.resolution?.at ? { resolvedAt: e.resolution.at } : {}),
   }));
   // newest は「mtime 最新」(従来 latest 契約)を維持。単一案件時の単発返却で使う。
   return { newest: rows[0], distinctCount: byHost.size, candidates };
@@ -374,6 +387,8 @@ export function buildEntryContext(entry, { shotUrlFor } = {}) {
     tab: normalizeTabMetadata(annotation.tab || entry.tab),
     viewport: annotation.viewport || null,
     image: annotation.image || null,
+    // 対応済み(resolve_feedback 済み)なら {at, summary}。
+    resolution: entry.resolution || null,
     annotations: items.map((it) => ({
       n: it.n ?? null,
       id: it.id || '',
@@ -430,6 +445,7 @@ export function buildEntryContextText(context) {
   const contextTab = tabSummary(context.tab);
   if (contextTab) lines.push(`chrome_tab: ${contextTab}  (tabId is Chrome-session scoped)`);
   if (context.viewport) lines.push(`viewport: ${context.viewport.width}x${context.viewport.height}`);
+  if (context.resolution) lines.push(`resolved: ${context.resolution.at}${context.resolution.summary ? `  ${context.resolution.summary}` : ''}  (対応済み)`);
   lines.push('agent_lookup:');
   lines.push('  priority: dataAgentId -> selector -> testid -> anchorLabel -> targetCandidates -> image');
   lines.push('  source_search: rg -n \'data-agent-id="@agent:\' -g \'!*.md\' -g \'!.claude\'');
@@ -504,7 +520,7 @@ function pathIfExists(dir, name) {
   return existsSync(p) ? p : '';
 }
 
-function readEntryAnnotation(entry) {
+export function readEntryAnnotation(entry) {
   if (entry?.annotation) return entry.annotation;
   return entry?.dir ? readAnnotation(entry.dir) : null;
 }
