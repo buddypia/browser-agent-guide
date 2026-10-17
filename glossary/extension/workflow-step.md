@@ -17,6 +17,7 @@ code_refs:
   - { path: "content/content-script.js", symbol: "runStep" }
   - { path: "background/service-worker.js", symbol: "driveWorkflow" }
   - { path: "lib/judge-client.js", symbol: "callJudgeChoice" }
+  - { path: "lib/judge-client.js", symbol: "askClef" }
   - { path: "lib/judge-client.js", symbol: "callJudgeVisualCheck" }
 api_refs: []
 db_refs: []
@@ -40,9 +41,9 @@ confidence: medium
 - `choice.by` は `index | text | first | last | min | max | ai`。候補からの選択は SW の純関数
   `pickCandidate` が決め、決まらない時(曖昧/該当なし/`ai`)だけ AI に **候補キーの enum から1つ**
   を選ばせる(`callAIChoice`)。AI が補った結果は `suggestion` として残り、人間が採用した時だけ学習される。
-  判断AI(`settings.judge.provider:'jev' | 'eg2'`)を設定すると、この候補選択だけを System 1
-  (TypeSafe Jev またはローカル EmbeddingGemma 2) に任せる(`callJudgeChoice`。チャット/verbs 生成は LLM のまま)。
-  選んだ候補の確信度(Jev の確率または eg2 のコサイン類似度)が `minConfidence` 以上なら進んで
+  判断AI(`settings.judge.provider:'jev' | 'clef' | 'eg2'`)を設定すると、この候補選択だけを System 1
+  (TypeSafe Jev / Cloudflare Clef / ローカル EmbeddingGemma 2) に任せる(`callJudgeChoice`。チャット/verbs 生成は LLM のまま)。
+  選んだ候補の確信度(Jev / Clef の確率または eg2 のコサイン類似度。Jev と Clef は同じ {state, questions} → probabilities の契約)が `minConfidence` 以上なら進んで
   確信度つきの `suggestion` を残し、未満なら最有力を `suggestion.pending` に残して `heldKind:'judge'` で保留する。
   記録要素が無い時の差し替え(候補がページ全体)は確信度に関わらず保留する。判断の承認は
   `judgeApprovedStepId`(候補選択だけを通す)で、確定系ゲートの `approvedStepId` とは別に持つ。
@@ -52,7 +53,7 @@ confidence: medium
   同じ。承認までに一覧が並び替わりうるため)。AI が選んだ候補を一意に示せない(テキスト無し/同じ表記が複数)時は
   保留せず止める。外部 AI へ手順の入力値も、入力欄の今の値も送らない(`labelOf` は `value` 属性=ページの初期値だけを使う)。
 - `check.type` は `none | url | text | appears | visual | download`。URL は `urlPattern`(`:id` 汎化)で照合し、
-  `visual` はステップ実行後にタブの読込完了・アクティブ状態を確認し、`PREPARE_VISUAL_CHECK` で入力欄(`input`/`textarea`/`contenteditable`)のライブ値を透明マスクした上でスクリーンショットを撮り、`callJudgeVisualCheck`(Jev マルチモーダルまたは eg2 `POST /v1/evaluate`)で画面状態・UI崩れやエラー表示の有無を検証する。
+  `visual` はステップ実行後にタブの読込完了・アクティブ状態を確認し、`PREPARE_VISUAL_CHECK` で入力欄(`input`/`textarea`/`contenteditable`)のライブ値を透明マスクした上でスクリーンショットを撮り、`callJudgeVisualCheck`(Jev / Clef マルチモーダルまたは eg2 `POST /v1/evaluate`)で画面状態・UI崩れやエラー表示の有無を検証する。
 - `download` は操作の前から SW がページのダウンロード(`chrome.downloads.onCreated`。拡張自身の保存は除く)を見張り、
   ファイル名か URL に `value` を含む(空なら何でも)ものが `complete` になるまで待つ(上限60秒)。始まらない・中断・
   時間切れは失敗で止まる。記録中、クリック直後(10秒以内)に始まったダウンロードはそのクリックにこの確認を SW が自動で付ける。

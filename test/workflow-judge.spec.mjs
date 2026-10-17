@@ -1,5 +1,5 @@
 // 判断AI(Jev)の E2E(拡張を実際に読み込む): リスト項目の表記が変わってルールで決まらない手順を、
-// 偽の Jev サーバー(loopback)に判断させる。
+// 偽の Jev / Clef サーバー(loopback)に判断させる。
 //   - 確信度が高い → そのまま選んで進み、手順に「選んだ項目と確信度」のメモ(suggestion)を残す
 //   - 確信度が低い → 手順を保留し、最有力の候補をメモ(pending)に残す → 承認で進む
 //   - 判断の承認では確定系ゲートは外れない(確定系ラベルは別の承認で止まる)
@@ -90,6 +90,18 @@ function startServer(state) {
         });
         return;
       }
+      // 偽 Clef (Worker プロキシ): Jev と同じ {state, questions} → answers の契約。
+      if (url.pathname === '/clef' && req.method === 'POST') {
+        let raw = '';
+        req.on('data', (c) => (raw += c));
+        req.on('end', () => {
+          const body = JSON.parse(raw);
+          state.clefCalls.push({ auth: req.headers.authorization, body });
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify({ ...fakeJev(body, state), model: body.model }));
+        });
+        return;
+      }
       if (url.pathname === '/v1/embeddings' && req.method === 'POST') {
         let raw = '';
         req.on('data', (c) => (raw += c));
@@ -143,9 +155,9 @@ async function getServiceWorker(context) {
 
 const readStore = (sw, key) => sw.evaluate(async (k) => (await chrome.storage.local.get(k))[k], key);
 
-test.describe('判断AI(Jev / eg2) E2E (拡張ロード)', () => {
+test.describe('判断AI(Jev / Clef / eg2) E2E (拡張ロード)', () => {
   test.describe.configure({ mode: 'serial' });
-  const state = { variant: 'rec', button: '選ぶ', formLabel: '保存する', jevCalls: [], eg2Calls: [], prefer: 'Anker', flip: false, fail: false, visualPass: true };
+  const state = { variant: 'rec', button: '選ぶ', formLabel: '保存する', jevCalls: [], clefCalls: [], eg2Calls: [], prefer: 'Anker', flip: false, fail: false, visualPass: true };
   let server;
   let origin;
   let context;
@@ -474,6 +486,35 @@ test.describe('判断AI(Jev / eg2) E2E (拡張ロード)', () => {
           },
         });
       }, origin);
+    }
+  });
+
+  test('clef 選択時: Cloudflare Clef (Worker プロキシ) で表記変更後の候補を選んで完走する', async () => {
+    const setJudge = (judge) =>
+      sw.evaluate(async (j) => {
+        const k = 'aiAdvisorSettings';
+        const cur = (await chrome.storage.local.get(k))[k] || {};
+        await chrome.storage.local.set({ [k]: { ...cur, judge: j } });
+      }, judge);
+    await setJudge({ provider: 'clef', minConfidence: 0.7, clefEndpoint: `${origin}/clef`, clefApiKey: 'proxy-key', clefModel: 'clef-flash' });
+    try {
+      await setSteps([recorded]);
+      const { page, tabId } = await openList('relabeled');
+      state.clefCalls.length = 0;
+      state.jevCalls.length = 0;
+      expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+      await expect(page.locator('#state')).toHaveText('picked:【新パッケージ】Anker USB-C to USB-C ケーブル (1m)', { timeout: 15_000 });
+      await expect.poll(async () => (await runOf())?.doneStepIds?.length ?? 0).toBe(1);
+      expect(state.jevCalls).toHaveLength(0);
+      expect(state.clefCalls).toHaveLength(1);
+      expect(state.clefCalls[0].auth).toBe('Bearer proxy-key');
+      expect(state.clefCalls[0].body.model).toBe('clef-flash');
+      const sg = (await stepOf()).suggestion;
+      expect(sg.label).toContain('新パッケージ');
+      expect(sg.reason).toMatch(/95%.*clef-flash|clef-flash.*95%/);
+      await page.close();
+    } finally {
+      await setJudge({ provider: 'jev', apiKey: 'test-key', baseUrl: `${origin}/v1`, model: 'jev-fake', minConfidence: 0.7 });
     }
   });
 

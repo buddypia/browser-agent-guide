@@ -1,4 +1,4 @@
-// judge-client (判断AI: TypeSafe Jev) の単体テスト。ネットワーク・課金なし(fetch を差し替える)。
+// judge-client (判断AI: TypeSafe Jev / Cloudflare Clef / eg2) の単体テスト。ネットワーク・課金なし(fetch を差し替える)。
 // bare node script: `node test/judge-client.test.mjs`
 
 import assert from 'node:assert/strict';
@@ -11,9 +11,12 @@ import {
   judgeMinConfidence,
   callJudgeChoice,
   callJudgeVisualCheck,
+  clefRoute,
 } from '../lib/judge-client.js';
 import { DEFAULT_SETTINGS } from '../lib/storage.js';
 import { normalizeRun, normalizeStep } from '../lib/workflow.js';
+
+const bodyHas = (seen, text) => String(seen.init.body).includes(text);
 
 let passed = 0;
 function ok(name) {
@@ -45,7 +48,28 @@ async function run() {
     assert.equal(isJudgeReady({ provider: 'jev', apiKey: '' }), false);
     assert.equal(isJudgeReady({ provider: 'jev', apiKey: 'k' }), true);
     assert.equal(isJudgeReady({ provider: 'eg2', apiKey: '' }), true);
-    ok('judge is opt-in and supports jev (with key) and eg2');
+    assert.equal(isJudgeReady({ ...DEFAULT_JUDGE, provider: 'clef' }), false);
+    assert.equal(isJudgeReady({ ...DEFAULT_JUDGE, provider: 'clef', apiKey: 'jev-key' }), false, 'the Jev key is not a Clef route');
+    assert.equal(isJudgeReady({ ...DEFAULT_JUDGE, provider: 'clef', clefAccountId: 'a'.repeat(32), clefApiKey: 't' }), true);
+    assert.equal(isJudgeReady({ ...DEFAULT_JUDGE, provider: 'clef', clefEndpoint: 'https://clef.example.workers.dev' }), true);
+    ok('judge is opt-in and supports jev (with key), clef (with a route) and eg2');
+  }
+
+  // Clef の宛先: プロキシ優先、REST はアカウントID(32桁16進)だけをパスに入れる。プロキシも https のみ。
+  {
+    const acct = '0123456789abcdef0123456789ABCDEF';
+    const rest = clefRoute({ clefAccountId: acct, clefApiKey: 'tok', clefModel: 'clef-flash' });
+    assert.equal(rest.url, `https://api.cloudflare.com/client/v4/accounts/${acct}/ai/run/@cf/cloudflare/clef-flash`);
+    assert.equal(rest.token, 'tok');
+    assert.equal(clefRoute({ clefAccountId: acct, clefApiKey: 'tok', clefModel: '../evil' }).model, 'clef');
+    assert.equal(clefRoute({ clefAccountId: `${acct}/../x`, clefApiKey: 'tok' }), null);
+    assert.equal(clefRoute({ clefAccountId: acct, clefApiKey: '' }), null);
+    const proxy = clefRoute({ clefEndpoint: 'https://clef.example.workers.dev/', clefApiKey: 'pk', clefAccountId: acct });
+    assert.equal(proxy.url, 'https://clef.example.workers.dev');
+    assert.equal(proxy.rest, false);
+    assert.match(clefRoute({ clefEndpoint: 'http://clef.example.com' }).error, /Clef endpoint must be https/);
+    assert.equal(isJudgeReady({ provider: 'clef', clefEndpoint: 'http://clef.example.com' }), false);
+    ok('clef route prefers the proxy and only puts a hex account id in the REST path');
   }
 
   // キーを送るので https 以外は拒否する。
@@ -162,6 +186,38 @@ async function run() {
     const failing = async () => ({ ok: false, status: 401, text: async () => 'unauthorized' });
     await assert.rejects(() => callJudgeChoice({ judge, step: pickStep, candidates, reason: 'none', fetchImpl: failing }), /401/);
     ok('callJudgeChoice posts to /systemone and surfaces HTTP errors');
+  }
+
+  // provider: 'clef' の候補選択: Jev と同じ要求/解釈。REST の {success,result} を開け、失敗は例外。
+  {
+    let seen;
+    const answer = { answers: { pick: { choice: 'c1', probabilities: { c0: 0.01, c1: 0.97, none: 0.02 }, confidence: 0.94 } } };
+    const fetchImpl = async (url, init) => {
+      seen = { url, init, body: JSON.parse(init.body) };
+      return { ok: true, json: async () => ({ success: true, result: answer }) };
+    };
+    const judge = { ...DEFAULT_JUDGE, provider: 'clef', clefAccountId: 'a'.repeat(32), clefApiKey: 'cf-token', clefModel: 'clef-flash' };
+    const step = { ...pickStep, action: { verb: 'fill', value: 'hunter2-secret' } };
+    const r = await callJudgeChoice({ judge, step, candidates: candidates.slice(0, 2), reason: 'none', url: 'https://shop.example.com/s', title: '検索', fetchImpl });
+    assert.match(seen.url, /\/ai\/run\/@cf\/cloudflare\/clef-flash$/);
+    assert.equal(seen.init.headers.Authorization, 'Bearer cf-token');
+    assert.equal(seen.body.model, 'clef-flash');
+    assert.deepEqual(Object.keys(seen.body.questions.pick.criteria), ['c0', 'c1', 'none']);
+    assert.ok(!bodyHas(seen, 'hunter2-secret'), 'step values are never sent to Clef');
+    assert.deepEqual([r.choice, r.confident, r.model], ['c1', true, 'clef-flash']);
+
+    const proxyJudge = { ...DEFAULT_JUDGE, provider: 'clef', clefEndpoint: 'https://clef.example.workers.dev' };
+    await callJudgeChoice({ judge: proxyJudge, step: pickStep, candidates, reason: 'none', fetchImpl: async (url, init) => {
+      seen = { url, init };
+      return { ok: true, json: async () => ({ ...answer, model: 'clef' }) };
+    } });
+    assert.equal(seen.url, 'https://clef.example.workers.dev');
+    assert.equal(seen.init.headers.Authorization, undefined, 'no bearer without a proxy key');
+
+    await assert.rejects(() => callJudgeChoice({ judge, step: pickStep, candidates, reason: 'none', fetchImpl: async () => ({ ok: false, status: 403, text: async () => 'forbidden' }) }), /Clef API error 403/);
+    await assert.rejects(() => callJudgeChoice({ judge, step: pickStep, candidates, reason: 'none', fetchImpl: async () => ({ ok: true, json: async () => ({ success: false, errors: [{ message: 'no model' }] }) }) }), /no model/);
+    await assert.rejects(() => callJudgeChoice({ judge, step: pickStep, candidates, reason: 'none', fetchImpl: async () => ({ ok: true, json: async () => ({ success: true, result: {} }) }) }), /no usable probabilities/);
+    ok('callJudgeChoice supports provider clef (REST and proxy) and fails closed');
   }
 
   // provider: 'eg2' の候補選択: 高類似度・僅差(保留)・低類似度(none)・秘密の入力値除外・障害時例外
@@ -293,6 +349,22 @@ async function run() {
     assert.equal(vFallback.passed, true);
     assert.equal(vFallback.provider, 'eg2');
 
+    // Clef: 画像は images 配列で渡し、確率表で pass/fail を決める
+    let clefReq;
+    const vClef = await callJudgeVisualCheck({
+      judge: { ...DEFAULT_JUDGE, provider: 'clef', clefEndpoint: 'https://clef.example.workers.dev', clefApiKey: 'pk', minConfidence: 0.7 },
+      imageDataUrl: 'data:image/png;base64,EEEE',
+      goal: 'レポートのダウンロード完了が表示される',
+      fetchImpl: async (url, init) => {
+        clefReq = { url, headers: init.headers, body: JSON.parse(init.body) };
+        return { ok: true, json: async () => ({ answers: { visual: { choice: 'pass', probabilities: { pass: 0.97, fail: 0.03 } } } }) };
+      },
+    });
+    assert.deepEqual([vClef.passed, vClef.provider, vClef.model], [true, 'clef', 'clef']);
+    assert.deepEqual(clefReq.body.images, ['data:image/png;base64,EEEE']);
+    assert.equal(clefReq.headers.Authorization, 'Bearer pk');
+    assert.match(clefReq.body.questions.visual.instructions, /ダウンロード完了/);
+
     // Jev も eg2 も未設定なら例外にする
     await assert.rejects(
       () =>
@@ -304,7 +376,7 @@ async function run() {
         }),
       /視覚確認/
     );
-    ok('callJudgeVisualCheck supports both Jev multimodal, eg2 fallback, and unconfigured error');
+    ok('callJudgeVisualCheck supports Jev / Clef multimodal, eg2 fallback, and unconfigured error');
   }
 
   // 実行セッション/手順メモの新フィールドは保存形を往復できる。

@@ -754,4 +754,32 @@ test.describe('UI quality gates', () => {
     await expect(page.locator('#save-daemon')).toHaveCSS('background-color', 'rgb(240, 237, 230)');
     await expectNoAxeViolations(page);
   });
+
+  test('options judge section shows only the chosen provider fields', async ({ page }, testInfo) => {
+    await page.goto(pageUrl('options/options.html'));
+    await page.locator('#ui-language').selectOption('ja');
+    await page.locator('#theme-select').selectOption('light');
+
+    // 既定(LLM)は追加の欄なし。
+    await expect(page.locator('#judge-apiKey')).toBeHidden();
+    await expect(page.locator('#judge-clefAccountId')).toBeHidden();
+
+    await page.locator('#judge-provider').selectOption('jev');
+    await expect(page.getByLabel('Jev APIキー')).toBeVisible();
+    await expect(page.locator('#judge-clefAccountId')).toBeHidden();
+
+    await page.locator('#judge-provider').selectOption('clef');
+    await expect(page.locator('#judge-apiKey')).toBeHidden();
+    await expect(page.getByLabel('Cloudflare アカウントID')).toBeVisible();
+    await expect(page.getByLabel('Workers AI トークン / プロキシキー')).toBeVisible();
+    await expect(page.getByLabel('Worker プロキシ URL (任意)')).toBeVisible();
+    await expect(page.locator('#judge-clefModel')).toBeVisible();
+
+    // 宛先が無いまま接続テストしても外へは送らず、入力を促す。
+    await page.locator('#test-judge').click();
+    await expect(page.locator('#judge-status')).toContainText('Cloudflare アカウントID');
+
+    await page.locator('.card', { has: page.locator('#judge-provider') }).screenshot({ path: testInfo.outputPath('options-judge-clef.png') });
+    await expectNoAxeViolations(page);
+  });
 });
