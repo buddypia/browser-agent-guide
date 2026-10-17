@@ -1256,6 +1256,14 @@ async function loadSentMemos() {
   }
 }
 
+// AI が対応済みにしたメモ(MCP resolve_feedback。「AIに渡す」も外れている)。直っていなければチェックを付け直すと再び届く。
+function doneChip() {
+  const chip = document.createElement('span');
+  chip.className = 'anno-done';
+  chip.textContent = t('annotations.done');
+  return chip;
+}
+
 // 届いた内容と今の内容が同じなら送信済み。編集して中身が変われば未送信に戻る。
 function sentStateChip(a) {
   const sent = Boolean(a.sig) && Boolean(sentMemos[a.sig]);
@@ -1434,7 +1442,9 @@ function renderDrawingTrayItem(a, index) {
     warn.textContent = t('annotations.unresolved');
     meta.appendChild(warn);
   }
-  if (a.forAI === false) {
+  if (a.doneAt) {
+    meta.appendChild(doneChip());
+  } else if (a.forAI === false) {
     const off = document.createElement('span');
     off.textContent = t('annotations.visualExcluded');
     meta.appendChild(off);
@@ -1485,6 +1495,7 @@ function renderSupportAnnotationItem(a) {
   title.textContent = annotationTitle(a);
   body.appendChild(title);
   if (a.kind === 'note' && String(a.note || '').trim() && a.forAI !== false) body.appendChild(sentStateChip(a));
+  if (a.kind === 'note' && a.doneAt) body.appendChild(doneChip());
   const sub = annotationSub(a);
   if (sub) {
     const subEl = document.createElement('span');

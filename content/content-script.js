@@ -124,7 +124,8 @@
     'clickAffordance', 'clickElement', 'fillAffordance', 'fillInput', 'selectOption',
   ]);
   // 外部エージェントの setStyle は「見た目を直す」範囲に限る。外部を参照する値(url() 等。読んだ内容を
-  // 外へ送る口になる)と、要素を重ねる/隠す/動かすプロパティ(確定ボタンの偽装や誤クリックの誘導に使える)は断る。
+  // 外へ送る口になる)と、要素を重ねる・動かす・透過させるプロパティ(position / z-index / transform / opacity 等。
+  // 確定ボタンの偽装や誤クリックの誘導に使える)は断る。色や大きさで目立たなくすることまでは防げない。
   const AGENT_STYLE_PROPS =
     /^(color|background-color|border(-(top|right|bottom|left))?(-(color|width|style))?|border-radius|outline(-(color|width|style|offset))?|font(-(size|weight|style|family))?|text-(align|decoration|transform)|line-height|letter-spacing|word-spacing|white-space|word-break|overflow-wrap|padding(-(top|right|bottom|left))?|margin(-(top|right|bottom|left))?|(min-|max-)?(width|height)|gap)$/;
   const AGENT_STYLE_BAD_VALUE = /url\s*\(|image\s*\(|image-set|element\s*\(|cross-fade|@import|expression\s*\(|\\/i;
@@ -1417,6 +1418,8 @@
       step: a.kind === 'note' ? annoNoteNumber(a) : drawing ? annoDrawingNumber(a) : undefined,
       // AIに渡すか(お描き/メモ)。forAI 未設定の旧レコードは ON 扱いにして後方互換にする。
       forAI: drawing || a.kind === 'note' ? memoForAI(a) : undefined,
+      // AI が対応済みにした時刻(MCP resolve_feedback)。人が「AIに渡す」を付け直すと消える。
+      doneAt: a.doneAt || '',
       shapePreview: drawing ? buildShapePreview(a.shapes) : undefined,
       target: t ? truncate(labelOf(t), 50) : '',
       resolved,
@@ -2123,9 +2126,11 @@
       // 兄弟の z-index に隠されず、メモ本文が hover 不要で常に読める。
       const entry = addOutlineBox(target, 'note', { caption: { number, text: a.note || '' } });
       // AIに渡さないメモは枠もキャプションも淡色にして、送る対象から外れたと分かるようにする。
+      // AI が対応済みにしたメモは、キャプションを淡色にせず「AI対応済み」と示す。
       if (entry && !memoForAI(a)) {
         entry.box.classList.add('bag-anno-outline-box--off');
-        entry.caption?.classList.add('bag-step-caption--off');
+        if (a.doneAt && entry.caption) markCaptionDone(entry.caption);
+        else entry.caption?.classList.add('bag-step-caption--off');
       }
     } else {
       // 対象未解決/floating は浮遊キャプションで常時表示する(画面右下に番号順で積む)。
@@ -2141,9 +2146,18 @@
   function renderFloatingNote(a, number) {
     const cap = buildStepCaption(number, a.note || '');
     cap.classList.add('bag-floating');
-    if (!memoForAI(a)) cap.classList.add('bag-step-caption--off');
+    if (a.doneAt) markCaptionDone(cap);
+    else if (!memoForAI(a)) cap.classList.add('bag-step-caption--off');
     cap.setAttribute(ATTR.anno, a.id); // renderAnnotations の [data-bag-anno] 一括クリアで作り直す
     floatingHost().appendChild(cap);
+  }
+
+  function markCaptionDone(cap) {
+    cap.classList.add('bag-step-caption--done');
+    const done = document.createElement('span');
+    done.className = 'bag-step-caption-done';
+    done.textContent = t('cs.memo.done');
+    cap.append(done);
   }
 
   function observeAnno() {
@@ -3222,6 +3236,12 @@
     tag.className = 'bag-memo-tag';
     tag.textContent = t('cs.memo.tag');
     head.append(numChip, tag);
+    if (a.doneAt) {
+      const done = document.createElement('span');
+      done.className = 'bag-memo-done';
+      done.textContent = t('cs.memo.done');
+      head.append(done);
+    }
 
     const ta = document.createElement('textarea');
     ta.className = 'bag-memo-text';
@@ -3305,6 +3325,7 @@
       entry?.g?.classList.toggle('bag-draw-g--off', off);
       entry?.connector?.classList.toggle('bag-memo-connector--off', off);
       entry?.numEl?.classList.toggle('bag-anno-num--off', off);
+      if (cb.checked) card.querySelector('.bag-memo-done')?.remove(); // 付け直し = 未対応へ戻す
       updateMemoFields(a.id, { forAI: cb.checked });
     });
     saveBtn.addEventListener('click', (e) => {
@@ -3412,6 +3433,8 @@
     }
     if ('forAI' in patch && memoForAI(a) !== patch.forAI) {
       a.forAI = patch.forAI;
+      // 対応済みのメモに人がチェックを付け直したら、直っていなかったとみなして未対応へ戻す。
+      if (patch.forAI) delete a.doneAt;
       changed = true;
     }
     // ドラッグで覚えさせた手動位置(図形ボックス左上からの px オフセット)。null/未指定で自動配置へ戻す。
@@ -5099,6 +5122,23 @@
           await updateMemoFields(a.id, { forAI: msg.on === true });
           renderAnnotations();
           return { id: a.id, forAI: memoForAI(a) };
+        }
+        case 'MARK_ANNOTATIONS_DONE': {
+          // AI がメモに対応し終えた(MCP resolve_feedback)。「AI対応済み」にして「AIに渡す」を外し、次の送信に含めない。
+          const ids = new Set(Array.isArray(msg.ids) ? msg.ids.map(String) : []);
+          const marked = [];
+          for (const a of annotations) {
+            if (!ids.has(a.id) || (a.kind !== 'drawing' && a.kind !== 'note')) continue;
+            a.doneAt = String(msg.at || new Date().toISOString());
+            a.forAI = false;
+            marked.push(a.id);
+          }
+          if (marked.length) {
+            await persistAnnotations();
+            renderAnnotations();
+            notifyPageFeedbackChanged('update');
+          }
+          return { marked };
         }
         case 'EXPORT_CONTEXT':
           return { text: buildContextText() };

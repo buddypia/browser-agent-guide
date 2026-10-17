@@ -1902,6 +1902,22 @@ async function connectDaemonWebSocket() {
         return;
       }
 
+      if (msg?.type === 'mark_annotations_done') {
+        // AI がメモに対応し終えた(MCP resolve_feedback)。該当メモを持たない拡張は ok:false を返し、
+        // 持つ拡張の応答を daemon に採らせる(daemon は最初の ok:true で解決する)。
+        let reply;
+        try {
+          const marked = await markAnnotationsDone(msg);
+          reply = marked.length ? { ok: true, marked } : { ok: false, error: 'No matching annotations in this browser.' };
+        } catch (err) {
+          reply = { ok: false, error: err.message };
+        }
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'mark_annotations_done_result', requestId: msg.requestId, ...reply }));
+        }
+        return;
+      }
+
       if (msg?.type === 'run_actions') {
         const { requestId, tabId, windowId, urlContains, titleContains, actions } = msg;
         try {
@@ -1953,6 +1969,34 @@ async function connectDaemonWebSocket() {
     console.warn('[bag] failed to initiate daemon WS:', e);
     scheduleReconnect();
   }
+}
+
+// 指定 id のお描き/メモを「AI対応済み」にして「AIに渡す」を外す。そのページを開いているタブがあれば
+// content に任せて表示もその場で変え、閉じた/別ページへ移った分は保存済みの注釈を直接書き換える(id は全ページで一意)。
+async function markAnnotationsDone({ tabId, ids }) {
+  const want = (Array.isArray(ids) ? ids : []).map(String);
+  const at = new Date().toISOString();
+  const marked = [];
+  if (Number.isInteger(tabId) && (await getTab(tabId))) {
+    const res = await ensureContentAndSend(tabId, { type: 'MARK_ANNOTATIONS_DONE', ids: want, at }).catch(() => null);
+    if (Array.isArray(res?.marked)) marked.push(...res.marked);
+  }
+  const rest = want.filter((id) => !marked.includes(id));
+  if (!rest.length) return marked;
+  const key = 'aiAdvisorAnnotations';
+  const map = (await chrome.storage.local.get(key))[key] || {};
+  let changed = false;
+  for (const list of Object.values(map)) {
+    for (const a of Array.isArray(list) ? list : []) {
+      if (!a || !rest.includes(a.id) || (a.kind !== 'drawing' && a.kind !== 'note')) continue;
+      a.doneAt = at;
+      a.forAI = false;
+      marked.push(a.id);
+      changed = true;
+    }
+  }
+  if (changed) await chrome.storage.local.set({ [key]: map });
+  return marked;
 }
 
 function scheduleReconnect() {
