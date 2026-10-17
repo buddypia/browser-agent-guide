@@ -496,6 +496,15 @@ html.bag-drawing .bag-draw-overlay {
   border-radius: 999px;
   padding: 2px 8px;
 }
+/* AI が対応済みにしたメモ(resolve_feedback)。カードは淡色(AIに渡さない)になるので、濃い緑で読めるようにする。 */
+.bag-memo-done {
+  font-size: 10px;
+  font-weight: 800;
+  color: #17562f;
+  background: #e3f1e7;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
 .bag-memo-text {
   width: 100%;
   box-sizing: border-box;
@@ -638,6 +647,22 @@ html.bag-drawing .bag-draw-overlay {
 .bag-anno-outline-box--off,
 .bag-step-caption--off {
   opacity: 0.45;
+}
+/* AI が対応済みにした補足(resolve_feedback)。淡色にせず、緑の枠と「AI対応済み」で示す。 */
+.bag-step-caption--done {
+  border-color: #2f7a4b;
+}
+.bag-step-caption--done .bag-step-caption-num {
+  background: #2f7a4b;
+}
+.bag-step-caption-done {
+  flex: none;
+  font-size: 10px;
+  font-weight: 800;
+  color: #17562f;
+  background: #e3f1e7;
+  border-radius: 999px;
+  padding: 1px 6px;
 }
 
 /* ===== お描きワークフロー(番号付きお描きを「操作手順」として説明する) ===== */
