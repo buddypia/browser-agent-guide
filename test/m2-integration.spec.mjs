@@ -73,7 +73,7 @@ test.describe('Milestone 2 Integration', () => {
     // 2) Start test daemon server
     daemonInboxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bag-daemon-inbox-'));
     entryStore = createPageFeedbackStore({ inboxDir: daemonInboxDir, storageMode: 'memory' });
-    daemonServer = createHttpServer({ inboxDir: daemonInboxDir, entryStore, token: TOKEN });
+    daemonServer = createHttpServer({ inboxDir: daemonInboxDir, entryStore, token: TOKEN, extensionRequest: (type, params) => daemonWss.request(type, params) });
     daemonWss = attachWebSocketServer(daemonServer, { inboxDir: daemonInboxDir, entryStore, token: TOKEN });
     await new Promise((r) => daemonServer.listen(0, '127.0.0.1', r));
     daemonPort = daemonServer.address().port;
@@ -260,6 +260,50 @@ test.describe('Milestone 2 Integration', () => {
     expect(all.find((a) => a.id === 'note-later').doneAt).toBeUndefined();
     // 該当メモを持たない拡張は ok:false を返す(複数の拡張が繋がる時に、持つ側の応答を daemon に採らせる)。
     await expect(daemonWss.request('mark_annotations_done', { tabId, ids: ['missing'] })).rejects.toThrow(/No matching annotations/);
+
+    await sw.evaluate(() => chrome.storage.local.remove('aiAdvisorAnnotations'));
+    await page.close();
+  });
+
+  test('a4. MCP resolve_feedback reaches the real extension and the latest answers "handled"', async () => {
+    await expect.poll(() => daemonWss.getBridgeStatus().connected).toBe(true);
+    const sw = await getServiceWorker(context);
+    const scope = pageUrl.split('?')[0];
+    const anchor = { selector: 'input[name="email"]', tag: 'input', role: 'textbox', text: '' };
+    await sw.evaluate(
+      ({ scope, anchor }) =>
+        chrome.storage.local.set({ aiAdvisorAnnotations: { [scope]: [{ id: 'note-mcp', kind: 'note', createdAt: '2026-10-17T00:00:00Z', note: '入力欄の枠を太く', intent: '', anchor, forAI: false }] } }),
+      { scope, anchor },
+    );
+    const page = await context.newPage();
+    await page.goto(pageUrl);
+    await expect(page.locator('.bag-step-caption')).toHaveCount(1);
+    const tabId = await sw.evaluate(async (u) => (await chrome.tabs.query({})).find((t) => t.url === u)?.id, pageUrl);
+    // 人が「AIに渡す」にチェック → daemon ON なのでメモだけが画像なしで同期される。
+    await sw.evaluate((t) => chrome.tabs.sendMessage(t, { type: 'SET_ANNOTATION_FOR_AI', id: 'note-mcp', on: true }, { frameId: 0 }), tabId);
+    const mcp = async (name, args) => {
+      const res = await fetch(`http://127.0.0.1:${daemonPort}/mcp`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+      });
+      const text = await res.text();
+      const line = text.split('\n').find((l) => l.startsWith('data: '));
+      return JSON.parse(line ? line.slice(6) : text).result;
+    };
+    let ctx;
+    await expect.poll(async () => (ctx = await mcp('get_latest_feedback_context', { tabId }))?.structuredContent?.id || '', { timeout: 15000 }).not.toBe('');
+    expect(JSON.stringify(ctx.content)).toContain('入力欄の枠を太く');
+
+    const resolved = await mcp('resolve_feedback', { id: ctx.structuredContent.id, summary: '枠を 2px にした' });
+    expect(resolved.structuredContent.extension).toEqual({ marked: ['note-mcp'], missing: [] });
+    await expect(page.locator('.bag-step-caption--done')).toContainText('AI');
+    const stored = await sw.evaluate(async (s) => (await chrome.storage.local.get('aiAdvisorAnnotations')).aiAdvisorAnnotations[s][0], scope);
+    expect(stored).toMatchObject({ forAI: false, doneAt: expect.any(String) });
+    // 同じメモに二度対応させない: latest は中身を返さず「対応済み」と答え、top-level に id を載せない。
+    const again = await mcp('get_latest_feedback_context', { tabId });
+    expect(again.content[0].text).toContain('対応済み');
+    expect(again.structuredContent.id).toBeUndefined();
 
     await sw.evaluate(() => chrome.storage.local.remove('aiAdvisorAnnotations'));
     await page.close();

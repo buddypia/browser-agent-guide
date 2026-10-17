@@ -72,7 +72,7 @@ async function withClient(fn) {
   }
 }
 
-test('tools/list が新名5ツールのみを公開する（旧 page_feedback エイリアスは撤去済み）', async () => {
+test('tools/list が現行ツールのみを公開する（旧 page_feedback エイリアスは撤去済み）', async () => {
   await withClient(async (client) => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
@@ -84,6 +84,7 @@ test('tools/list が新名5ツールのみを公開する（旧 page_feedback �
       'get_latest_feedback_context',
       'get_latest_feedback_image',
       'list_feedback',
+      'resolve_feedback',
     ].sort());
     // 2 つの image ツールは context-first ゲート（contextId + imageReason）を必須にする。
     for (const name of ['get_latest_feedback_image', 'get_feedback_image']) {

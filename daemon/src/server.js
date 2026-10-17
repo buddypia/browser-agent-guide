@@ -11,7 +11,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { buildEntryContent, buildEntryContext, buildEntryContextText, entryHasImage, peekDistinctRecent, readEntryImageBuffer, readEntryInline, tabSummary } from './inbox.js';
+import { buildEntryContent, buildEntryContext, buildEntryContextText, entryHasImage, peekDistinctRecent, readEntryAnnotation, readEntryImageBuffer, readEntryInline, tabSummary } from './inbox.js';
 import { createDiskEntryStore } from './store.js';
 import { evaluateGoalWithEg2, validateEg2Url, DEFAULT_EG2_URL } from './eg2.js';
 
@@ -52,7 +52,7 @@ const IMAGE_GATE_SCHEMA = {
 
 // shotUrlFor(id, kind) は、ディスクパス非依存の loopback HTTP 取得先（/shot|/raw/<id>.png?token=…）を
 // 返すオプション関数。渡された時だけ context/image テキストに shot_url/raw_url を併走させる。
-export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFAULT_LATEST_WINDOW_MS, nowMs, bridgeStatus, executeActions } = {}) {
+export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFAULT_LATEST_WINDOW_MS, nowMs, bridgeStatus, executeActions, extensionRequest } = {}) {
   const entryStore = asEntryStore(entrySource);
   const currentNowMs = typeof nowMs === 'function' ? nowMs : () => (Number.isFinite(nowMs) ? nowMs : Date.now());
   const emptyMessage = (filters) => filterEmptyMessage(filters, bridgeStatus ? bridgeStatus() : null);
@@ -117,6 +117,8 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
         }
         const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains });
         if (stale) return stale;
+        const done = resolvedLatestResult(entry);
+        if (done) return done;
         const peek = peekDistinctRecent(rows, { windowMs: latestWindowMs });
         if (peek.distinctCount >= 2) {
           return ambiguousLatestResult(peek);
@@ -131,6 +133,8 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       }
       const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains, tabId, windowId });
       if (stale) return stale;
+      const done = resolvedLatestResult(entry);
+      if (done) return done;
       return contextResult(entry, shotUrlFor);
     }
   );
@@ -159,6 +163,8 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
         }
         const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains });
         if (stale) return stale;
+        const done = resolvedLatestResult(entry);
+        if (done) return done;
         const peek = peekDistinctRecent(rows, { windowMs: latestWindowMs });
         if (peek.distinctCount >= 2) {
           const picked = peek.candidates.find((c) => c.id === contextId);
@@ -183,6 +189,8 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       }
       const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains, tabId, windowId });
       if (stale) return stale;
+      const done = resolvedLatestResult(entry);
+      if (done) return done;
       return imageResult(entryStore, entry, shotUrlFor, { contextId, imageReason });
     }
   );
@@ -334,6 +342,47 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
     }
   );
 
+  server.registerTool(
+    'resolve_feedback',
+    {
+      title: 'フィードバックを対応済みにする',
+      description:
+        'メモ/お描きの指示に対応し終えたら、その capture の id(context の id)を渡して呼ぶ。以後 get_latest_feedback_* はそれを返さず「対応済み」と答える。' +
+        '拡張が接続していれば、その capture に入っていたメモをページ上でも「AI対応済み」にし、「AIに渡す」を外して次の送信に含めない' +
+        '(人が確認して直っていなければ、チェックを付け直すと再び届く)。メモは消さない。',
+      inputSchema: {
+        id: z.string().min(1).describe('対応した capture の id(get_*_feedback_context の id)'),
+        summary: z.string().max(500).optional().describe('何をどう直したか(1〜2文。人が確認に使う)'),
+      },
+    },
+    async ({ id, summary }) => {
+      const entry = entryStore.findEntry(id);
+      if (!entry) return { content: [{ type: 'text', text: `id=${id} は見つかりません。` }], isError: true };
+      const resolution = { at: new Date(currentNowMs()).toISOString(), summary: String(summary || '') };
+      entryStore.markResolved?.(id, resolution);
+      const annotation = readEntryAnnotation(entry) || {};
+      const ids = (Array.isArray(annotation.items) ? annotation.items : []).map((it) => it?.id).filter(Boolean);
+      const lines = [`id=${id} を対応済みにしました(${resolution.at})。`];
+      let extension = null;
+      if (!ids.length) {
+        lines.push('この capture にはメモの id が無いため、拡張側のメモは変えていません。');
+      } else if (!extensionRequest) {
+        lines.push('拡張との接続が無いため、ページ上のメモは変えていません。');
+      } else {
+        try {
+          const res = await extensionRequest('mark_annotations_done', { tabId: annotation.tab?.tabId ?? null, url: annotation.url || entry.url || '', ids });
+          const marked = Array.isArray(res?.marked) ? res.marked : [];
+          extension = { marked, missing: ids.filter((x) => !marked.includes(x)) };
+          lines.push(`ページ上のメモ ${marked.length}/${ids.length} 件を「AI対応済み」にし、「AIに渡す」を外しました。`);
+        } catch (err) {
+          extension = { error: err.message };
+          lines.push(`ページ上のメモは更新できませんでした: ${err.message}`);
+        }
+      }
+      return { content: [{ type: 'text', text: lines.join('\n') }], structuredContent: { id, resolution, extension } };
+    }
+  );
+
   if (executeActions) {
     server.registerTool(
       'execute_actions',
@@ -418,8 +467,23 @@ function asEntryStore(entrySource) {
 }
 
 function entryStatus(entry) {
-  if (!entry?.storage) return '';
-  return `  storage=${entry.storage}${entry.materialized === false ? '/memory' : '/materialized'}`;
+  const resolved = entry?.resolution ? `  resolved=${entry.resolution.at}` : '';
+  if (!entry?.storage) return resolved;
+  return `  storage=${entry.storage}${entry.materialized === false ? '/memory' : '/materialized'}${resolved}`;
+}
+
+// 最新が対応済み(resolve_feedback 済み)なら中身を返さない。同じメモに二度対応させないため。
+// stale と同じく top-level に id を載せない(対応済みの id を「今の依頼」として掴ませない)。
+function resolvedLatestResult(entry) {
+  if (!entry?.resolution) return null;
+  const { at, summary } = entry.resolution;
+  const message =
+    `最新のキャプチャ(id=${entry.id})は対応済みです(${at}${summary ? `: ${summary}` : ''})。その後に新しいメモ/お描きは届いていません。` +
+    '新しい依頼があるなら、拡張から送り直してもらうようユーザーに伝える。対応済みの中身を見直す時だけ get_feedback_context に id を渡す。';
+  return {
+    content: [{ type: 'text', text: message }],
+    structuredContent: { resolved: { message, latest: { id: entry.id, url: entry.url || '', resolution: entry.resolution } } },
+  };
 }
 
 function entryTab(entry) {

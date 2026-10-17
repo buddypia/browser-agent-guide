@@ -36,6 +36,9 @@
   - `get_feedback_image` — context 確認後のみ id 指定で image+パスを返す
   - `evaluate_feedback_goal` — キャプチャの画面が目的の状態になっているかを、ローカルの EmbeddingGemma 2(`EG2_URL`)で判定する(既定は success / failure の二択)
   - `execute_actions` — 接続中の拡張を通して、指定タブで拡張の動詞を実行する（使える動詞は allow-list に限る。下の「セキュリティ」）
+  - `resolve_feedback` — 対応し終えた capture を対応済みにする。以後 `get_latest_feedback_*` はそれを返さず「対応済み」と答え、
+    拡張が繋がっていればページ上のメモも「AI対応済み」にして「AIに渡す」を外す（メモは消さない。人がチェックし直すと再び届く）。
+    disk/hybrid では `<slug>/resolution.json` に残る
 
   > **命名（旧 → 新の経緯）**: かつての `*_visual_feedback*` は「メモ＋HTML 要素だけ欲しい（画像なし）」ケースでも "visual" を
   > 冠して紛らわしかったため、modality 中立な `*_feedback_context`（テキスト/HTML/a11y）と `*_feedback_image`（画像）へ改名し、
@@ -370,7 +373,7 @@ node scripts/probe.mjs ~/Downloads/ai-inbox --image             # 必要時の�
 - **`execute_actions` は動詞の allow-list(入力スキーマの `verb` enum)に限る**。拡張側も同じ一覧を実行時に強制し、
   経路名は SW が `execute_actions` に固定する(daemon の申告は使わない)。任意 JS(`injectScript`)・HTML 注入・
   `navigateTo`・要素削除・`submitForm` は無い。`setStyle` で変えられるのは色・枠線・文字・余白・大きさだけで、
-  `url()` などの外部参照や、要素を重ねる/隠す/動かすプロパティは断る。確定/購入/削除や名前の無いボタンのクリックは
+  `url()` などの外部参照や、要素を重ねる・動かす・透過させるプロパティは断る(色や大きさで目立たなくすることまでは防げない)。確定/購入/削除や名前の無いボタンのクリックは
   `held:true` で保留され、人が押す。ページ由来の文字列(メモの HTML 等)で AI が乗っ取られても、ユーザーのタブで
   任意コードを走らせず、読んだ内容を外へ送る口を減らすため。ただし普通のボタンやリンクは押せるので、それによる送信・遷移は起こりうる。
 - 拡張は daemon と WS をつなぎっぱなしにし、切れたら再接続する(MV3 の SW が止まらないよう 20 秒ごとに ping)。

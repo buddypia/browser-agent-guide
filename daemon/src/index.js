@@ -112,6 +112,7 @@ const server = createHttpServer({
   latestWindowMs,
   bridgeStatus: () => wssRef?.getBridgeStatus?.() || { connected: false, everConnected: false, lastConnectedAt: null, lastPushAt: null },
   executeActions: (params) => wssRef?.executeActions?.(params),
+  extensionRequest: (type, params) => (wssRef ? wssRef.request(type, params) : Promise.reject(new Error('No extension clients connected to daemon.'))),
   host,
 });
 const wss = attachWebSocketServer(server, {

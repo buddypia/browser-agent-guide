@@ -23,6 +23,12 @@ function writeAtomic(dir, filename, buffer) {
   renameSync(tmp, target);
 }
 
+// 対応済みの記録(MCP resolve_feedback)。capture 本体は変えず、entry ディレクトリに置く。
+export const RESOLUTION = 'resolution.json';
+export function writeResolution(dir, resolution) {
+  writeAtomic(dir, RESOLUTION, Buffer.from(JSON.stringify(resolution, null, 2)));
+}
+
 export function decodeBase64(data) {
   if (!data) return null;
   // data URL（png/webp/jpeg いずれの image/* も）でも生 base64 でも受ける。
