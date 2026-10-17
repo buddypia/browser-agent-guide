@@ -179,6 +179,37 @@ test.describe('決定的ワークフロー: 観察記録', () => {
     expect(confirm.locator.kind).toBe('fixed');
   });
 
+  // 実サイト(Amazon の検索バー)で、div で並ぶ選択欄・入力欄・送信ボタンが一覧と誤判定されていた。
+  test('div で並ぶフォームの行は一覧とみなさず、同じ種類のボタンの並びと深い商品カードの並びは pick 手順にする', async ({ page }) => {
+    await load(page, { recording: true });
+    await page.evaluate(() => {
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        `<form id="search" onsubmit="return false"><div class="nav-left"><select aria-label="カテゴリー"><option>すべて</option><option>本</option></select></div>
+         <div class="nav-fill"><input type="text" aria-label="検索語"></div>
+         <div class="nav-right"><span><input id="nav-search-submit-button" type="submit" value="検索"></span></div></form>
+         <div id="plans"><div><button>ライト</button></div><div><button>標準</button></div><div><button>プロ</button></div></div>`
+      );
+      // Amazon の検索結果と同じく、商品カードがタイトルのリンクから8階層上にある一覧。
+      const deep = (title) => `<div class="s-result-item">${'<div><div class="a-section">'.repeat(3)}<span><div>` +
+        `<h2><a href="#p">${title}</a></h2><div class="a-section"><a href="#r">評価</a></div><div class="a-section"><a href="#s" role="button">カートに入れる</a></div>` +
+        `</div></span>${'</div></div>'.repeat(3)}</div>`;
+      document.body.insertAdjacentHTML('beforeend', `<div id="results">${['赤ペン', '青ペン', '黒ペン'].map(deep).join('')}</div>`);
+    });
+    await page.click('#nav-search-submit-button');
+    await page.click('#plans div:nth-child(2) button');
+    await page.click('#results > div:nth-child(3) h2 a');
+    await page.waitForTimeout(50);
+    const [submit, plan, product] = await steps(page);
+    expect(submit).toMatchObject({ target: '検索', locator: { kind: 'fixed' } });
+    expect(submit.locator.anchor.selector).toBe('#nav-search-submit-button');
+    expect(plan.locator.kind).toBe('pick');
+    expect(plan.choice).toEqual({ by: 'text', value: '標準' });
+    expect(product.locator.kind).toBe('pick'); // カード内の小区画(タイトル/評価/カート)ではなく、カードの並び
+    expect(product.locator.item).toMatchObject({ classes: ['s-result-item'] });
+    expect(product.choice).toEqual({ by: 'text', value: '黒ペン' }); // 項目間で一意な押した要素のテキスト(評価等は含めない)
+  });
+
   test('記録OFF・拡張自身のUI・実行器の操作は記録しない', async ({ page }) => {
     await load(page, { recording: false });
     await page.click('#new');
@@ -240,6 +271,64 @@ test.describe('決定的ワークフロー: RUN_STEP', () => {
     const res = await execute(page, { ...pick, choice: { by: 'text', value: 'チャーター便' } });
     expect(res.status).toBe('ok');
     expect(await state(page)).toBe('ship:チャーター便');
+  });
+
+  // 実サイト(Amazon の検索結果)で、バッジ付きのカードだけ構造がずれ、位置のパスがカード自体に落ちていた。
+  test('pick 手順: 項目の構造がずれても、記録した要素のセレクタで項目内の同じ要素を押す', async ({ page }) => {
+    await load(page, { recording: true });
+    await page.evaluate(() => {
+      const card = (t) => `<div class="card"><div class="body"><div data-cy="title"><a href="#" class="ttl">${t}</a></div><div><a href="#" class="rate">評価</a></div></div></div>`;
+      document.body.insertAdjacentHTML('beforeend', `<div id="cards">${['赤ペン', '青ペン', '黒ペン'].map(card).join('')}</div>`);
+      document.getElementById('cards').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('state').textContent = 'open:' + e.target.textContent;
+      });
+    });
+    await page.click('#cards > div:nth-child(1) .ttl');
+    await page.waitForTimeout(50);
+    const [step] = await steps(page);
+    expect(step.locator.kind).toBe('pick');
+    expect(step.choice).toEqual({ by: 'text', value: '赤ペン' });
+    // 3枚目だけ先頭にバッジが入り、位置のパス(1つ目の div の a)はバッジを指すようになる。
+    await page.evaluate(() =>
+      document.querySelector('#cards > div:nth-child(3) .body').insertAdjacentHTML('afterbegin', '<div><a href="#" class="badge">ベストセラー</a></div>')
+    );
+    const res = await execute(page, { ...step, choice: { by: 'text', value: '黒ペン' } });
+    expect(res.status).toBe('ok');
+    expect(await state(page)).toBe('open:黒ペン');
+  });
+
+  test('pick 手順: 押した要素のテキストが他の項目の全文にも含まれるなら、選び方は項目全文のまま', async ({ page }) => {
+    await load(page, { recording: true });
+    await page.evaluate(() => {
+      const card = (t, p) => `<div class="card"><a href="#" class="ttl">${t}</a> <span>${p}</span></div>`;
+      document.body.insertAdjacentHTML('beforeend', `<div id="cards">${card('赤ペン', '¥100')}${card('赤ペン替芯', '¥80')}${card('青ペン', '¥100')}</div>`);
+      document.getElementById('cards').addEventListener('click', (e) => e.preventDefault());
+    });
+    await page.click('#cards > div:nth-child(1) .ttl');
+    await page.waitForTimeout(50);
+    const [step] = await steps(page);
+    expect(step.choice).toEqual({ by: 'text', value: '赤ペン ¥100' });
+  });
+
+  test('クリック: target=_blank や文書内に無い名前のリンクは同じタブで開き、既存フレームを狙うリンクはフレームだけ遷移する', async ({ page }) => {
+    await load(page);
+    await page.evaluate(() => {
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        `<iframe name="main" src="about:blank"></iframe><a id="to-frame" href="/frame-page" target="main">枠で開く</a>
+         <a id="to-win" href="/reports/42" target="report-win">別窓で開く</a>`
+      );
+    });
+    const click = (selector) => runStep(page, { action: { verb: 'click' }, locator: { kind: 'fixed', anchor: { selector, tag: 'a' } } });
+    expect((await click('#to-frame')).status).toBe('ok');
+    await expect.poll(() => page.frame({ name: 'main' })?.url()).toBe('http://bag.test/frame-page');
+    expect(page.url()).toBe('http://bag.test/orders/new');
+    expect(await page.getAttribute('#to-frame', 'target')).toBe('main');
+    const popup = page.context().waitForEvent('page', { timeout: 2000 }).catch(() => null);
+    await click('#to-win');
+    await page.waitForURL('http://bag.test/reports/42');
+    expect(await popup).toBeNull();
   });
 
   test('pick 手順: 「数値が最小」ルールは実行時の候補から決定的に選ぶ', async ({ page }) => {

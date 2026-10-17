@@ -37,7 +37,11 @@ confidence: medium
 - `action.verb` は閉じた集合 `click | fill | select | check`。`value` は `{name}` 変数を含められる
   (パスワードは値を保存せず `{password}` に置換)。
 - `locator.kind` は `fixed`(記録した要素を anchor で再特定)か `pick`(同じ形の項目が3つ以上並ぶ
-  リスト内の操作。`scope`/`item` 署名/`inner` で実行時に候補を列挙)。
+  リスト内の操作。`scope`/`item` 署名/`inner` で実行時に候補を列挙)。リストとみなすのは項目らしいタグ/role/クラスか、
+  汎用 div なら先頭3つが同じ種類の操作要素を持つ並びだけ(選択欄・入力欄・送信ボタンが並ぶフォームの行は `fixed`)。
+  既定の選び方は押した要素のテキストが項目間で一意かつ項目全文への部分一致でも1件ならそれ(評価や価格で変わる
+  項目全文より安定)、無ければ項目全文。`text` の値の末尾「…」(記録時に切った値)は前方部分として照合する。
+  実行時の項目内の対象は、記録した要素のセレクタが項目内で1つに当たればそれ、無ければ位置のパス。
 - `choice.by` は `index | text | first | last | min | max | ai`。候補からの選択は SW の純関数
   `pickCandidate` が決め、決まらない時(曖昧/該当なし/`ai`)だけ AI に **候補キーの enum から1つ**
   を選ばせる(`callAIChoice`)。AI が補った結果は `suggestion` として残り、人間が採用した時だけ学習される。
@@ -52,7 +56,7 @@ confidence: medium
   content の確定系ゲートも対象のテキストが `expectText` と一致する時だけ承認を効かせる(ルールで選んだ pick 候補も
   同じ。承認までに一覧が並び替わりうるため)。AI が選んだ候補を一意に示せない(テキスト無し/同じ表記が複数)時は
   保留せず止める。外部 AI へ手順の入力値も、入力欄の今の値も送らない(`labelOf` は `value` 属性=ページの初期値だけを使う)。
-- `check.type` は `none | url | text | appears | visual | download`。URL は `urlPattern`(`:id` 汎化)で照合し、
+- `check.type` は `none | url | text | appears | visual | download`。URL は `urlPattern`(`:id` 汎化。ID 的区間・`=` を含む区間、ID がある URL では長い slug も可変)で照合し、
   `visual` はステップ実行後にタブの読込完了・アクティブ状態を確認し、`PREPARE_VISUAL_CHECK` で入力欄(`input`/`textarea`/`contenteditable`)のライブ値を透明マスクした上でスクリーンショットを撮り、`callJudgeVisualCheck`(Jev / Clef マルチモーダルまたは eg2 `POST /v1/evaluate`)で画面状態・UI崩れやエラー表示の有無を検証する。
 - `download` は操作の前から SW がページのダウンロード(`chrome.downloads.onCreated`。拡張自身の保存は除く)を見張り、
   ファイル名か URL に `value` を含む(空なら何でも)ものが `complete` になるまで待つ(上限60秒)。始まらない・中断・
@@ -61,3 +65,5 @@ confidence: medium
 
 実行は SW の `driveWorkflow` が1手ずつ: ページ合わせ → `RUN_STEP`(content の `runStep`)→ 確認 →
 前進。`dryRun` は操作せず対象を光らせるだけ。`kind` を持たない旧来のメモ手順は従来どおり AI が verbs 化する。
+ランナーは1つのタブで進む。新しいタブで開くリンク(`_blank`、または文書内に無いフレーム名)のクリックは `runStep` が同じタブで開く
+(既存の iframe/frame を名前で狙うリンクはそのまま)。記録時は人が開いた新しいタブで続けてよい(手順は URL で結び付く)。
