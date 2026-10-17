@@ -10,6 +10,16 @@ export const repoRoot = path.resolve(fileURLToPath(new URL('../..', import.meta.
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
+// 候補選びを任せる判断AI。BAG_LIVE_JUDGE=eg2 ならローカル EmbeddingGemma 2(EG2_URL)、TYPESAFE_API_KEY があれば Jev、
+// どちらも無ければ null(記録したルールでの選び方だけを確かめる)。
+export const liveJudge = process.env.BAG_LIVE_JUDGE === 'eg2' ? 'eg2' : process.env.TYPESAFE_API_KEY ? 'jev' : null;
+const judgeSettings = () =>
+  liveJudge === 'eg2'
+    ? { judge: { provider: 'eg2', minConfidence: 0.7 }, eg2: { url: process.env.EG2_URL || 'http://127.0.0.1:38765', urlVersion: 2 } }
+    : liveJudge === 'jev'
+      ? { judge: { provider: 'jev', apiKey: process.env.TYPESAFE_API_KEY, minConfidence: 0.7 } }
+      : {};
+
 export async function launchWithExtension(name, { locale } = {}) {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), `bag-live-${name}-`));
   const userDataDir = fs.mkdtempSync(path.join(workDir, 'chrome-'));
@@ -41,15 +51,15 @@ export async function launchWithExtension(name, { locale } = {}) {
   };
   const autorunMessages = () => extPage.evaluate(() => window.__autorun.map((m) => m.text).filter(Boolean));
   const clearAutorunMessages = () => extPage.evaluate(() => void (window.__autorun.length = 0));
-  // 記録を始める。judge は Jev(キーが無ければルールの選び方だけを確かめる)。
+  // 記録を始める。judge は liveJudge の設定。
   const startRecording = () =>
     sw.evaluate(
-      (key) =>
+      (settings) =>
         chrome.storage.local.set({
-          aiAdvisorSettings: key ? { judge: { provider: 'jev', apiKey: key, minConfidence: 0.7 } } : {},
+          aiAdvisorSettings: settings,
           aiAdvisorWorkflow: { recording: true, steps: [], saved: [] },
         }),
-      process.env.TYPESAFE_API_KEY || '',
+      judgeSettings(),
     );
   // 記録した手順を作業中に置き、自動実行を始めて止まるまで待つ。
   const runSteps = async (tabId, steps, vars = {}) => {

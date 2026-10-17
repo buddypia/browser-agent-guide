@@ -1,9 +1,9 @@
 // 実地確認(要件2, amazon.co.jp, 未ログインの使い捨てプロファイル): 人の操作で記録 → 別セッションで自動実行。
 // 検索語の入力 → 検索 → 動的な結果から商品を選ぶ → 商品ページ → 「今すぐ買う」は人が承認するまで押さずに止まること。
 // 未ログインなので、記録時に押す「今すぐ買う」もサインイン画面へ移るだけで購入は成立しない。テスト(npm run check)ではない。
-// TYPESAFE_API_KEY があれば、2回目は商品選びを System One(Jev) に任せ、判断の保留を承認しても確定系では再び止まることを見る。
-// 使い方: [TYPESAFE_API_KEY=...] node scripts/live/workflow-amazon.mjs
-import { launchWithExtension, log, sleep, summarizeSteps, waitSteps } from './workflow-lib.mjs';
+// TYPESAFE_API_KEY があれば Jev、BAG_LIVE_JUDGE=eg2 ならローカル eg2 に、2回目の商品選びを任せ、判断の保留を承認しても確定系では再び止まることを見る。
+// 使い方: [TYPESAFE_API_KEY=... | BAG_LIVE_JUDGE=eg2] node scripts/live/workflow-amazon.mjs
+import { launchWithExtension, liveJudge, log, sleep, summarizeSteps, waitSteps } from './workflow-lib.mjs';
 
 const TOP = 'https://www.amazon.co.jp/';
 const x = await launchWithExtension('amazon', { locale: 'ja-JP' });
@@ -39,7 +39,7 @@ try {
   report.steps = summarizeSteps(steps);
   log('recorded steps', JSON.stringify(report.steps, null, 1));
 
-  // 2) 別セッションで自動実行する(ルールの選び方) / 3) 商品選びを Jev に任せる
+  // 2) 別セッションで自動実行する(ルールの選び方) / 3) 商品選びを判断AI(Jev / eg2)に任せる
   const settle = async (run, gateStep) => ({
     done: run?.doneStepIds?.length,
     heldAtGate: !!gateStep && run?.heldStepId === gateStep.id,
@@ -71,9 +71,9 @@ try {
     await sleep(500);
   };
   await runOnce('rule');
-  if (process.env.TYPESAFE_API_KEY) {
+  if (liveJudge) {
     await runOnce(
-      'jev',
+      liveJudge,
       (s) => {
         const pick = s.find((st) => st.locator?.kind === 'pick' && st.url && new URL(st.url).pathname === '/s');
         if (pick) pick.choice = { by: 'ai', value: 'ゼブラ サラサクリップ 0.5 黒 の商品(替芯・他色・他社製品ではない)' };
