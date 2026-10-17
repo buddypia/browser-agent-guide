@@ -659,9 +659,19 @@ async function handleWorkflowRequest({ op, workflowId, vars }) {
   // 開始ページは必ず新しいタブで開く(人が作業中のタブを遷移させない)。
   const created = await chrome.tabs.create({ url: steps[0].url, active: true });
   const tab = (await waitForTab(created.id, (tb) => tb.status === 'complete', WF_NAV_WAIT_MS)) || created;
-  await chrome.storage.local.set({ [WORKFLOW_KEY]: setActiveWorkflow(wf, target.id) });
-  const res = await startWorkflowAutoRun(tab.id, given);
-  if (!res.active) throw new Error(`The run did not start (${res.reason || 'unknown'}).`);
+  // 読み込みを待つ間にサイドパネルで記録・編集・実行が始まっていたら、それを上書きしない。
+  const latest = await readWorkflow();
+  const latestRun = await readWorkflowRun();
+  let res = { active: false, reason: 'side panel changed' };
+  if (!latest.recording && !hasUnsavedSteps(latest) && !latestRun.active && !latestRun.heldStepId) {
+    await chrome.storage.local.set({ [WORKFLOW_KEY]: setActiveWorkflow(latest, target.id) });
+    res = await startWorkflowAutoRun(tab.id, given);
+    if (!res.active) await chrome.storage.local.set({ [WORKFLOW_KEY]: latest }); // 置き換えた作業中の手順を戻す
+  }
+  if (!res.active) {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+    throw new Error(`The run did not start (${res.reason || 'unknown'}).`);
+  }
   return { started: true, tabId: tab.id, workflow: savedWorkflowSummary(target) };
 }
 
