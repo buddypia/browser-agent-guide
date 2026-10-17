@@ -108,6 +108,10 @@ label {
   font-size: 13px;
 }
 
+label[hidden] {
+  display: none;
+}
+
 /* チェックボックス行は横並び + 2カラムにまたがる。 */
 label.checkbox-row {
   flex-direction: row;

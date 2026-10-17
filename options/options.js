@@ -2,7 +2,7 @@
 import { getSettings, saveSettings, DEFAULT_SETTINGS, migrateEg2 } from '../lib/storage.js';
 import { createI18n, resolveLocale, normalizeLocale, languageName } from '../sidepanel/i18n.js';
 import { checkEg2Health, DEFAULT_EG2_URL } from '../lib/eg2-client.js';
-import { askJudge } from '../lib/judge-client.js';
+import { askJudge, askClef, clefRoute, CLEF_MODELS } from '../lib/judge-client.js';
 
 const $ = (id) => document.getElementById(id);
 const SAFE_RECIPE_VERBS = new Set(['injectHtml', 'injectCss', 'injectScript', 'outlineElement', 'injectButton', 'injectPanel']);
@@ -193,25 +193,42 @@ function fillWorkflowForm() {
   $('autorun-allow-irreversible').checked = Boolean(settings.workflow?.allowIrreversibleClicks);
 }
 
-// ---- 判断AI (Jev / EmbeddingGemma 2) ----
+// ---- 判断AI (Jev / Clef / EmbeddingGemma 2) ----
+const JUDGE_PROVIDERS = ['llm', 'jev', 'clef', 'eg2'];
+
 function fillJudgeForm() {
   const j = { ...DEFAULT_SETTINGS.judge, ...(settings.judge || {}) };
-  $('judge-provider').value = j.provider === 'jev' ? 'jev' : j.provider === 'eg2' ? 'eg2' : 'llm';
+  $('judge-provider').value = JUDGE_PROVIDERS.includes(j.provider) ? j.provider : 'llm';
   $('judge-apiKey').value = j.apiKey;
   $('judge-model').value = j.model;
+  $('judge-clefAccountId').value = j.clefAccountId;
+  $('judge-clefApiKey').value = j.clefApiKey;
+  $('judge-clefEndpoint').value = j.clefEndpoint;
+  $('judge-clefModel').value = CLEF_MODELS.includes(j.clefModel) ? j.clefModel : DEFAULT_SETTINGS.judge.clefModel;
   $('judge-minConfidence').value = j.minConfidence;
+  toggleJudgeFields();
+}
+
+// 選んだ判断AIの欄だけを見せる(LLM / eg2 は追加の欄なし)。
+function toggleJudgeFields() {
+  const provider = $('judge-provider').value;
+  for (const el of document.querySelectorAll('[data-judge-for]')) el.hidden = el.dataset.judgeFor !== provider;
 }
 
 function readJudgeForm() {
   const min = Number.parseFloat($('judge-minConfidence').value);
   const rawProv = $('judge-provider').value;
-  const provider = rawProv === 'jev' ? 'jev' : rawProv === 'eg2' ? 'eg2' : 'llm';
+  const provider = JUDGE_PROVIDERS.includes(rawProv) ? rawProv : 'llm';
   return {
     ...DEFAULT_SETTINGS.judge,
     ...(settings.judge || {}),
     provider,
     apiKey: $('judge-apiKey').value.trim(),
     model: $('judge-model').value.trim() || DEFAULT_SETTINGS.judge.model,
+    clefAccountId: $('judge-clefAccountId').value.trim(),
+    clefApiKey: $('judge-clefApiKey').value.trim(),
+    clefEndpoint: $('judge-clefEndpoint').value.trim(),
+    clefModel: $('judge-clefModel').value,
     minConfidence: Number.isFinite(min) ? Math.min(1, Math.max(0, min)) : DEFAULT_SETTINGS.judge.minConfidence,
   };
 }
@@ -236,16 +253,15 @@ async function testJudge() {
     }
     return;
   }
-  if (!judge.apiKey) {
-    setStatus('judge-status', t('opt.judge.enterKey'), false);
+  const clef = judge.provider === 'clef';
+  if (clef ? !clefRoute(judge)?.url : !judge.apiKey) {
+    setStatus('judge-status', clefRoute(judge)?.error || t(clef ? 'opt.judge.enterClef' : 'opt.judge.enterKey'), false);
     return;
   }
   setStatus('judge-status', t('opt.eg2.connecting'), true);
   try {
-    const data = await askJudge({
-      judge,
-      body: { state: 'connection test', questions: { pick: { type: 'noul', instructions: 'This is a connection test.' } } },
-    });
+    const body = { state: 'connection test', questions: { pick: { type: 'noul', instructions: 'This is a connection test.' } } };
+    const data = clef ? await askClef({ judge, body }) : await askJudge({ judge, body });
     setStatus('judge-status', t('opt.judge.testOk', { model: data?.model || judge.model }), true);
   } catch (e) {
     setStatus('judge-status', t('opt.judge.testFailed', { error: e.message }), false);
@@ -565,6 +581,7 @@ function bindEvents() {
   $('save-eg2').addEventListener('click', saveEg2);
   $('save-judge').addEventListener('click', saveJudge);
   $('test-judge').addEventListener('click', testJudge);
+  $('judge-provider').addEventListener('change', toggleJudgeFields);
   $('test-eg2').addEventListener('click', testEg2);
   $('add-rule').addEventListener('click', addRule);
   $('recipe-site').addEventListener('change', loadRecipeJson);
