@@ -107,7 +107,10 @@ so the wrapper CLI and Git hook are kept as additional layers.
 
 Antigravity is wired in `.agents/hooks.json` with the same shared guard for
 `run_command` SessionStart/PreToolUse/PostToolUse coverage, plus the same
-Stop-time shipping gate via an Antigravity adapter. Local
+Stop-time shipping gate. Every command goes through
+`.claude/hooks/antigravity/agy-bridge.mjs`, which translates agy's camelCase
+input and protojson output (agy drops a result with unknown keys, and drops the
+whole file on one malformed entry — `test/antigravity-hooks.test.mjs`). Local
 `.agents/config.json` remains ignored because `worktree-init.mjs` writes
 per-machine `GIT_WORK_TREE` / `GIT_DIR` values there.
 
