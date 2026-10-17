@@ -1887,7 +1887,7 @@ function renderSuggestion(s) {
 }
 
 const CHOICE_ORDER = ['text', 'index', 'first', 'last', 'min', 'max', 'ai'];
-const CHECK_ORDER = ['none', 'url', 'text', 'appears', 'visual'];
+const CHECK_ORDER = ['none', 'url', 'text', 'appears', 'visual', 'download'];
 
 function labeled(labelText, control) {
   const wrap = createEl('label', 'wf-field');

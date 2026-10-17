@@ -67,6 +67,17 @@ function startServer() {
         res.end(shopHtml(order));
       } else if (/^\/checkout\/\d+$/.test(url.pathname)) {
         res.end(CHECKOUT_HTML);
+      } else if (url.pathname === '/reports') {
+        res.end(`<!doctype html><html><head><meta charset="utf-8"><title>レポート</title></head><body>
+          <a id="open" href="/reports/${100 + Math.floor(Math.random() * 900)}">10月の売上</a></body></html>`);
+      } else if (/^\/reports\/\d+$/.test(url.pathname)) {
+        res.end(`<!doctype html><html><head><meta charset="utf-8"><title>売上レポート</title></head><body>
+          <a id="csv" href="/files/sales-2026-10.csv" download>CSVをダウンロード</a>
+          <a id="broken" href="/files/missing.csv" download>壊れたリンク</a></body></html>`);
+      } else if (url.pathname === '/files/sales-2026-10.csv') {
+        res.setHeader('content-type', 'text/csv');
+        res.setHeader('content-disposition', 'attachment; filename="sales-2026-10.csv"');
+        res.end('month,total\n2026-10,1200\n');
       } else {
         res.statusCode = 404;
         res.end('not found');
@@ -108,6 +119,11 @@ test.describe('決定的ワークフロー E2E (拡張ロード)', () => {
     // SW へメッセージを送る送信元として拡張ページを1枚開く(SW は自分宛ての sendMessage を受けない)。
     extPage = await context.newPage();
     await extPage.goto(`chrome-extension://${extId}/options/options.html`);
+    // SW の進捗通知(notifyAutoRun のブロードキャスト)を拡張ページで拾う。
+    await extPage.evaluate(() => {
+      window.__autorun = [];
+      chrome.runtime.onMessage.addListener((m) => void window.__autorun.push(m));
+    });
   });
 
   test.afterAll(async () => {
@@ -226,6 +242,50 @@ test.describe('決定的ワークフロー E2E (拡張ロード)', () => {
     await sw.evaluate((s) => chrome.storage.local.set({ aiAdvisorWorkflow: { recording: false, steps: s, saved: [] } }), steps);
     const res2 = await sendToSw({ type: 'DRY_RUN_WORKFLOW', tabId, vars: { qty: '1' } });
     expect(res2.results[0].status).toBe('needs-ai');
+    await page.close();
+  });
+  test('ページを跨いでレポートを開き、CSV のダウンロード完了まで確認する(記録で確認が自動で付く)', async () => {
+    test.setTimeout(60_000);
+    await sw.evaluate(() => chrome.storage.local.set({ aiAdvisorWorkflow: { recording: true, steps: [], saved: [] } }));
+    const page = await context.newPage();
+    await page.goto(`${origin}/reports`);
+    await waitContentReady(page);
+    await page.click('#open');
+    await page.waitForURL(/\/reports\/\d+$/);
+    await waitContentReady(page);
+    await page.click('#csv');
+
+    let steps;
+    await expect
+      .poll(async () => {
+        steps = (await readStore(sw, 'aiAdvisorWorkflow'))?.steps || [];
+        return steps.map((s) => s.check?.type).join(',');
+      })
+      .toBe('url,download');
+
+    // 別セッション(レポートIDが変わる): 記録を止めて自動実行 → ダウンロード完了で前進し、保存先を知らせる。
+    await sw.evaluate((s) => chrome.storage.local.set({ aiAdvisorWorkflow: { recording: false, steps: s, saved: [] } }), steps);
+    await page.goto(`${origin}/reports`);
+    await waitContentReady(page);
+    const tabId = await tabIdOf(`${origin}/reports`);
+    await extPage.evaluate(() => (window.__autorun.length = 0));
+    expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+    await expect.poll(async () => (await readStore(sw, 'aiAdvisorWorkflowRun'))?.doneStepIds?.length ?? 0, { timeout: 30_000 }).toBe(2);
+    const done = await extPage.evaluate(() => window.__autorun.map((m) => m.text).join('\n'));
+    expect(done).toMatch(/(保存|Saved): /);
+
+    // ダウンロードが失敗したら(サーバーが 404)完了扱いにせず、手順番号つきで止まる。
+    steps[1].locator.anchor = { ...steps[1].locator.anchor, selector: '#broken', text: '壊れたリンク', id: 'broken' };
+    steps[1].target = '壊れたリンク';
+    await sw.evaluate((s) => chrome.storage.local.set({ aiAdvisorWorkflow: { recording: false, steps: s, saved: [] } }), steps);
+    await page.goto(`${origin}/reports`);
+    await waitContentReady(page);
+    await extPage.evaluate(() => (window.__autorun.length = 0));
+    expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+    await expect.poll(async () => (await readStore(sw, 'aiAdvisorWorkflowRun'))?.active, { timeout: 30_000 }).toBe(false);
+    expect((await readStore(sw, 'aiAdvisorWorkflowRun')).doneStepIds).toHaveLength(1);
+    const failed = await extPage.evaluate(() => window.__autorun.map((m) => m.text).join('\n'));
+    expect(failed).toMatch(/ダウンロードが中断されました|download was interrupted/);
     await page.close();
   });
 });
