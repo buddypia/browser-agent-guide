@@ -52,11 +52,16 @@ UI要素にバグを見つけて拡張でメモを残したあと、**`/bag-memo
 
 !`bash ${CLAUDE_SKILL_DIR}/scripts/preflight.sh "$ARGUMENTS"`
 
+> **Codex / Antigravity で使う時**: これらの CLI は上の `!` 行・`${CLAUDE_SKILL_DIR}`・`$ARGUMENTS` を展開しない
+> (上の行が `!` のまま見えていたら展開されていない)。リポジトリのルートで自分で
+> `bash .agents/skills/bag-memo/scripts/preflight.sh "<ユーザーが /bag-memo の後に書いた引数>"` を実行し、
+> その末尾の `STATUS` 行で分岐する。
+
 `STATUS` の読み方:
 
 | フィールド | 使い方 |
 |---|---|
-| `source_branch=MCP` | daemon 稼働 + MCP 登録済み(かつ疎通確認 `mcp_conn=connected`) → **MCP 経路**(主)。ステップ2へ |
+| `source_branch=MCP` | daemon 稼働 + MCP 登録済み(Claude Code は疎通確認 `mcp_conn=connected` も) → **MCP 経路**(主)。ステップ2へ |
 | `source_branch=FILE` | inbox にキャプチャはあるが MCP 未登録/未疎通 → **FILE 直読み**(救済)。あわせて次回用に登録を案内 |
 | `source_branch=NONE` | 取得手段なし → **停止**。`references/fallbacks.md`(`../bag-workflow/references/fallbacks.md`)の該当ブロックを**コピペ可のコマンド付き日本語＋英語**で案内。スタックトレースは出さない |
 | `arg_kind=tabId` `scope_tabId=N` | tabId 確定。`windowId=`/`url=` も解決できていれば併用 |
@@ -64,7 +69,8 @@ UI要素にバグを見つけて拡張でメモを残したあと、**`/bag-memo
 | `arg_kind=none` | **スコープ未指定** → ステップ1の「一覧→tabId を尋ねる」へ(bare 取得は禁止) |
 
 > **`source_branch=MCP` は「呼んでよい」許可であって「呼べる」保証ではない**。ツールを呼ぶ前に**必ず
-> ToolSearch で `mcp__bag_page_feedback__*` が見つかるか確認**し、無ければステップ2の「MCP 未接続の場合」へ。
+> ToolSearch で `mcp__bag_page_feedback__*` が見つかるか確認**し(Codex / Antigravity は ToolSearch が無いので、
+> 自分が使えるツールの一覧に `get_latest_feedback_context` があるかで確かめる)、無ければステップ2の「MCP 未接続の場合」へ。
 > (理由の正本 → `../bag-workflow/references/daemon-mcp.md`)
 
 ---
@@ -83,6 +89,7 @@ UI要素にバグを見つけて拡張でメモを残したあと、**`/bag-memo
 ## ステップ 2 — メモを取得する(MCP・画像なし・tabId スコープ)
 
 **呼び出す前に必ず ToolSearch で `bag_page_feedback` 系ツール(`mcp__bag_page_feedback__*`)が見つかるか確認する**
+(Codex / Antigravity は自分のツール一覧で確認する)
 (`source_branch=MCP` でも省略しない — 理由はステップ0の注記)。
 
 - **見つかった場合(主経路)**: 接頭辞 `bag_page_feedback:` は登録 alias 例。旧 `bag_visual_feedback` で**登録**
@@ -166,7 +173,11 @@ anchorLabel/html grep が現実の主戦力。何も解決できなければ、�
 **直すのは届いたメモだけ**: キャプチャに入るのは、ユーザーが「AIに渡す」にチェックしたメモ/お描きだけ
 (ページ上のメモカード、またはサイドパネルの各行のチェック)。届いていない要素は推測で直さない。
 
-**後始末(任意・ToolSearch で `execute_actions` が見つかる時)**: 直した要素を
+**対応済みにする(MCP 経路の時)**: 修正を終えたら `bag_page_feedback:resolve_feedback({ id: "<context の id>", summary: "<何をどう直したか1〜2文>" })`
+を呼ぶ。以後 `get_latest_feedback_*` は同じメモを返さず(二重対応を防ぐ)、拡張が繋がっていればページ上のメモも
+「AI対応済み」になって「AIに渡す」が外れる。メモは消えない。ユーザーには「直っていなければ『AIに渡す』を付け直すと再び届く」と伝える。
+
+**後始末(任意・`execute_actions` が使える時)**: 直した要素を
 `execute_actions({ tabId, actions: [{ verb: "highlightElement", args: { selector } }] })` で光らせて人間に示す。
 メモを消す(`removeAnnotation{id}`; id は `listAnnotations{}` で取る)のは、ユーザーが対応済みと認めた後だけ。
 

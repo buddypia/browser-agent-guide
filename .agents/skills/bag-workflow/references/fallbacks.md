@@ -44,7 +44,7 @@ FILE 経路で読むもの (preflight の `latest=` フォルダ):
 
 ## MCP は registered/Connected のはずなのに ToolSearch で見つからない (mcp=registered だが未接続)
 
-preflight の `mcp=registered`(`claude mcp list`/`codex mcp list` で行がある)は、**その場で新規に
+preflight の `mcp=registered`(`claude mcp list`/`codex mcp list`/`agy mcp list` で行がある)は、**その場で新規に
 疎通確認した結果**でしかない。Claude Code は MCP サーバーへの接続を**この会話セッションが起動した
 時点**で確立し、そこで失敗すると、daemon が後から立ち上がってもこのセッション内では自動回復しない
 (切断からの自動再接続はある。未接続からの自動接続は無い)。よくある原因は「daemon をこの会話の
@@ -57,6 +57,9 @@ preflight の `mcp=registered`(`claude mcp list`/`codex mcp list` で行があ�
 > The MCP connection wasn't established for this session (even though it's registered) — Claude
 > Code only connects to MCP servers at session startup and won't auto-recover mid-session. If a
 > file capture exists, proceed with that. Otherwise, please start a new conversation and re-run.
+
+Codex / Antigravity では「ToolSearch で見つからない」を「自分のツール一覧に無い」と読み替え、「新しい会話」を
+「その CLI の起動し直し」と読み替える。
 
 `capture=yes` なら FILE 経路でそのまま続行できる。`capture=no` なら新しい会話セッションの開始を促す
 (この preflight を再実行しても直らない — bash からは今のセッションの接続状態を検出できない)。

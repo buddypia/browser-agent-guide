@@ -77,7 +77,7 @@ EOF
   [ -n "$latest" ] && capture="yes" || capture="no"
 }
 
-# Claude Code / Codex への bag_page_feedback MCP 登録 + 疎通確認(タイムアウト付き)。
+# Claude Code / Codex / Antigravity への bag_page_feedback MCP 登録 + 疎通確認(タイムアウト付き)。
 # mcp/mcp_conn を設定する。
 # 注: これは「claude/codex の設定に登録され、このコマンドを叩いた瞬間に疎通できたか」の
 #     チェックであり、いま進行中の会話セッション自身がそのツールを呼べるかどうかとは別物。
@@ -100,6 +100,13 @@ bag_probe_mcp() {
   fi
   if [ "$mcp" = "absent" ] && command -v codex >/dev/null 2>&1; then
     if run_with_timeout 8 codex mcp list 2>/dev/null | grep -qi 'bag_page_feedback'; then
+      mcp="registered"
+      mcp_conn="unknown"
+    fi
+  fi
+  # Antigravity CLI(agy)。`agy mcp list` は NAME/TYPE/STATUS/URL の表を出す。無効化(disabled)された登録は数えない。
+  if [ "$mcp" = "absent" ] && command -v agy >/dev/null 2>&1; then
+    if run_with_timeout 8 agy mcp list 2>/dev/null | grep -i 'bag_page_feedback' | grep -qvi 'disabled'; then
       mcp="registered"
       mcp_conn="unknown"
     fi

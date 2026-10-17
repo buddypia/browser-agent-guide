@@ -3,7 +3,7 @@
 お描き (page feedback) を Claude に届ける常駐 daemon (内部名 `bag-page-feedback`) と、その MCP ツールの使い方。
 ライブの一次情報: `daemon/src/server.js`, `daemon/src/inbox.js`, `daemon/README.md`。
 
-## MCP ツール (5つ) — 完全修飾名で呼ぶ
+## MCP ツール — 完全修飾名で呼ぶ
 
 エンドポイント `http://127.0.0.1:8765/mcp`。接頭辞 (`bag_page_feedback:` 等) は**登録時に付けた alias**で、サーバ内部名とは別物。
 このスキルの例・登録手順は `bag_page_feedback:` を使う。旧 `bag_visual_feedback:` で登録していた場合は付け替える (下「登録」節)。
@@ -14,7 +14,7 @@ context で確認した `contextId` と、vision が必要な理由 `imageReason
 
 > **ツール名 (旧 → 新の経緯)**: かつての `*_visual_feedback*` は「メモ＋HTML だけ欲しい (画像なし)」ケースでも "visual" を
 > 冠して紛らわしかったため、modality 中立な `*_feedback_context` (テキスト/HTML/a11y) と `*_feedback_image` (画像) へ改名した。
-> **旧名 (deprecated エイリアス) は撤去済み** — 現在は新名 5 ツールのみ公開。旧名で書かれた古い手順は動かないので新名を使う。
+> **旧名 (deprecated エイリアス) は撤去済み** — 現在は新名のツールのみ公開。旧名で書かれた古い手順は動かないので新名を使う。
 
 | ツール | 入力 | 返り値 | 用途 |
 |---|---|---|---|
@@ -23,6 +23,10 @@ context で確認した `contextId` と、vision が必要な理由 `imageReason
 | `bag_page_feedback:get_feedback_context` | `{ id }` | text + structuredContent (imageなし。html/a11y 含む) | id 指定でメタ＋HTML を軽量取得 |
 | `bag_page_feedback:get_latest_feedback_image` | `{ urlContains?, titleContains?, tabId?, windowId?, contextId, imageReason }` | image(PNG) + text(file_path, url, title, capturedAt, annotations) | context 確認後、必要時のみ vision 用に取得 |
 | `bag_page_feedback:get_feedback_image` | `{ id, contextId, imageReason }` | image + text | id 指定 context 確認後、必要時のみ vision 用に取得 |
+| `bag_page_feedback:execute_actions` | `{ actions: [{ verb, args?, reason? }], tabId?, windowId?, urlContains?, titleContains? }` | 動詞ごとの結果 | 直した要素を光らせる(`highlightElement`)、メモ一覧(`listAnnotations`)など。使える動詞は enum に限り、確定/購入/削除や名前の無いボタンは `held:true` で押さない |
+| `bag_page_feedback:list_workflows` / `run_workflow` / `get_workflow_run` / `stop_workflow` | `run`: `{ workflowId, vars? }` | JSON テキスト | サイドパネルで保存したワークフローの一覧・実行・状態・停止。実行は開始ページを新しいタブで開く。確定系の手順と判断AIの保留では止まり、人がサイドパネルで承認する(承認するツールは無い) |
+| `bag_page_feedback:resolve_feedback` | `{ id, summary? }` | 結果テキスト | 対応し終えた capture を対応済みにする。以後 latest は同じメモを返さず、拡張のメモも「AI対応済み」になり「AIに渡す」が外れる(メモは消えない) |
+| `bag_page_feedback:evaluate_feedback_goal` | `{ id?, goal, choices? }` | 選んだ選択肢とスコア | ローカルの EmbeddingGemma 2 で、キャプチャの画面が目的の状態か判定する |
 
 ### 共有 inbox のスコープ (重要)
 
@@ -43,7 +47,7 @@ bag_page_feedback:get_latest_feedback_image({
 ## `source_branch=MCP`/`mcp=registered` は「呼べる」保証ではない(canonical — bag-workflow/bag-memo 共通)
 
 preflight の `STATUS` 行が `source_branch=MCP`(または `mcp=registered`)でも、それは **この preflight を
-実行したその瞬間**に別プロセスの `claude mcp list`/`codex mcp list` が疎通確認した結果にすぎない。
+実行したその瞬間**に別プロセスの `claude mcp list`/`codex mcp list`/`agy mcp list` が確かめた結果にすぎない。
 Claude Code は MCP サーバーへの接続を**この会話セッションが起動した時点**で確立し、途中で切断された時
 だけ自動再接続する(最大5回) —— **起動した時点で接続できていなければ、daemon が後から立ち上がっても、
 この会話セッションでは自動回復しない**。
@@ -52,6 +56,8 @@ Claude Code は MCP サーバーへの接続を**この会話セッションが�
 (`mcp__bag_page_feedback__*`)が見つかるか確認**し、見つからなければ FILE 経路(`capture=yes` の場合)に
 切り替えるか、`capture=no` なら「新しい会話セッションを開始してください」と日本語＋英語で案内する
 (具体的な案内文は `fallbacks.md` の「MCP は registered/Connected のはずなのに ToolSearch で見つからない」節)。
+Codex / Antigravity には ToolSearch が無いので、自分が使えるツールの一覧に `get_latest_feedback_context` が
+あるかで確かめる(無ければ同じく、その CLI を起動し直してもらう)。
 
 ## Claude Code に MCP を登録する (1回だけ)
 
@@ -73,7 +79,10 @@ claude mcp list   # bag_page_feedback が出れば登録済み
 { "mcpServers": { "bag_page_feedback": { "type": "http", "url": "http://127.0.0.1:8765/mcp" } } }
 ```
 > Codex CLI は `codex mcp add bag_page_feedback --url http://127.0.0.1:8765/mcp`、
-> または `~/.codex/config.toml` の `url`。Antigravity は `serverUrl` キー。いずれも同じ `…/mcp` を指す。
+> または `~/.codex/config.toml` の `url`。Antigravity CLI は `agy mcp add --type http bag_page_feedback http://127.0.0.1:8765/mcp`
+> (`agy mcp list` で確認。設定ファイルでは `serverUrl` キー)。いずれも同じ `…/mcp` を指す。
+> スキル(`/bag-memo`・`/bag-workflow`)は3つの CLI ともリポジトリの `.agents/skills/` から読まれる
+> (Claude Code は `.claude/skills/`、Codex は `.codex/skills/` のリンク経由)。
 > **旧 alias `bag_visual_feedback` で登録していた場合は付け替える** (旧 deprecated ツール名は撤去済み):
 > `claude mcp remove bag_visual_feedback && claude mcp add --transport http bag_page_feedback http://127.0.0.1:8765/mcp`。
 >
