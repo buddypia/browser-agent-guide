@@ -75,7 +75,7 @@ try {
     await runOnce(
       'jev',
       (s) => {
-        const pick = s.find((st) => st.locator?.kind === 'pick' && new URL(st.url).pathname === '/s');
+        const pick = s.find((st) => st.locator?.kind === 'pick' && st.url && new URL(st.url).pathname === '/s');
         if (pick) pick.choice = { by: 'ai', value: 'ゼブラ サラサクリップ 0.5 黒 の商品(替芯・他色・他社製品ではない)' };
         const fill = s.find((st) => st.action?.verb === 'fill');
         if (fill) fill.action.value = '{q}';

@@ -257,6 +257,54 @@ test.describe('お描き連動のAIメモ', () => {
     expect(await call({ type: 'SET_ANNOTATION_FOR_AI', id: 'missing', on: true })).toHaveProperty('error');
   });
 
+  // AI がメモに対応し終えた(MCP resolve_feedback → SW → MARK_ANNOTATIONS_DONE)。対応済みのメモは次の送信に含めず、
+  // ページ上で「AI対応済み」と示す。人がチェックを付け直すと未対応へ戻り、再び届く。
+  test('AI が対応済みにしたメモは送信から外れて「AI対応済み」と表示され、チェックし直すと戻る', async ({ page }) => {
+    await page.evaluate(() => {
+      const scope = location.origin + location.pathname;
+      const anchor = { selector: '#target', tag: 'button', role: 'button', text: 'CTAボタン' };
+      window.__store.aiAdvisorAnnotations = {
+        [scope]: [
+          { id: 'note-a', kind: 'note', createdAt: '2026-10-17T00:00:00Z', note: '色を濃く', intent: '', anchor },
+          { id: 'note-b', kind: 'note', createdAt: '2026-10-17T00:00:01Z', note: '文言を短く', intent: '', anchor },
+        ],
+      };
+    });
+    const call = (msg) => page.evaluate((m) => new Promise((r) => window.__bagListener(m, {}, r)), msg);
+    await call({ type: 'LIST_ANNOTATIONS' });
+
+    // SW が保存済みの一覧を先に書き換え、開いているタブにはメモリの更新だけを頼む(content は書き戻さない)。
+    await page.evaluate(() => {
+      const map = JSON.parse(JSON.stringify(window.__store.aiAdvisorAnnotations));
+      Object.assign(Object.values(map)[0][0], { forAI: false, doneAt: '2026-10-17T01:00:00.000Z' });
+      window.__store.aiAdvisorAnnotations = map;
+    });
+    expect(await call({ type: 'MARK_ANNOTATIONS_DONE', ids: ['note-a', 'other-page'], at: '2026-10-17T01:00:00.000Z' })).toEqual({ marked: ['note-a'] });
+    const list = (await call({ type: 'LIST_ANNOTATIONS' })).annotations;
+    expect(list.map((a) => [a.id, a.forAI, a.doneAt])).toEqual([['note-a', false, '2026-10-17T01:00:00.000Z'], ['note-b', true, '']]);
+    expect((await call({ type: 'COLLECT_PAGE_FEEDBACK' })).items.map((i) => i.note)).toEqual(['文言を短く']);
+    await expect(page.locator('.bag-step-caption--done')).toHaveCount(1);
+    await expect(page.locator('.bag-step-caption--done')).toContainText('AI対応済み');
+
+    await call({ type: 'SET_ANNOTATION_FOR_AI', id: 'note-a', on: true });
+    expect((await call({ type: 'LIST_ANNOTATIONS' })).annotations[0].doneAt).toBe('');
+    expect((await call({ type: 'COLLECT_PAGE_FEEDBACK' })).items.map((i) => i.note)).toEqual(['色を濃く', '文言を短く']);
+    await expect(page.locator('.bag-step-caption--done')).toHaveCount(0);
+  });
+
+  test('AI が対応済みにしたお描きのメモカードに「AI対応済み」が出る', async ({ page }, testInfo) => {
+    await drawRectAndFinish(page, 'ボタンを赤に');
+    const call = (msg) => page.evaluate((m) => new Promise((r) => window.__bagListener(m, {}, r)), msg);
+    const [drawing] = (await call({ type: 'LIST_ANNOTATIONS' })).annotations;
+    expect(await call({ type: 'MARK_ANNOTATIONS_DONE', ids: [drawing.id] })).toEqual({ marked: [drawing.id] });
+    const card = page.locator('.bag-memo');
+    await expect(card.locator('.bag-memo-done')).toHaveText('✓ AI対応済み');
+    await expect(card.locator('.bag-memo-toggle input')).not.toBeChecked();
+    await page.screenshot({ path: testInfo.outputPath('memo-card-done.png') });
+    await card.locator('.bag-memo-toggle input').check();
+    await expect(card.locator('.bag-memo-done')).toHaveCount(0);
+  });
+
   // メモ保存は自動同期用の変更通知を飛ばし、本文ありメモを送信件数に数える。
   // 本文を空にすると送信件数0かつ capture からも外れる（空メモが inbox/件数を汚さない）。
   test('メモ保存で送信件数つき変更通知が飛び、本文を空にすると0件で capture からも外れる', async ({ page }) => {

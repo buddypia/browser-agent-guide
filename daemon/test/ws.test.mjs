@@ -283,3 +283,39 @@ test('WebSocket executeActions: broadcast, wait and resolve/reject', async () =>
 
   client.close();
 });
+
+test('WebSocket request: 任意の type を送り、該当しない拡張の ok:false より該当する拡張の ok:true を採る', async () => {
+  const open = async () => {
+    const ws = new WebSocket(`${wsUrl}?token=${TOKEN}`);
+    await new Promise((resolve, reject) => {
+      ws.once('open', resolve);
+      ws.once('error', reject);
+    });
+    return ws;
+  };
+  const [without, holder] = [await open(), await open()];
+  const next = (ws) => new Promise((resolve) => ws.once('message', (d) => resolve(JSON.parse(d.toString()))));
+  const got = [next(without), next(holder)];
+  // params が type / requestId を名乗っても、daemon が付けた値で上書きされる。
+  const pending = wss.request('mark_annotations_done', { ids: ['anno-1'], type: 'run_actions', requestId: 'forged' });
+  const [m1, m2] = await Promise.all(got);
+  for (const m of [m1, m2]) {
+    assert.equal(m.type, 'mark_annotations_done');
+    assert.notEqual(m.requestId, 'forged');
+    assert.deepEqual(m.ids, ['anno-1']);
+  }
+  without.send(JSON.stringify({ type: 'mark_annotations_done_result', requestId: m1.requestId, ok: false, error: 'No matching annotations' }));
+  holder.send(JSON.stringify({ type: 'mark_annotations_done_result', requestId: m2.requestId, ok: true, marked: ['anno-1'] }));
+  const res = await pending;
+  assert.deepEqual(res.marked, ['anno-1']);
+
+  // 全員 ok:false なら reject し、理由をまとめて返す。
+  const failing = wss.request('mark_annotations_done', { ids: ['x'] });
+  const [f1, f2] = await Promise.all([next(without), next(holder)]);
+  for (const [ws, m] of [[without, f1], [holder, f2]]) {
+    ws.send(JSON.stringify({ type: 'mark_annotations_done_result', requestId: m.requestId, ok: false, error: 'No matching annotations' }));
+  }
+  await assert.rejects(failing, /No matching annotations/);
+  without.close();
+  holder.close();
+});

@@ -2,13 +2,9 @@
   "agent-worktree-guard": {
     "SessionStart": [
       {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/agent-worktree-guard.mjs\" session-start",
-            "timeout": 10
-          }
-        ]
+        "type": "command",
+        "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/antigravity/agy-bridge.mjs\" SessionStart node \"$(git rev-parse --show-toplevel)/.claude/hooks/agent-worktree-guard.mjs\" session-start",
+        "timeout": 10
       }
     ],
     "PreToolUse": [
@@ -17,7 +13,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/agent-worktree-guard.mjs\" pre-tool",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/antigravity/agy-bridge.mjs\" PreToolUse node \"$(git rev-parse --show-toplevel)/.claude/hooks/agent-worktree-guard.mjs\" pre-tool",
             "timeout": 5
           }
         ]
@@ -29,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/agent-worktree-guard.mjs\" post-tool",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/antigravity/agy-bridge.mjs\" PostToolUse node \"$(git rev-parse --show-toplevel)/.claude/hooks/agent-worktree-guard.mjs\" post-tool",
             "timeout": 5
           }
         ]
@@ -37,18 +33,14 @@
     ],
     "Stop": [
       {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/agent-worktree-guard.mjs\" stop",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/antigravity/worktree-shipping-guard.mjs\"",
-            "timeout": 10
-          }
-        ]
+        "type": "command",
+        "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/antigravity/agy-bridge.mjs\" Stop node \"$(git rev-parse --show-toplevel)/.claude/hooks/agent-worktree-guard.mjs\" stop",
+        "timeout": 10
+      },
+      {
+        "type": "command",
+        "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/antigravity/agy-bridge.mjs\" Stop node \"$(git rev-parse --show-toplevel)/.claude/hooks/worktree-shipping-guard.mjs\"",
+        "timeout": 10
       }
     ]
   }

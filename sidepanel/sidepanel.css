@@ -786,6 +786,13 @@ textarea:focus-visible {
   color: var(--err);
 }
 
+.anno-done {
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 700;
+  color: var(--ok);
+}
+
 .anno-flag {
   align-self: flex-start;
   margin-top: 1px;
@@ -911,8 +918,9 @@ textarea:focus-visible {
   border-left-color: var(--err);
 }
 
-.anno-tray-item.off {
-  opacity: 0.74;
+/* 送らないお描きは図形のプレビューだけ淡くする(行ごと透過すると文字のコントラストが足りなくなる)。 */
+.anno-tray-item.off .anno-preview {
+  opacity: 0.6;
 }
 
 .anno-preview {
