@@ -26,4 +26,7 @@ TYPESAFE_API_KEY=... node scripts/live/workflow-wikipedia.mjs
 - `TYPESAFE_API_KEY` が無ければ、記録したルールでの選び方だけを確かめる。キーは使い捨てプロファイルの storage にだけ置く。
 - 実サイトの文言や DOM が変わると、記録の段階(人の操作の再現)で失敗する。その時はスクリプトのセレクタを直す。
 - 報告には入力した文字列を書かない(`{変数}` だけ残す)。
-- `agy` は CLI 引数で MCP を渡せないため、実行中だけ `agy mcp add --type http baglive <url>` でグローバル設定に登録し、終了時に `agy mcp remove baglive` で外す。
+- `agy` は CLI 引数で MCP を渡せないため、実行中だけ一意な名前 `baglive_<乱数>` でグローバル設定に登録し、終了時(Ctrl-C を含む)に外す。
+  強制終了(kill -9)で残ったら `agy mcp list` で確かめて `agy mcp remove <名前>`。
+- claude は `--allowedTools`、codex は `-s read-only` で使える道具を絞るが、`agy` には同等の制限が無い(プロンプトで MCP だけを使うよう頼むだけ)。
+  作業ディレクトリは一時ディレクトリにしている。
