@@ -96,7 +96,17 @@ export async function setupMcp(options = {}) {
     setupCursorMcpJson(serverName, serverUrl);
 
     console.log('\n--- 4. Registering to Antigravity CLI ---');
-    setupAntigravityMcpJson(serverName, serverUrl);
+    try {
+      try {
+        execSync('agy mcp remove bag_visual_feedback', { stdio: 'ignore' });
+      } catch (_) {}
+      // Flags must come before <name> (agy rejects a flag placed after it).
+      execSync(`agy mcp add --type http ${serverName} ${serverUrl}`, { stdio: 'inherit' });
+      console.log('Successfully registered bag_page_feedback MCP server to Antigravity CLI!');
+    } catch (err) {
+      console.warn('Could not automatically run "agy mcp add". Trying fallback directly to ~/.gemini/config/mcp_config.json...');
+      setupAntigravityMcpJson(serverName, serverUrl);
+    }
   }
 
   console.log('\nMCP Setup complete!');
@@ -117,7 +127,7 @@ export async function setupMcp(options = {}) {
   console.log('\n[Codex CLI] (~/.codex/config.toml):');
   console.log(`[mcp_servers.${serverName}]\nurl = "${serverUrl}"`);
 
-  console.log('\n[Antigravity CLI] (~/.gemini/antigravity-cli/settings.json):');
+  console.log('\n[Antigravity CLI] (~/.gemini/config/mcp_config.json, or: agy mcp add --type http bag_page_feedback <url>):');
   console.log(JSON.stringify({
     mcpServers: {
       [serverName]: {
@@ -230,12 +240,13 @@ function setupCursorMcpJson(serverName, serverUrl) {
   }
 }
 
-// Antigravity CLI config
+// Fallback: Antigravity CLI MCP config. agy reads ~/.gemini/config/mcp_config.json
+// (~/.gemini/antigravity/mcp_config.json links to it), not ~/.gemini/antigravity-cli/settings.json.
 function setupAntigravityMcpJson(serverName, serverUrl) {
-  const p = path.join(home, '.gemini', 'antigravity-cli', 'settings.json');
+  const p = path.join(home, '.gemini', 'config', 'mcp_config.json');
   try {
     if (!fs.existsSync(p)) {
-      console.log(`Antigravity CLI settings file not found at ${p}. Skipping.`);
+      console.log(`Antigravity CLI MCP config not found at ${p}. Skipping.`);
       return;
     }
 
