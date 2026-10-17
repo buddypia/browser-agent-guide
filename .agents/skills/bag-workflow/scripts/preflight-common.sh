@@ -7,7 +7,7 @@
 set -u
 
 # ポータブルなタイムアウト実行。GNU timeout(coreutils)が無い素の macOS 等でも、preflight 全体が
-# 「daemon/claude/codex のどれかがハングしても止まらない」不変条件を守るためのフォールバック付き。
+# 「daemon/claude/codex/agy のどれかがハングしても止まらない」不変条件を守るためのフォールバック付き。
 run_with_timeout() {
   local secs="$1"; shift
   if command -v timeout >/dev/null 2>&1; then
@@ -79,7 +79,7 @@ EOF
 
 # Claude Code / Codex / Antigravity への bag_page_feedback MCP 登録 + 疎通確認(タイムアウト付き)。
 # mcp/mcp_conn を設定する。
-# 注: これは「claude/codex の設定に登録され、このコマンドを叩いた瞬間に疎通できたか」の
+# 注: これは「claude/codex/agy の設定に登録され、このコマンドを叩いた瞬間に疎通できたか」の
 #     チェックであり、いま進行中の会話セッション自身がそのツールを呼べるかどうかとは別物。
 #     Claude Code は MCP サーバーへの接続をセッション起動時に確立し、起動時点で接続に失敗すると
 #     そのセッションでは(daemon が後から起動しても)自動回復しない。だから mcp=registered でも
@@ -104,9 +104,9 @@ bag_probe_mcp() {
       mcp_conn="unknown"
     fi
   fi
-  # Antigravity CLI(agy)。`agy mcp list` は NAME/TYPE/STATUS/URL の表を出す。無効化(disabled)された登録は数えない。
+  # Antigravity CLI(agy)。`agy mcp list` は NAME/TYPE/STATUS/URL の表を出す。STATUS が enabled の行だけ数える。
   if [ "$mcp" = "absent" ] && command -v agy >/dev/null 2>&1; then
-    if run_with_timeout 8 agy mcp list 2>/dev/null | grep -i 'bag_page_feedback' | grep -qvi 'disabled'; then
+    if run_with_timeout 8 agy mcp list 2>/dev/null | awk 'tolower($1) ~ /bag_page_feedback/ && tolower($3) == "enabled" { found = 1 } END { exit !found }'; then
       mcp="registered"
       mcp_conn="unknown"
     fi

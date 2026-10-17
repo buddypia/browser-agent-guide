@@ -82,7 +82,7 @@ claude mcp list   # bag_page_feedback が出れば登録済み
 > または `~/.codex/config.toml` の `url`。Antigravity CLI は `agy mcp add --type http bag_page_feedback http://127.0.0.1:8765/mcp`
 > (`agy mcp list` で確認。設定ファイルでは `serverUrl` キー)。いずれも同じ `…/mcp` を指す。
 > スキル(`/bag-memo`・`/bag-workflow`)は3つの CLI ともリポジトリの `.agents/skills/` から読まれる
-> (Claude Code は `.claude/skills/`、Codex は `.codex/skills/` のリンク経由)。
+> (Claude Code は `.claude/skills/`、Codex は `.codex/skills/` のリンク経由。どちらのリンクも `make setup.skills` が作る)。
 > **旧 alias `bag_visual_feedback` で登録していた場合は付け替える** (旧 deprecated ツール名は撤去済み):
 > `claude mcp remove bag_visual_feedback && claude mcp add --transport http bag_page_feedback http://127.0.0.1:8765/mcp`。
 >
