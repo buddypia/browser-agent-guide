@@ -16,7 +16,9 @@ export function attachWebSocketServer(httpServer, { inboxDir, entryStore, token,
   const pendingRequests = new Map();
   const clients = new Set();
 
-  wss.executeActions = (params) => {
+  // 拡張への要求(type)を全接続へ送り、最初の ok:true の `${type}_result` で解決する(全員 ok:false なら reject)。
+  // 該当しない拡張(タブやメモを持たない別プロファイル等)は ok:false を返す約束なので、持つ側の応答が勝つ。
+  wss.request = (type, params) => {
     if (clients.size === 0) {
       return Promise.reject(new Error('No extension clients connected to daemon.'));
     }
@@ -35,9 +37,9 @@ export function attachWebSocketServer(httpServer, { inboxDir, entryStore, token,
       };
       pendingRequests.set(requestId, pendingRequest);
       const payload = {
-        type: 'run_actions',
-        requestId,
         ...params,
+        type,
+        requestId,
       };
       const serialized = JSON.stringify(payload);
       for (const client of clients) {
@@ -55,6 +57,7 @@ export function attachWebSocketServer(httpServer, { inboxDir, entryStore, token,
       }
     });
   };
+  wss.executeActions = (params) => wss.request('run_actions', params);
 
   // 拡張との橋渡し状態。healthz/preflight が「daemon は起きているが拡張がまだ一度も
   // 繋がっていない」と「繋がったことはあるが今は切れている」を区別できるようにする。
@@ -114,7 +117,7 @@ export function attachWebSocketServer(httpServer, { inboxDir, entryStore, token,
         ws.send(JSON.stringify({ type: 'error', error: 'invalid json' }));
         return;
       }
-      if (msg?.type === 'run_actions_result') {
+      if (typeof msg?.type === 'string' && msg.type.endsWith('_result')) {
         const reqId = msg.requestId;
         if (reqId && pendingRequests.has(reqId)) {
           const deferred = pendingRequests.get(reqId);

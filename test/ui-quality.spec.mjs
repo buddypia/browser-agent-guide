@@ -303,6 +303,9 @@ test.describe('UI quality gates', () => {
         { id: 'd1', kind: 'drawing', note: 'Right-align the total', intent: '', shapeText: '', step: 1, forAI: true, resolved: true, target: 'Total', sig: 's1', shapePreview: null },
         { id: 'n1', kind: 'note', note: 'Address field is too narrow', intent: '', step: 1, forAI: true, resolved: true, target: 'Address', sig: 's2' },
         { id: 'n2', kind: 'note', note: 'Private reminder', intent: '', step: 2, forAI: false, resolved: true, target: 'Name', sig: 's3' },
+        // AI が対応済みにしたメモ(resolve_feedback)は「AIに渡す」が外れ、対応済みと示す。
+        { id: 'n3', kind: 'note', note: 'Make Save red', intent: '', step: 3, forAI: false, doneAt: '2026-10-17T01:00:00Z', resolved: true, target: 'Save', sig: 's5' },
+        { id: 'd2', kind: 'drawing', note: 'Bigger logo', intent: '', shapeText: '', step: 2, forAI: false, doneAt: '2026-10-17T01:00:00Z', resolved: true, target: 'Logo', sig: 's6', shapePreview: null },
         // 目印は送信対象ではないのでチェックを出さない。
         { id: 'm1', kind: 'marker', name: 'Hero', label: '', note: '', intent: 'hero banner', resolved: true, target: 'Hero', sig: 's4' },
       ],
@@ -312,18 +315,24 @@ test.describe('UI quality gates', () => {
 
     const tray = page.locator('#anno-panel');
     const checks = tray.getByRole('checkbox', { name: 'Send to AI' });
-    await expect(checks).toHaveCount(3);
+    await expect(checks).toHaveCount(5);
     await expect(checks.nth(0)).toBeChecked();
-    await expect(checks.nth(1)).toBeChecked();
-    await expect(checks.nth(2)).not.toBeChecked();
+    await expect(checks.nth(1)).not.toBeChecked();
+    await expect(checks.nth(2)).toBeChecked();
+    await expect(checks.nth(3)).not.toBeChecked();
+    await expect(checks.nth(4)).not.toBeChecked();
+    await expect(tray.locator('.anno-done')).toHaveCount(2);
+    await expect(tray.locator('.anno-done').first()).toContainText('Fixed by AI');
+    await tray.locator('.anno-done').last().scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath('sidepanel-memo-done-360.png') });
     await expect(page.locator('#capture-count')).toHaveText('2');
 
-    await checks.nth(1).uncheck();
+    await checks.nth(2).uncheck();
     await expect.poll(() => page.evaluate(() => window.__bagSentMessages.filter((m) => m.type === 'SET_ANNOTATION_FOR_AI'))).toEqual([
       { type: 'SET_ANNOTATION_FOR_AI', tabId: 1, id: 'n1', on: false },
     ]);
     await expect(page.locator('#capture-count')).toHaveText('1');
-    await expect(tray.getByRole('checkbox', { name: 'Send to AI' }).nth(1)).not.toBeChecked();
+    await expect(tray.getByRole('checkbox', { name: 'Send to AI' }).nth(2)).not.toBeChecked();
     await page.screenshot({ path: testInfo.outputPath('sidepanel-memo-checks-360.png') });
     await expectNoAxeViolations(page);
   });

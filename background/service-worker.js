@@ -1902,17 +1902,35 @@ async function connectDaemonWebSocket() {
         return;
       }
 
+      if (msg?.type === 'mark_annotations_done') {
+        // AI がメモに対応し終えた(MCP resolve_feedback)。該当メモを持たない拡張は ok:false を返し、
+        // 持つ拡張の応答を daemon に採らせる(daemon は最初の ok:true で解決する)。
+        let reply;
+        try {
+          const marked = await markAnnotationsDone(msg);
+          reply = marked.length ? { ok: true, marked } : { ok: false, error: 'No matching annotations in this browser.' };
+        } catch (err) {
+          reply = { ok: false, error: err.message };
+        }
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'mark_annotations_done_result', requestId: msg.requestId, ...reply }));
+        }
+        return;
+      }
+
       if (msg?.type === 'run_actions') {
-        const { requestId, tabId, windowId, urlContains, titleContains, actions, source } = msg;
+        const { requestId, tabId, windowId, urlContains, titleContains, actions } = msg;
         try {
           const targetTabId = await findMatchingTab({ tabId, windowId, urlContains, titleContains });
           if (!targetTabId) {
             throw new Error('No matching tab found for the specified filters.');
           }
+          // 経路(source)は daemon の申告を使わず固定する。content はこの経路を外部エージェントとして
+          // allow-list と不可逆ガードで縛るので、'manual' 等を名乗って外させない。
           const res = await ensureContentAndSend(targetTabId, {
             type: 'RUN_ACTIONS',
             actions,
-            source: source || 'execute_actions'
+            source: 'execute_actions'
           });
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
@@ -1951,6 +1969,38 @@ async function connectDaemonWebSocket() {
     console.warn('[bag] failed to initiate daemon WS:', e);
     scheduleReconnect();
   }
+}
+
+// 指定 id のお描き/メモを「AI対応済み」にして「AIに渡す」を外す。保存済みの注釈は最新の一覧に対して該当 id だけを
+// ここで1回書き換える(content にページ分を丸ごと書き戻させると、同じページを開いた別タブの古い一覧が後勝ちで
+// 人のメモを消しうる)。開いているタブの content にはメモリの更新と再描画だけを頼み、古い forAI:true で送らせない。
+async function markAnnotationsDone({ ids }) {
+  const want = new Set((Array.isArray(ids) ? ids : []).map(String));
+  const at = new Date().toISOString();
+  const marked = new Set();
+  const key = 'aiAdvisorAnnotations';
+  const map = (await chrome.storage.local.get(key))[key] || {};
+  for (const list of Object.values(map)) {
+    for (const a of Array.isArray(list) ? list : []) {
+      if (!a || !want.has(a.id) || (a.kind !== 'drawing' && a.kind !== 'note')) continue;
+      a.doneAt = at;
+      a.forAI = false;
+      marked.add(a.id);
+    }
+  }
+  if (marked.size) await chrome.storage.local.set({ [key]: map });
+  const tabs = await chrome.tabs.query({});
+  await Promise.all(
+    tabs.map(async (tab) => {
+      try {
+        const res = await chrome.tabs.sendMessage(tab.id, { type: 'MARK_ANNOTATIONS_DONE', ids: [...want], at }, { frameId: 0 });
+        for (const id of Array.isArray(res?.marked) ? res.marked : []) marked.add(id);
+      } catch {
+        /* content の居ないタブ(chrome:// 等)は対象外 */
+      }
+    }),
+  );
+  return [...marked];
 }
 
 function scheduleReconnect() {
