@@ -46,6 +46,18 @@ const commands = (event) =>
     .flatMap((entry) => (TOOL_EVENTS.has(event) ? entry.hooks : [entry]))
     .map((h) => h.command);
 
+// 실제 저장소의 .tmp (ledger·소유 기록)를 건드리지 않도록 가드는 임시 저장소에서 판정한다.
+function withTempRepo(fn) {
+  const repo = mkdtempSync(join(tmpdir(), 'bag-agy-repo-'));
+  try {
+    spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+    spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: repo });
+    return fn(repo);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+}
+
 // agy 와 같은 방식 — 등록 문자열 그대로, hooks.json 디렉터리에서 `sh -c`.
 function runRegistered(event, pattern, payload) {
   const command = commands(event).find((c) => pattern.test(c));
@@ -92,11 +104,11 @@ test('모든 명령이 agy 브리지를 거친다 (가드는 Claude 규약만 �
 });
 
 test('실제 agy run_command 입력으로 raw git worktree add 를 막고 사유를 전달한다', () => {
-  const result = runRegistered('PreToolUse', /agent-worktree-guard\.mjs" pre-tool/, {
-    toolCall: { name: 'run_command', args: { CommandLine: 'git worktree add /nonexistent-agy/q no-such-ref', Cwd: ROOT } },
+  const result = withTempRepo((repo) => runRegistered('PreToolUse', /agent-worktree-guard\.mjs" pre-tool/, {
+    toolCall: { name: 'run_command', args: { CommandLine: 'git worktree add /nonexistent-agy/q no-such-ref', Cwd: repo } },
     conversationId: 'agy-test',
-    workspacePaths: [ROOT],
-  });
+    workspacePaths: [repo],
+  }));
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
   assert.equal(output.allow_tool, false);
