@@ -42,11 +42,16 @@ disallowed-tools: Bash(rm *)
 
 !`bash ${CLAUDE_SKILL_DIR}/scripts/preflight.sh`
 
+> **Codex / Antigravity で使う時**: これらの CLI は上の `!` 行・`${CLAUDE_SKILL_DIR}`・`$ARGUMENTS` を展開しない
+> (上の行が `!` のまま見えていたら展開されていない)。リポジトリのルートで自分で
+> `bash .agents/skills/bag-workflow/scripts/preflight.sh` を実行し、その末尾の `STATUS` 行で分岐する。
+> `$ARGUMENTS` は、ユーザーが `/bag-workflow` の後に書いた文字列と読み替える。
+
 `STATUS` の `source_branch` で分岐する:
 
 | source_branch | 意味 | 進み方 |
 |---|---|---|
-| `MCP` | daemon 稼働 + Claude Code に MCP 登録済み(かつ疎通確認 `mcp_conn=connected`) | ステップ1 を **MCP** で (主経路) |
+| `MCP` | daemon 稼働 + Claude Code / Codex / Antigravity のどれかに MCP 登録済み(Claude Code は疎通確認 `mcp_conn=connected` も) | ステップ1 を **MCP** で (主経路) |
 | `FILE` | お描きファイルは inbox にあるが MCP 未登録/未疎通 | ステップ1 を **ファイル直読み** で。あわせて「次回のため」に MCP 登録を案内 (`references/daemon-mcp.md`) |
 | `NONE` | daemon 停止、かつお描きも無い | **ここで停止**。`references/fallbacks.md` の該当ブロックを **そのままコピペできるコマンド付きで日本語＋英語**で案内する。スタックトレースは出さない |
 
@@ -55,7 +60,8 @@ disallowed-tools: Bash(rm *)
 
 > **`source_branch=MCP` は「呼んでよい」という許可であって「呼べる」保証ではない**(詳細・理由は
 > `references/daemon-mcp.md` の該当セクションが正本)。よって MCP 経路に進む前に**必ず ToolSearch で
-> `bag_page_feedback` 系ツール(`mcp__bag_page_feedback__*`)が見つかるか確認**し、見つからなければ
+> `bag_page_feedback` 系ツール(`mcp__bag_page_feedback__*`)が見つかるか確認**し(Codex / Antigravity は
+> ToolSearch が無いので、自分が使えるツールの一覧に `get_latest_feedback_context` があるかで確かめる)、見つからなければ
 > FILE 経路(`capture=yes` の場合)に切り替えるか、`capture=no` なら新しい会話セッションの開始を案内する
 > (`references/fallbacks.md` の該当ブロック参照)。
 
@@ -80,12 +86,23 @@ disallowed-tools: Bash(rm *)
 
 ---
 
+## ステップ 0.7 — 保存済みワークフローを動かす依頼なら (MCP 経路の時)
+
+ユーザーの依頼が「サイドパネルで保存したワークフローを実行して」なら、お描きを読むより先にこちら:
+`bag_page_feedback:list_workflows` で id と変数名を見て、`run_workflow({ workflowId, vars })` で始め(開始ページが新しいタブで開く)、
+`get_workflow_run` で進み具合を見る(`run_workflow` は待たずに返る)。`held` が付いたら、それは確定系の手順か
+判断AIの迷いで、**承認するツールは無い**。「サイドパネルで確認して承認してください」とユーザーに伝えて止まる。
+エラーで始まらない時(別の実行中・記録中・未保存の手順)は、その理由をそのまま伝える。中身が知りたいだけなら
+ステップ1へ進まず、一覧の結果を伝える。
+
+---
+
 ## ステップ 1 — お描きを読む (= 何を / WHAT)
 
 お描きは**指示の正本**。番号順 (n=1,2,3…) に「手順」として読む。
 
 **MCP 経路 (主):** 呼ぶ前に ToolSearch で `bag_page_feedback` 系ツール(`mcp__bag_page_feedback__*`)が
-見つかるか確認する(`source_branch=MCP` でも省略しない — 理由はステップ0の注記)。見つからなければ
+見つかるか確認する(Codex / Antigravity はツール一覧で確認。`source_branch=MCP` でも省略しない — 理由はステップ0の注記)。見つからなければ
 MCP 未接続と確定し、下の FILE 経路に切り替えるか、`capture=no` なら新しい会話セッションの開始を案内する。
 見つかった場合: MCP ツールを**完全修飾名**で呼ぶ。接頭辞 `bag_page_feedback:` は登録時の alias 例 (任意の名前でよい。旧 `bag_visual_feedback:` を使っていたら付け替える → `references/daemon-mcp.md`)。`$ARGUMENTS` を `urlContains` に渡して、自分のプロジェクトのお描きだけに絞る (共有 inbox `~/Downloads/ai-inbox` は他プロジェクトの直近キャプチャを返しうる)。
 
