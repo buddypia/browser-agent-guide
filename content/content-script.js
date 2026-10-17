@@ -108,6 +108,37 @@
     'exportContext', 'notify', 'noop',
     'clickAffordance', 'clickElement', 'fillAffordance', 'fillInput', 'selectOption',
   ]);
+  // @term: verb-registry  (外部エージェント経路の allow-list。用語定義: glossary/extension/verb-registry.md)
+  // 外部の AI エージェント(daemon の execute_actions / scripts/cdp-bridge.mjs)からの実行も deny-by-default。
+  // ページ由来の文字列(メモの HTML 等)でエージェントが乗っ取られても、任意 JS(injectScript)・HTML 注入・
+  // 任意 URL への遷移(navigateTo。データの持ち出し口)・要素削除・submitForm には届かない。許すのは読み取り、
+  // 直した要素を示す/見た目を直す操作(setStyle は agentStyleProblem の範囲)、メモの後始末、
+  // (autorun と同じガード付きの)クリックと入力だけ。ページにある普通のボタンやリンクは押せるので、
+  // それによる送信・遷移は起こりうる(確定/購入系と名前の無いボタンは保留)。
+  // daemon/src/server.js の EXECUTE_ACTIONS_VERBS と一致必須(test/agent-verbs.test.mjs がパリティ検査)。
+  const AGENT_SOURCES = new Set(['execute_actions', 'cdp_bridge']);
+  const AGENT_ALLOWED_VERBS = new Set([
+    'annotatePage', 'listAffordances', 'readText', 'extractData', 'readSignals', 'listAnnotations',
+    'exportContext', 'explainWorkflow', 'waitForElement', 'notify', 'noop',
+    'scrollToElement', 'highlightElement', 'focusElement', 'outlineElement', 'setStyle', 'removeAnnotation',
+    'clickAffordance', 'clickElement', 'fillAffordance', 'fillInput', 'selectOption',
+  ]);
+  // 外部エージェントの setStyle は「見た目を直す」範囲に限る。外部を参照する値(url() 等。読んだ内容を
+  // 外へ送る口になる)と、要素を重ねる/隠す/動かすプロパティ(確定ボタンの偽装や誤クリックの誘導に使える)は断る。
+  const AGENT_STYLE_PROPS =
+    /^(color|background-color|border(-(top|right|bottom|left))?(-(color|width|style))?|border-radius|outline(-(color|width|style|offset))?|font(-(size|weight|style|family))?|text-(align|decoration|transform)|line-height|letter-spacing|word-spacing|white-space|word-break|overflow-wrap|padding(-(top|right|bottom|left))?|margin(-(top|right|bottom|left))?|(min-|max-)?(width|height)|gap)$/;
+  const AGENT_STYLE_BAD_VALUE = /url\s*\(|image\s*\(|image-set|element\s*\(|cross-fade|@import|expression\s*\(|\\/i;
+  /** 外部エージェントに許さない setStyle のプロパティ名を返す(問題が無ければ '')。 */
+  function agentStyleProblem(styles) {
+    for (const [k, v] of Object.entries(styles && typeof styles === 'object' ? styles : {})) {
+      const prop = camelToKebab(String(k)).toLowerCase();
+      const val = String(v ?? '');
+      if (!AGENT_STYLE_PROPS.test(prop) || AGENT_STYLE_BAD_VALUE.test(val)) return prop;
+      if (prop.startsWith('margin') && /-\s*[\d.]/.test(val)) return prop; // 負の余白は隣の要素に重ねられる
+    }
+    return '';
+  }
+  // @endterm: verb-registry
   // autorun で「対象ラベルが確定/購入系、または名前不明なら保留」する対象動詞(クリック系)。
   const AUTORUN_GUARD_VERBS = new Set(['clickAffordance', 'clickElement']);
   // 不可逆/確定系ラベル。lib/workflow.js の IRREVERSIBLE_KEYWORDS と一致必須(test がパリティ検査)。
@@ -4321,6 +4352,7 @@
     if (source === 'recipe' && RECIPE_BLOCKED_VERBS.has(verbName)) return false;
     // autorun は deny-by-default: 許可された安全動詞だけ通す。
     if (source === 'autorun') return AUTORUN_ALLOWED_VERBS.has(verbName);
+    if (AGENT_SOURCES.has(source)) return AGENT_ALLOWED_VERBS.has(verbName);
     return true;
   }
 
@@ -4383,10 +4415,17 @@
           continue;
         }
       }
-      // 自動実行の不可逆ガード: 対象ラベルが「注文を確定/購入/削除」等、または名前が一切取れない
-      // (アイコンのみ等)クリックは自動では押さず保留する(fail-safe)。ユーザーが手動で押す前提。
+      // 自動実行と外部エージェントの不可逆ガード: 対象ラベルが「注文を確定/購入/削除」等、または名前が一切取れない
+      // (アイコンのみ等)クリックは押さず保留する(fail-safe)。ユーザーが手動で押す前提。
+      // 外部エージェントには解除の手段(allowIrreversibleClicks)を渡さない。
       // 要素が解決できない場合は requireEl が例外→クリックされないので安全(保留扱いは不要)。
-      if (source === 'autorun' && !options.allowIrreversibleClicks && AUTORUN_GUARD_VERBS.has(a.verb)) {
+      const agent = AGENT_SOURCES.has(source);
+      const badStyle = agent && a.verb === 'setStyle' ? agentStyleProblem(a.args?.styles) : '';
+      if (badStyle) {
+        results.push({ verb: a.verb, ok: false, reason: a.reason || '', error: t('cs.err.agentStyleBlocked', { prop: badStyle }) });
+        continue;
+      }
+      if ((agent || (source === 'autorun' && !options.allowIrreversibleClicks)) && AUTORUN_GUARD_VERBS.has(a.verb)) {
         let guardEl = null;
         try {
           guardEl = getEl(a.args || {});
@@ -4402,7 +4441,7 @@
               held: true,
               reason: a.reason || '',
               label: truncate(guardLabel || '(名前不明 / unnamed)', 60),
-              error: t('cs.err.autorunHeld'),
+              error: t(agent ? 'cs.err.agentHeld' : 'cs.err.autorunHeld'),
             });
             continue;
           }

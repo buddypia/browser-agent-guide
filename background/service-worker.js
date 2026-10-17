@@ -1903,16 +1903,18 @@ async function connectDaemonWebSocket() {
       }
 
       if (msg?.type === 'run_actions') {
-        const { requestId, tabId, windowId, urlContains, titleContains, actions, source } = msg;
+        const { requestId, tabId, windowId, urlContains, titleContains, actions } = msg;
         try {
           const targetTabId = await findMatchingTab({ tabId, windowId, urlContains, titleContains });
           if (!targetTabId) {
             throw new Error('No matching tab found for the specified filters.');
           }
+          // 経路(source)は daemon の申告を使わず固定する。content はこの経路を外部エージェントとして
+          // allow-list と不可逆ガードで縛るので、'manual' 等を名乗って外させない。
           const res = await ensureContentAndSend(targetTabId, {
             type: 'RUN_ACTIONS',
             actions,
-            source: source || 'execute_actions'
+            source: 'execute_actions'
           });
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
