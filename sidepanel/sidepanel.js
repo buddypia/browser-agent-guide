@@ -1444,12 +1444,31 @@ function renderDrawingTrayItem(a, index) {
     const hint = document.createElement('div');
     hint.className = 'anno-tray-hint';
     hint.textContent = t('annotations.unresolvedHint');
-    body.append(head, sub, meta, hint, buildAnnotationActions(a, true));
+    body.append(head, sub, meta, hint, buildForAIToggle(a), buildAnnotationActions(a, true));
   } else {
-    body.append(head, sub, meta, buildAnnotationActions(a, true));
+    body.append(head, sub, meta, buildForAIToggle(a), buildAnnotationActions(a, true));
   }
   row.appendChild(body);
   return row;
+}
+
+// 「AIに渡す」チェック。外したお描き/メモは送信(画像・メモ同期)の対象から外れる(ページ上のチェックと同じ)。
+function buildForAIToggle(a) {
+  const wrap = document.createElement('label');
+  wrap.className = 'anno-for-ai';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = a.forAI !== false;
+  cb.addEventListener('change', async () => {
+    cb.disabled = true;
+    // 失敗してもページ側の実際の状態で描き直す(チェック表示と送信対象をずらさない)。
+    await send({ type: 'SET_ANNOTATION_FOR_AI', tabId: state.tabId, id: a.id, on: cb.checked }).catch(() => {});
+    refreshAnnotations();
+  });
+  const text = document.createElement('span');
+  text.textContent = t('annotations.forAIOn');
+  wrap.append(cb, text);
+  return wrap;
 }
 
 function renderSupportAnnotationItem(a) {
@@ -1485,6 +1504,7 @@ function renderSupportAnnotationItem(a) {
     warn.textContent = t('annotations.unresolved');
     body.appendChild(warn);
   }
+  if (a.kind === 'note' && String(a.note || '').trim()) body.appendChild(buildForAIToggle(a));
 
   row.append(kind, body, buildAnnotationActions(a, false));
   return row;

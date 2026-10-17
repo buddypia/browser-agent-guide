@@ -327,7 +327,10 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       'execute_actions',
       {
         title: 'アクションの実行',
-        description: '接続されたブラウザ拡張を介して、指定したタブでアクションを実行する。',
+        description:
+          '接続されたブラウザ拡張を介して、指定したタブで拡張の動詞(verb)を実行する。tabId(context の tab.tabId)で対象タブを指定する。' +
+          'メモ対応の後始末によく使う動詞: listAnnotations{} (このページのメモ一覧と id)、highlightElement{selector} (直した要素を光らせて人間に示す)、' +
+          'removeAnnotation{id} (人間が対応済みと認めたメモを消す)。読み取り/操作: readText{selector}、listAffordances{}、clickElement{selector}、fillInput{selector,value}。',
         inputSchema: {
           actions: z.array(z.object({
             verb: z.string().describe('実行する動詞の名前'),

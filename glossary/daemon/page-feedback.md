@@ -23,7 +23,7 @@ api_refs:
   - { name: "MCP: get_latest_feedback_image", spec: "daemon/src/server.js" }
 db_refs: []
 related: ["entry-store", "affordance"]
-last_verified: 2026-07-19
+last_verified: 2026-10-17
 confidence: high
 ---
 
@@ -35,7 +35,9 @@ Canvas 2D で注釈を合成 → daemon が有効なら WS push、無効なら `
 `<download dir>/ai-inbox/<slug>/` へ保存。
 
 `collectPageFeedbackData`(content-script)が capture 対象を集める。対象は **お描き(`kind:'drawing'`)
-＋ メモを残す(`kind:'note'`、本文ありのみ)** の2種（marker/button は対象外）。メモは図形を持たないので
+＋ メモを残す(`kind:'note'`、本文ありのみ)** の2種（marker/button は対象外）で、「AIに渡す」(`forAI`)に
+チェックがあるものだけ(お描きはページ上のメモカード、お描き/メモともサイドパネルの各行で切り替える。未設定は ON)。
+外したものは送信・チャット文脈・プロンプトのどれにも載らない。メモは図形を持たないので
 対象要素の矩形を bbox にして吹き出し＋番号バッジだけを焼き込む。daemon は既定 OFF で、daemon が
 無効な間はメモ/お描きは**サイドパネルの「画像でAIへ送る」を押す**まで inbox に届かない。daemon を
 有効化すると（旧 autoSync トグルは廃止し `daemon.enabled` に一本化）、本文ありメモは残すだけで自動送信される。

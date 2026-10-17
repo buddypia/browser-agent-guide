@@ -121,6 +121,13 @@ test('text-only(メモのみ同期): image 無し + annotation ありは ack（s
   assert.equal(hit.shot, '', 'shot パスは空文字列（存在しないパスを広告しない）');
 });
 
+test('keepalive: ping には pong を返し、エラーにもファイル書き込みにもしない', async () => {
+  const before = listEntries(inboxDir, 100).length;
+  const res = await sendOnce(`${wsUrl}?token=${TOKEN}`, { type: 'ping' });
+  assert.deepEqual(res, { type: 'pong' });
+  assert.equal(listEntries(inboxDir, 100).length, before);
+});
+
 test('writeEntry: slug 衝突時は -2 で別ディレクトリ', () => {
   const a = writeEntry(inboxDir, { capturedAt: '2026-06-18T09:09:09.000Z', image: { shot: PNG_B64 } });
   const b = writeEntry(inboxDir, { capturedAt: '2026-06-18T09:09:09.000Z', image: { shot: PNG_B64 } });
