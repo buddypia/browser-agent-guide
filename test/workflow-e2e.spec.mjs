@@ -69,7 +69,7 @@ function startServer() {
         res.end(CHECKOUT_HTML);
       } else if (url.pathname === '/reports') {
         res.end(`<!doctype html><html><head><meta charset="utf-8"><title>レポート</title></head><body>
-          <a id="open" href="/reports/${100 + Math.floor(Math.random() * 900)}">10月の売上</a></body></html>`);
+          <a id="open" href="/reports/${100 + Math.floor(Math.random() * 900)}" target="_blank">10月の売上</a></body></html>`);
       } else if (/^\/reports\/\d+$/.test(url.pathname)) {
         res.end(`<!doctype html><html><head><meta charset="utf-8"><title>売上レポート</title></head><body>
           <a id="csv" href="/files/sales-2026-10.csv" download>CSVをダウンロード</a>
@@ -244,16 +244,17 @@ test.describe('決定的ワークフロー E2E (拡張ロード)', () => {
     expect(res2.results[0].status).toBe('needs-ai');
     await page.close();
   });
+  // レポートは新しいタブで開くリンク(target=_blank)。人は新しいタブで続けて記録し、自動実行は1つのタブのまま進む。
   test('ページを跨いでレポートを開き、CSV のダウンロード完了まで確認する(記録で確認が自動で付く)', async () => {
     test.setTimeout(60_000);
     await sw.evaluate(() => chrome.storage.local.set({ aiAdvisorWorkflow: { recording: true, steps: [], saved: [] } }));
     const page = await context.newPage();
     await page.goto(`${origin}/reports`);
     await waitContentReady(page);
-    await page.click('#open');
-    await page.waitForURL(/\/reports\/\d+$/);
-    await waitContentReady(page);
-    await page.click('#csv');
+    const [report] = await Promise.all([context.waitForEvent('page'), page.click('#open')]);
+    await report.waitForURL(/\/reports\/\d+$/);
+    await waitContentReady(report);
+    await report.click('#csv');
 
     let steps;
     await expect
@@ -269,10 +270,13 @@ test.describe('決定的ワークフロー E2E (拡張ロード)', () => {
     await waitContentReady(page);
     const tabId = await tabIdOf(`${origin}/reports`);
     await extPage.evaluate(() => (window.__autorun.length = 0));
+    const pagesBefore = context.pages().length;
     expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
     await expect.poll(async () => (await readStore(sw, 'aiAdvisorWorkflowRun'))?.doneStepIds?.length ?? 0, { timeout: 30_000 }).toBe(2);
     const done = await extPage.evaluate(() => window.__autorun.map((m) => m.text).join('\n'));
     expect(done).toMatch(/(保存|Saved): /);
+    await expect(page).toHaveURL(/\/reports\/\d+$/); // 新しいタブを開かず、同じタブで進んだ
+    expect(context.pages()).toHaveLength(pagesBefore);
 
     // ダウンロードが失敗したら(サーバーが 404)完了扱いにせず、手順番号つきで止まる。
     steps[1].locator.anchor = { ...steps[1].locator.anchor, selector: '#broken', text: '壊れたリンク', id: 'broken' };
@@ -286,6 +290,7 @@ test.describe('決定的ワークフロー E2E (拡張ロード)', () => {
     expect((await readStore(sw, 'aiAdvisorWorkflowRun')).doneStepIds).toHaveLength(1);
     const failed = await extPage.evaluate(() => window.__autorun.map((m) => m.text).join('\n'));
     expect(failed).toMatch(/ダウンロードが中断されました|download was interrupted/);
+    await report.close();
     await page.close();
   });
 });

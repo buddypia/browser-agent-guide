@@ -4504,15 +4504,21 @@
   function looksLikeItem(el, sig, siblings) {
     if (ITEM_TAGS.has(sig.tag) || ITEM_ROLES.has(sig.role)) return true;
     if (sig.classes.some((c) => /(item|row|card|option|result|cell|tile|entry|choice)/i.test(c))) return true;
-    // 汎用 div の並びでも、先頭3つがそれぞれ操作可能なら「選択肢の並び」とみなす。
-    return siblings.slice(0, 3).every((s) => s.matches(INTERACTIVE_SELECTOR) || s.querySelector(INTERACTIVE_SELECTOR));
+    // 汎用 div の並びでも、先頭3つが同じ種類の操作要素を持つなら「選択肢の並び」とみなす。
+    // (選択欄・入力欄・送信ボタンが div で並ぶフォームの行は選択肢ではない)
+    const kinds = siblings.slice(0, 3).map((s) => {
+      const x = s.matches(INTERACTIVE_SELECTOR) ? s : s.querySelector(INTERACTIVE_SELECTOR);
+      return x ? `${x.tagName}:${(x.getAttribute('type') || '').toLowerCase()}:${x.getAttribute('role') || ''}` : '';
+    });
+    return Boolean(kinds[0]) && kinds.every((k) => k === kinds[0]);
   }
 
   // el を含み「同じ形の兄弟が3つ以上並ぶ」最も近い祖先(= リスト項目)を返す。無ければ null。
+  // 実サイトの商品カードは操作要素から8階層ほど上にある(Amazon の検索結果)ので12階層まで辿る。
   function repeatedItemOf(el) {
     let cur = el;
     let depth = 0;
-    while (cur && cur.parentElement && cur !== document.body && depth < 8) {
+    while (cur && cur.parentElement && cur !== document.body && depth < 12) {
       const parent = cur.parentElement;
       const sig0 = itemSignature(cur);
       const siblings = Array.from(parent.children).filter(
@@ -4649,6 +4655,14 @@
         inner: relativePath(rep.item, el),
       };
       step.choice = { by: 'text', value: truncate(normalizeItemText(rep.item), 80) };
+      // 押した要素(商品名のリンク等)のテキストが項目間で一意なら、評価件数や価格で毎回変わる項目全文より
+      // 安定なのでそれを選び方にする(実行時は項目全文への部分一致で選ばれる)。
+      const own = normalizeItemText(el);
+      if (own && el !== rep.item) {
+        const items = Array.from(rep.container.children).filter((c) => matchesItemSignature(c, rep.sig));
+        const same = items.filter((it) => normalizeItemText(innerTargetOf(it, step.locator.inner, step.locator.anchor?.selector)) === own);
+        if (same.length === 1) step.choice = { by: 'text', value: truncate(own, 80) };
+      }
       step.needsReview = true;
       step.gate = isIrreversibleLabel(label);
     } else {
@@ -4768,8 +4782,16 @@
     return items.filter((x) => isVisible(x));
   }
 
-  function innerTargetOf(item, inner) {
+  // 項目内の操作対象。記録した要素のセレクタ(例: [data-cy="title-recipe"] > a)が項目内でちょうど1つに当たれば
+  // それを優先する(実サイトの商品カードはバッジ等で構造がずれ、位置のパスでは別の要素や項目自体に落ちるため)。
+  function innerTargetOf(item, inner, anchorSelector = '') {
     if (!inner) return item;
+    try {
+      const hits = anchorSelector ? item.querySelectorAll(anchorSelector) : [];
+      if (hits.length === 1) return hits[0];
+    } catch {
+      /* 項目内では使えないセレクタ */
+    }
     try {
       return item.querySelector(inner) || item;
     } catch {
@@ -4845,7 +4867,7 @@
         return list.length ? list : null;
       }, timeoutMs);
       if (!items) return { status: 'failed', error: t('cs.err.stepListMissing', { label: step.target || '' }) };
-      return { status: 'choose', ...publishCandidates(items.map((item) => ({ el: innerTargetOf(item, locator.inner), text: normalizeItemText(item) }))) };
+      return { status: 'choose', ...publishCandidates(items.map((item) => ({ el: innerTargetOf(item, locator.inner, locator.anchor?.selector), text: normalizeItemText(item) }))) };
     } else {
       target = await waitUntil(() => resolveAnchor(locator.anchor), timeoutMs);
       if (!target) {
@@ -4895,7 +4917,16 @@
       }
       const value = String(step.action.value ?? '');
       if (verb === 'click') {
-        target.click();
+        // ランナーは1つのタブで進む。新しいタブで開くリンク(target=_blank 等)はこのタブで開く。
+        const link = target.closest('a[href][target]');
+        const linkTarget = link?.getAttribute('target') || '';
+        const newTab = link && !['', '_self', '_top', '_parent'].includes(linkTarget.toLowerCase());
+        if (newTab) link.setAttribute('target', '_self');
+        try {
+          target.click();
+        } finally {
+          if (newTab) link.setAttribute('target', linkTarget);
+        }
       } else if (verb === 'fill') {
         fillValue(target, value);
         if (valueOf(target) !== value) return { status: 'failed', label, error: t('cs.err.stepVerifyValue', { label }) };

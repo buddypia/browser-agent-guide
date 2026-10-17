@@ -313,7 +313,13 @@ const ok = (name) => {
 {
   assert.equal(inferUrlPattern('https://a.test/orders/8812/edit'), 'https://a.test/orders/:id/edit');
   assert.equal(inferUrlPattern('https://a.test/u/550e8400-e29b-41d4-a716-446655440000/'), 'https://a.test/u/:id');
-  assert.equal(inferUrlPattern('https://a.test/dp/B0ABCDE123/ref=x'), 'https://a.test/dp/:id/ref=x');
+  assert.equal(inferUrlPattern('https://a.test/dp/B0ABCDE123/ref=x'), 'https://a.test/dp/:id/:id2');
+  // 実サイト(Amazon の商品ページ): 商品名の slug と ref= は商品・一覧での位置ごとに変わる。
+  const amazon = inferUrlPattern('https://www.amazon.co.jp/%E3%82%BC%E3%83%96%E3%83%A9-%E3%82%B8%E3%82%A7%E3%83%AB-0-5-P-JJ15-BK10/dp/B00P0PT7BS/ref=sr_1_1');
+  assert.equal(amazon, 'https://www.amazon.co.jp/:id/dp/:id2/:id3');
+  assert.ok(urlMatchesPattern('https://www.amazon.co.jp/%E4%B8%89%E8%8F%B1-%E3%82%B8%E3%82%A7%E3%83%83%E3%83%88-0-5-SXN150-05/dp/B0012Y6V3K/ref=sr_1_5?th=1', amazon));
+  assert.equal(inferUrlPattern('https://a.test/questions/12345/how-to-parse-json-safely'), 'https://a.test/questions/:id/:id2');
+  assert.equal(inferUrlPattern('https://a.test/reports/monthly-sales-report'), 'https://a.test/reports/monthly-sales-report'); // ID が無ければ slug も固定
   assert.equal(inferUrlPattern('https://a.test/a/1/b/2'), 'https://a.test/a/:id/b/:id2');
   assert.equal(inferUrlPattern('https://a.test/api/v2/page2'), 'https://a.test/api/v2/page2'); // 短語は汎化しない
   assert.equal(inferUrlPattern(inferUrlPattern('https://a.test/o/1')), 'https://a.test/o/:id'); // 冪等
