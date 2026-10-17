@@ -46,6 +46,17 @@ function startStaticServer() {
   });
 }
 
+async function mcpCall(port, name, args) {
+  const res = await fetch(`http://127.0.0.1:${port}/mcp`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+  });
+  const text = await res.text();
+  const line = text.split('\n').find((l) => l.startsWith('data: '));
+  return JSON.parse(line ? line.slice(6) : text).result;
+}
+
 async function getServiceWorker(context) {
   let [sw] = context.serviceWorkers();
   if (!sw) sw = await context.waitForEvent('serviceworker');
@@ -281,16 +292,7 @@ test.describe('Milestone 2 Integration', () => {
     const tabId = await sw.evaluate(async (u) => (await chrome.tabs.query({})).find((t) => t.url === u)?.id, pageUrl);
     // 人が「AIに渡す」にチェック → daemon ON なのでメモだけが画像なしで同期される。
     await sw.evaluate((t) => chrome.tabs.sendMessage(t, { type: 'SET_ANNOTATION_FOR_AI', id: 'note-mcp', on: true }, { frameId: 0 }), tabId);
-    const mcp = async (name, args) => {
-      const res = await fetch(`http://127.0.0.1:${daemonPort}/mcp`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
-      });
-      const text = await res.text();
-      const line = text.split('\n').find((l) => l.startsWith('data: '));
-      return JSON.parse(line ? line.slice(6) : text).result;
-    };
+    const mcp = (name, args) => mcpCall(daemonPort, name, args);
     let ctx;
     await expect.poll(async () => (ctx = await mcp('get_latest_feedback_context', { tabId }))?.structuredContent?.id || '', { timeout: 15000 }).not.toBe('');
     expect(JSON.stringify(ctx.content)).toContain('入力欄の枠を太く');
@@ -307,6 +309,60 @@ test.describe('Milestone 2 Integration', () => {
 
     await sw.evaluate(() => chrome.storage.local.remove('aiAdvisorAnnotations'));
     await page.close();
+  });
+
+  test('a5. MCP runs a saved workflow in a new tab and stops at the confirm step for a person', async () => {
+    await expect.poll(() => daemonWss.getBridgeStatus().connected).toBe(true);
+    const sw = await getServiceWorker(context);
+    const mcp = (name, args) => mcpCall(daemonPort, name, args);
+    const steps = [
+      { id: 'w1', kind: 'action', url: pageUrl, target: 'メールアドレス', action: { verb: 'fill', value: '{email}' }, locator: { kind: 'fixed', anchor: { selector: 'input[name="email"]', tag: 'input' } } },
+      { id: 'w2', kind: 'action', url: pageUrl, target: '購入手続きへ', action: { verb: 'click', value: '' }, locator: { kind: 'fixed', anchor: { selector: '[data-testid="cta-checkout"]', tag: 'button', role: 'button', text: '購入手続きへ' } }, gate: true },
+    ];
+    const saved = { id: 'wf-mcp', name: 'メール入力→購入', createdAt: '2026-10-17T00:00:00Z', steps };
+    const seed = (working) => sw.evaluate(({ saved, working }) => chrome.storage.local.set({ aiAdvisorWorkflow: { recording: false, activeId: saved.id, name: saved.name, steps: working, saved: [saved] }, aiAdvisorWorkflowRun: null }), { saved, working });
+
+    // 保存済みも実行も無いプロファイルは答えない(複数のプロファイルが繋がっても、該当するものの答えが採られる)。
+    await sw.evaluate(() => chrome.storage.local.remove(['aiAdvisorWorkflow', 'aiAdvisorWorkflowRun']));
+    expect((await mcp('list_workflows', {})).content[0].text).toMatch(/No saved workflows/);
+    expect((await mcp('stop_workflow', {})).content[0].text).toMatch(/No workflow run in progress/);
+
+    await seed(steps);
+    const list = await mcp('list_workflows', {});
+    expect(list.structuredContent.workflows).toEqual([
+      { id: 'wf-mcp', name: 'メール入力→購入', createdAt: '2026-10-17T00:00:00Z', steps: 2, confirmSteps: 1, variables: ['email'], startPage: pageUrl },
+    ]);
+    // サイドパネルの未保存の手順は置き換えない(人が保存か破棄を選ぶ)。
+    await seed(steps.slice(0, 1));
+    const refused = await mcp('run_workflow', { workflowId: 'wf-mcp', vars: { email: 'mcp@example.com' } });
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toMatch(/unsaved working steps/);
+
+    // 変数が足りなければ、タブを開く前・作業中の手順を置き換える前に断る。
+    await seed(steps);
+    const pagesBefore = context.pages().length;
+    const noVars = await mcp('run_workflow', { workflowId: 'wf-mcp', vars: {} });
+    expect(noVars.isError).toBe(true);
+    expect(noVars.content[0].text).toMatch(/Missing values for: email/);
+    expect(context.pages().length).toBe(pagesBefore);
+
+    const opened = context.waitForEvent('page');
+    const run = await mcp('run_workflow', { workflowId: 'wf-mcp', vars: { email: 'mcp@example.com' } });
+    expect(run.structuredContent).toMatchObject({ started: true, workflow: { id: 'wf-mcp' } });
+    const tab = await opened;
+    let status;
+    await expect.poll(async () => (status = (await mcp('get_workflow_run', {})).structuredContent.run).held?.kind || '', { timeout: 20000 }).toBe('confirm');
+    expect(status).toMatchObject({ active: false, workflowId: 'wf-mcp', tabId: run.structuredContent.tabId, done: 1, total: 2, complete: false, held: { step: 2 } });
+    await expect(tab.locator('input[name="email"]')).toHaveValue('mcp@example.com');
+    // 状態に入力値や手順の文面を載せない(直近の出来事は種類と時刻だけ)。
+    expect(Object.keys(status.last).sort()).toEqual(['at', 'phase']);
+    expect(JSON.stringify(status)).not.toContain('mcp@example.com');
+    // 確定系の手順を承認する手段は MCP に無い。止めると承認待ちも消える。
+    const stopped = await mcp('stop_workflow', {});
+    expect(stopped.structuredContent.run).toMatchObject({ active: false, held: null });
+
+    await sw.evaluate(() => chrome.storage.local.remove(['aiAdvisorWorkflow', 'aiAdvisorWorkflowRun']));
+    await tab.close();
   });
 
   test('b. Action execution and result recovery via the fallback CDP bridge CLI', async () => {

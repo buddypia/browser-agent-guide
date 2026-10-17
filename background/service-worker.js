@@ -28,6 +28,9 @@ import {
   pickCandidate,
   buildChoiceMessages,
   formatStepTitle,
+  hasUnsavedSteps,
+  setActiveWorkflow,
+  isRunComplete,
 } from '../lib/workflow.js';
 import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18n.js';
 import { matchAffordanceFastPath, resolveFastPathAction } from '../lib/eg2-client.js';
@@ -542,7 +545,10 @@ async function setStepSuggestion(stepId, suggestion) {
     /* 学習候補の保存失敗は実行結果に影響させない */
   }
 }
+// 直近の自動実行イベント(MCP get_workflow_run 用)。文面は記録時の URL・変数を埋めた値・候補を含みうるので、種類と時刻だけ残す。
+let lastAutoRunEvent = null;
 function notifyAutoRun(payload) {
+  lastAutoRunEvent = { phase: payload.phase, at: new Date().toISOString() };
   // サイドパネル等へブロードキャスト(未起動なら無視)。SW自身には届かない。
   try {
     chrome.runtime.sendMessage({ type: 'WORKFLOW_AUTORUN_EVENT', ...payload }, () => void chrome.runtime.lastError);
@@ -611,6 +617,92 @@ async function stopWorkflowAutoRun() {
   await writeWorkflowRun({ ...run, active: false, doneStepIds: [], heldStepId: '', heldKind: '', heldLabel: '', approvedStepId: '', judgeApprovedStepId: '', approvedLabel: '' });
   notifyAutoRun({ phase: 'stopped', text: t('sw.autorun.stopped') });
   return { active: false };
+}
+
+// MCP(list_workflows / run_workflow / get_workflow_run / stop_workflow)から保存済みワークフローを扱う。
+// 返すのは名前・手順数・変数名・進み具合だけで、入力値は返さない。承認はここに無い: 確定系や判断AIの保留は、
+// 人がサイドパネルで承認するまで止まったまま(エージェントが自分の実行を承認できないようにする)。
+// 複数のプロファイルが繋がっていても、該当するプロファイルだけが答える(それ以外は throw → ok:false)。
+async function handleWorkflowRequest({ op, workflowId, vars }) {
+  const wf = await readWorkflow();
+  const run = await readWorkflowRun();
+  if (op === 'list') {
+    if (!wf.saved.length) throw new Error('No saved workflows in this browser.');
+    return { workflows: wf.saved.map(savedWorkflowSummary), run: workflowRunSummary(wf, run) };
+  }
+  if (op === 'status') {
+    if (!run.active && !run.heldStepId && !run.startedAt) throw new Error('No workflow run in this browser.');
+    return { run: workflowRunSummary(wf, run) };
+  }
+  if (op === 'stop') {
+    if (!run.active && !run.heldStepId) throw new Error('No workflow run in progress in this browser.');
+    await stopWorkflowAutoRun();
+    return { run: workflowRunSummary(wf, await readWorkflowRun()) };
+  }
+  if (op !== 'run') throw new Error(`Unknown workflow op: ${op}`);
+  const target = wf.saved.find((w) => w.id === String(workflowId || ''));
+  if (!target) throw new Error(`No saved workflow with id "${workflowId}". Call list_workflows.`);
+  if (run.active || run.heldStepId) throw new Error('A workflow run is in progress or waiting for approval in the side panel. Stop it first (stop_workflow).');
+  if (wf.recording) throw new Error('The side panel is recording steps. Ask the user to stop recording first.');
+  // 作業中の手順を置き換えるので、サイドパネルの未保存の変更は捨てない(人が保存か破棄を選ぶ)。
+  if (hasUnsavedSteps(wf)) throw new Error('The side panel has unsaved working steps. Ask the user to save or discard them first.');
+  // タブを開く・手順を置き換える前に、始められるかを確かめる。
+  const steps = actionableSteps(target);
+  if (!steps.length) throw new Error('The workflow has no steps.');
+  const given = vars && typeof vars === 'object' ? vars : {};
+  const missing = stepVariables(steps).filter((name) => !String(given[name] ?? '').length);
+  if (missing.length) throw new Error(`Missing values for: ${missing.join(', ')}. Pass them in vars.`);
+  if (steps.some((st) => !isStructuredStep(st)) && !(await getSettings()).ai.apiKey) {
+    throw new Error('This workflow has memo-only steps that need an AI key, and none is set.');
+  }
+  if (!/^https?:/.test(steps[0].url)) throw new Error('The first step has no page to open.');
+  // 開始ページは必ず新しいタブで開く(人が作業中のタブを遷移させない)。
+  const created = await chrome.tabs.create({ url: steps[0].url, active: true });
+  const tab = (await waitForTab(created.id, (tb) => tb.status === 'complete', WF_NAV_WAIT_MS)) || created;
+  // 読み込みを待つ間にサイドパネルで記録・編集・実行が始まっていたら、それを上書きしない。
+  const latest = await readWorkflow();
+  const latestRun = await readWorkflowRun();
+  let res = { active: false, reason: 'side panel changed' };
+  if (!latest.recording && !hasUnsavedSteps(latest) && !latestRun.active && !latestRun.heldStepId) {
+    await chrome.storage.local.set({ [WORKFLOW_KEY]: setActiveWorkflow(latest, target.id) });
+    res = await startWorkflowAutoRun(tab.id, given);
+    if (!res.active) await chrome.storage.local.set({ [WORKFLOW_KEY]: latest }); // 置き換えた作業中の手順を戻す
+  }
+  if (!res.active) {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+    throw new Error(`The run did not start (${res.reason || 'unknown'}).`);
+  }
+  return { started: true, tabId: tab.id, workflow: savedWorkflowSummary(target) };
+}
+
+function savedWorkflowSummary(w) {
+  const steps = actionableSteps(w);
+  let startPage = '';
+  try {
+    const u = new URL(steps[0]?.url || '');
+    startPage = u.origin + u.pathname; // クエリは記録時の入力を含みうるので落とす
+  } catch {
+    /* URL の無い手順 */
+  }
+  return { id: w.id, name: w.name, createdAt: w.createdAt, steps: steps.length, confirmSteps: steps.filter((s) => s.gate).length, variables: stepVariables(steps), startPage };
+}
+
+function workflowRunSummary(wf, run) {
+  const steps = actionableSteps(wf);
+  return {
+    active: run.active,
+    workflowId: wf.activeId || '',
+    name: wf.name || '',
+    tabId: run.tabId,
+    done: run.doneStepIds.length,
+    total: steps.length,
+    complete: run.doneStepIds.length > 0 && isRunComplete(wf, run),
+    held: run.heldStepId
+      ? { step: steps.findIndex((s) => s.id === run.heldStepId) + 1, kind: run.heldKind === 'judge' ? 'judge' : 'confirm', label: run.heldLabel }
+      : null,
+    startedAt: run.startedAt,
+    last: lastAutoRunEvent,
+  };
 }
 
 /** 承認ゲートで止まった手順を人間が承認 → その1手だけゲートを通して再開する。 */
@@ -1899,6 +1991,19 @@ async function connectDaemonWebSocket() {
       try {
         msg = JSON.parse(event.data);
       } catch (e) {
+        return;
+      }
+
+      if (msg?.type === 'workflow') {
+        let reply;
+        try {
+          reply = { ok: true, ...(await handleWorkflowRequest(msg)) };
+        } catch (err) {
+          reply = { ok: false, error: err.message };
+        }
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'workflow_result', requestId: msg.requestId, ...reply }));
+        }
         return;
       }
 

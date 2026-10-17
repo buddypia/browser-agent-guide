@@ -392,6 +392,66 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
     }
   );
 
+  if (extensionRequest) {
+    // サイドパネルで記録・保存したワークフローを、接続中の拡張で動かす。承認するツールは無い:
+    // 確定系の手順や判断AIの保留は、人がサイドパネルで承認するまで止まったまま。
+    const workflowCall = async (params) => {
+      try {
+        const { ok, type, requestId, ...data } = (await extensionRequest('workflow', params)) || {};
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }], structuredContent: data };
+      } catch (err) {
+        return { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true };
+      }
+    };
+    server.registerTool(
+      'list_workflows',
+      {
+        title: '保存済みワークフローの一覧',
+        description:
+          'ユーザーがサイドパネルで記録・保存したワークフロー(ページを跨ぐ操作手順)の一覧と、実行中の状態を返す。' +
+          '各項目は id・名前・手順数・確定系の手順数・変数名(run_workflow の vars に渡す)・開始ページ。入力値は返さない。',
+        inputSchema: {},
+      },
+      async () => workflowCall({ op: 'list' })
+    );
+    server.registerTool(
+      'run_workflow',
+      {
+        title: '保存済みワークフローの実行',
+        description:
+          '保存済みワークフローを id で選び、開始ページを新しいタブで開いて自動実行を始める(終わるのを待たない。進み具合は get_workflow_run)。' +
+          '手順に {名前} の変数があれば vars で全部の値を渡す(足りなければ何も開かずにエラー)。' +
+          '購入・送信・削除などの確定系の手順と、判断AIが迷った選択では止まり、人がサイドパネルで承認するまで進まない(このツールからは承認できない)。' +
+          '別の実行中・承認待ち、記録中、サイドパネルに未保存の手順がある時は始めずにエラーを返す。',
+        inputSchema: {
+          workflowId: z.string().min(1).describe('list_workflows の id'),
+          vars: z.record(z.string()).optional().describe('手順の変数 {名前} に入れる値'),
+        },
+      },
+      async ({ workflowId, vars }) => workflowCall({ op: 'run', workflowId, vars: vars || {} })
+    );
+    server.registerTool(
+      'get_workflow_run',
+      {
+        title: 'ワークフロー実行の状態',
+        description:
+          '実行中/直近の自動実行の状態を返す: active・done/total・complete・held(承認待ちの手順番号・種類 confirm|judge・候補の表示名)・last(直近の出来事の種類 phase と時刻)。' +
+          'held がある時は、サイドパネルで承認するようユーザーに伝える。',
+        inputSchema: {},
+      },
+      async () => workflowCall({ op: 'status' })
+    );
+    server.registerTool(
+      'stop_workflow',
+      {
+        title: 'ワークフロー実行の停止',
+        description: '自動実行を止める(承認待ちも取り消す)。実行済みの操作は元に戻らない。',
+        inputSchema: {},
+      },
+      async () => workflowCall({ op: 'stop' })
+    );
+  }
+
   if (executeActions) {
     server.registerTool(
       'execute_actions',

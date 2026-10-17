@@ -16,6 +16,7 @@ code_refs:
   - { path: "lib/workflow.js", symbol: "pickCandidate" }
   - { path: "content/content-script.js", symbol: "runStep" }
   - { path: "background/service-worker.js", symbol: "driveWorkflow" }
+  - { path: "background/service-worker.js", symbol: "handleWorkflowRequest" }
   - { path: "lib/judge-client.js", symbol: "callJudgeChoice" }
   - { path: "lib/judge-client.js", symbol: "askClef" }
   - { path: "lib/judge-client.js", symbol: "callJudgeVisualCheck" }
@@ -67,3 +68,9 @@ confidence: medium
 前進。`dryRun` は操作せず対象を光らせるだけ。`kind` を持たない旧来のメモ手順は従来どおり AI が verbs 化する。
 ランナーは1つのタブで進む。新しいタブで開くリンク(`_blank`、または文書内に無いフレーム名)のクリックは `runStep` が同じタブで開く
 (既存の iframe/frame を名前で狙うリンクはそのまま)。記録時は人が開いた新しいタブで続けてよい(手順は URL で結び付く)。
+AI CLI は MCP の `run_workflow`(daemon → WS `workflow` `{op:'run'}` → SW `handleWorkflowRequest`)で保存済みワークフローを
+id と変数で始められる。開始ページは常に新しいタブで開く(人が作業中のタブを遷移させない)。実行中/承認待ち・記録中・
+サイドパネルに未保存の手順がある時や変数が足りない時は、何も開かずに断る(人の編集を捨てない)。
+状態(`get_workflow_run`)は進み具合・`held` の手順番号と種類と候補の表示名・直近の出来事の種類(phase)だけを返し、
+入力値と手順ごとの文面は返さない。
+承認する手段は MCP に無く、確定系も判断AIの保留も人がサイドパネルで承認する。
