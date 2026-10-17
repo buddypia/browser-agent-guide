@@ -278,6 +278,7 @@ export function peekDistinctRecent(rows, { windowMs = 90 * 60 * 1000 } = {}) {
     host,
     title: e.title || '',
     capturedAt: e.capturedAt || '',
+    ...(e.resolution?.at ? { resolvedAt: e.resolution.at } : {}),
   }));
   // newest は「mtime 最新」(従来 latest 契約)を維持。単一案件時の単発返却で使う。
   return { newest: rows[0], distinctCount: byHost.size, candidates };

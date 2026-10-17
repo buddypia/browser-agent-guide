@@ -117,12 +117,13 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
         }
         const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains });
         if (stale) return stale;
-        const done = resolvedLatestResult(entry);
-        if (done) return done;
         const peek = peekDistinctRecent(rows, { windowMs: latestWindowMs });
         if (peek.distinctCount >= 2) {
           return ambiguousLatestResult(peek);
         }
+        // 対応済みの判定は曖昧検知の後(最新が対応済みでも、窓内の別案件の未対応を隠さない)。
+        const done = resolvedLatestResult(entry);
+        if (done) return done;
         // 単一プロジェクト（または空）→ 従来どおり最新を返す。
         return contextResult(entry, shotUrlFor);
       }
@@ -163,8 +164,6 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
         }
         const stale = staleLatestResult(entry, { latestWindowMs, nowMs: currentNowMs(), urlContains, titleContains });
         if (stale) return stale;
-        const done = resolvedLatestResult(entry);
-        if (done) return done;
         const peek = peekDistinctRecent(rows, { windowMs: latestWindowMs });
         if (peek.distinctCount >= 2) {
           const picked = peek.candidates.find((c) => c.id === contextId);
@@ -179,6 +178,8 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
           }
           return ambiguousLatestResult(peek);
         }
+        const done = resolvedLatestResult(entry);
+        if (done) return done;
         // 単一プロジェクト（または空）→ 従来の imageGate 経路をそのまま。
         return imageResult(entryStore, entry, shotUrlFor, { contextId, imageReason });
       }
@@ -359,10 +360,18 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       const entry = entryStore.findEntry(id);
       if (!entry) return { content: [{ type: 'text', text: `id=${id} は見つかりません。` }], isError: true };
       const resolution = { at: new Date(currentNowMs()).toISOString(), summary: String(summary || '') };
-      entryStore.markResolved?.(id, resolution);
+      const lines = [];
+      let stored = true;
+      try {
+        entryStore.markResolved?.(id, resolution);
+        lines.push(`id=${id} を対応済みにしました(${resolution.at})。`);
+      } catch (err) {
+        // 記録に失敗しても拡張側のメモは更新する(人に見える側を優先)。latest は引き続きこの capture を返しうる。
+        stored = false;
+        lines.push(`id=${id} の対応済みの記録を保存できませんでした: ${err.message}`);
+      }
       const annotation = readEntryAnnotation(entry) || {};
       const ids = (Array.isArray(annotation.items) ? annotation.items : []).map((it) => it?.id).filter(Boolean);
-      const lines = [`id=${id} を対応済みにしました(${resolution.at})。`];
       let extension = null;
       if (!ids.length) {
         lines.push('この capture にはメモの id が無いため、拡張側のメモは変えていません。');
@@ -379,7 +388,7 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
           lines.push(`ページ上のメモは更新できませんでした: ${err.message}`);
         }
       }
-      return { content: [{ type: 'text', text: lines.join('\n') }], structuredContent: { id, resolution, extension } };
+      return { content: [{ type: 'text', text: lines.join('\n') }], structuredContent: { id, resolution, stored, extension } };
     }
   );
 
@@ -528,7 +537,7 @@ function ambiguousLatestMessage(candidates = []) {
   lines.push(AMBIGUOUS_MESSAGE);
   lines.push('candidates (newest-first):');
   for (const c of candidates) {
-    lines.push(`  - id=${c.id}  host=${c.host}  title=${c.title || '(不明)'}  captured_at=${c.capturedAt || '(不明)'}`);
+    lines.push(`  - id=${c.id}  host=${c.host}  title=${c.title || '(不明)'}  captured_at=${c.capturedAt || '(不明)'}${c.resolvedAt ? `  resolved=${c.resolvedAt} (対応済み)` : ''}`);
   }
   lines.push(AMBIGUOUS_HINT);
   return lines.join('\n');

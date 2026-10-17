@@ -106,3 +106,58 @@ test('resolve_feedback: disk では resolution.json に残り、再起動後も�
     rmSync(inboxDir, { recursive: true, force: true });
   }
 });
+
+test('resolve_feedback: 最新が対応済みでも、窓内の別案件の未対応は隠さない(曖昧検知が先)', async () => {
+  const inboxDir = mkdtempSync(join(tmpdir(), 'bag-resolve-'));
+  const entryStore = createPageFeedbackStore({ inboxDir, storageMode: 'memory' });
+  const other = entryStore.save({ ...payload(1), annotation: { ...payload(1).annotation, url: 'https://other.test/', title: '別案件' } });
+  const { id } = entryStore.save(payload(2));
+  try {
+    await withClient({ inboxDir, entryStore }, async (client) => {
+      await client.callTool({ name: 'resolve_feedback', arguments: { id } });
+      const bare = await client.callTool({ name: 'get_latest_feedback_context', arguments: {} });
+      const candidates = bare.structuredContent.disambiguation.candidates;
+      assert.deepEqual(candidates.map((c) => [c.id, Boolean(c.resolvedAt)]), [[id, true], [other.id, false]]);
+      assert.match(text(bare), /resolved=.*\(対応済み\)/);
+      // 未対応の別候補は contextId で選べば画像経路に進める(対応済みで弾かない)。
+      const picked = await client.callTool({ name: 'get_latest_feedback_image', arguments: { contextId: other.id, imageReason: '色を確かめる' } });
+      assert.doesNotMatch(text(picked), /対応済みです/);
+    });
+  } finally {
+    rmSync(inboxDir, { recursive: true, force: true });
+  }
+});
+
+test('resolve_feedback: 記録の保存に失敗しても拡張側のメモは更新し、失敗を伝える', async () => {
+  const inboxDir = mkdtempSync(join(tmpdir(), 'bag-resolve-'));
+  const entryStore = createPageFeedbackStore({ inboxDir, storageMode: 'memory' });
+  const { id } = entryStore.save(payload(1));
+  entryStore.markResolved = () => {
+    throw new Error('EACCES');
+  };
+  const calls = [];
+  try {
+    await withClient({ inboxDir, entryStore, extensionRequest: async (type, params) => (calls.push(type), { ok: true, marked: params.ids }) }, async (client) => {
+      const res = await client.callTool({ name: 'resolve_feedback', arguments: { id } });
+      assert.equal(res.structuredContent.stored, false);
+      assert.match(text(res), /保存できませんでした: EACCES/);
+      assert.deepEqual(calls, ['mark_annotations_done']);
+    });
+  } finally {
+    rmSync(inboxDir, { recursive: true, force: true });
+  }
+});
+
+test('resolve_feedback: hybrid で書き出す前に対応済みにしても、書き出し時に resolution.json を残す', () => {
+  const inboxDir = mkdtempSync(join(tmpdir(), 'bag-resolve-'));
+  const entryStore = createPageFeedbackStore({ inboxDir, storageMode: 'hybrid' });
+  const { id } = entryStore.save(payload(1));
+  try {
+    entryStore.markResolved(id, { at: '2026-10-17T10:05:00.000Z', summary: 'done' });
+    assert.equal(existsSync(join(inboxDir, id, 'resolution.json')), false);
+    entryStore.materialize(entryStore.findEntry(id));
+    assert.equal(createDiskEntryStore(inboxDir).findEntry(id).resolution.summary, 'done');
+  } finally {
+    rmSync(inboxDir, { recursive: true, force: true });
+  }
+});

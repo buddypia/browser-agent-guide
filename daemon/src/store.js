@@ -105,6 +105,8 @@ function createMemoryBackedStore({ inboxDir, mode, memoryLimit }) {
       entry.shot = written.files.includes('shot.png') ? join(written.dir, 'shot.png') : '';
       entry.files = written.files;
       entry.materialized = true;
+      // 書き出す前に対応済みにされていたら、その記録も残す(hybrid の再起動後も対応済みのまま)。
+      if (entry.resolution) writeResolution(written.dir, entry.resolution);
       return entry;
     },
     // メモリの entry は RAM に記録する(hybrid で inbox に書き出し済みなら再起動後も残るよう書く)。
