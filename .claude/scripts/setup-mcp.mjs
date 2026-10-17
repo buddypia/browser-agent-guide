@@ -68,11 +68,23 @@ export async function setupMcp(options = {}) {
         console.log('Removed deprecated bag_visual_feedback MCP server from Claude Code.');
       } catch (_) {}
 
-      // Register new alias
-      execSync(`claude mcp add --transport http ${serverName} ${serverUrl}`, { stdio: 'inherit' });
-      console.log('Successfully registered bag_page_feedback MCP server to Claude Code!');
+      // A re-run must not reach the fallback: "claude mcp add" exits 1 on an
+      // existing name, and the fallback rewrites ~/.claude.json under live sessions.
+      let registered = false;
+      try {
+        execSync(`claude mcp get ${serverName}`, { stdio: 'ignore' });
+        registered = true;
+      } catch (_) {}
+
+      if (registered) {
+        console.log('bag_page_feedback is already registered in Claude Code. Skipping.');
+      } else {
+        // Register new alias
+        execSync(`claude mcp add --transport http ${serverName} ${serverUrl}`, { stdio: 'inherit' });
+        console.log('Successfully registered bag_page_feedback MCP server to Claude Code!');
+      }
     } catch (err) {
-      console.warn('Could not automatically run "claude mcp add". Trying fallback directly to ~/.mcp.json...');
+      console.warn('Could not automatically run "claude mcp add". Trying fallback directly to ~/.claude.json...');
       setupClaudeMcpJson(serverName, serverUrl);
     }
 
