@@ -161,6 +161,45 @@ test.describe('Milestone 2 Integration', () => {
     await page.close();
   });
 
+  test('a2. execute_actions is limited to the agent allow-list and never clicks purchase buttons', async () => {
+    // 'a' のテストで拡張は daemon に接続済み(設定は storage に残る)。
+    await expect.poll(() => daemonWss.getBridgeStatus().connected).toBe(true);
+    const page = await context.newPage();
+    await page.goto(pageUrl);
+    await page.evaluate(() => {
+      const b = document.createElement('button');
+      b.id = 'buy-now';
+      b.textContent = '今すぐ買う';
+      b.addEventListener('click', () => { window.__bought = true; });
+      document.body.append(b);
+    });
+    const run = (actions, extra = {}) => daemonWss.executeActions({ actions, urlContains: 'playground.html', ...extra });
+
+    // daemon が別の経路(manual)を名乗っても、拡張は execute_actions として縛る。
+    const blocked = await run(
+      [
+        { verb: 'injectScript', args: { code: 'window.__injected = true' } },
+        { verb: 'navigateTo', args: { url: 'https://example.com/?leak=1' } },
+        { verb: 'removeElement', args: { selector: '#buy-now' } },
+      ],
+      { source: 'manual' },
+    );
+    expect(blocked.results.map((r) => r.ok)).toEqual([false, false, false]);
+    expect(page.url()).toBe(pageUrl);
+    await expect(page.locator('#buy-now')).toHaveCount(1);
+
+    const res = await run([
+      { verb: 'setStyle', args: { selector: '#buy-now', styles: { backgroundColor: 'rgb(192, 0, 0)' } } },
+      { verb: 'clickElement', args: { selector: '#buy-now' } },
+    ]);
+    expect(res.results[0].ok).toBe(true);
+    await expect(page.locator('#buy-now')).toHaveCSS('background-color', 'rgb(192, 0, 0)');
+    expect(res.results[1]).toMatchObject({ ok: false, held: true });
+    expect(await page.evaluate(() => window.__bought === true)).toBe(false);
+
+    await page.close();
+  });
+
   test('b. Action execution and result recovery via the fallback CDP bridge CLI', async () => {
     const sw = await getServiceWorker(context);
     const extId = new URL(sw.url()).hostname;

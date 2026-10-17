@@ -629,3 +629,36 @@ test('list_feedback: 拡張は接続済みだが push が無い時は自動送�
     }
   );
 });
+
+test('execute_actions: 使える動詞は enum に限り、範囲外は拡張へ送らずに断る', async () => {
+  const inboxDir = mkdtempSync(join(tmpdir(), 'vf-mcp-exec-'));
+  const sent = [];
+  const server = createHttpServer({
+    inboxDir,
+    executeActions: async (params) => {
+      sent.push(params);
+      return { ok: true, results: params.actions.map((a) => ({ verb: a.verb, ok: true })) };
+    },
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const client = new Client({ name: 'mcp-exec-client', version: '0.0.0' });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.address().port}/mcp`)));
+  try {
+    const { tools } = await client.listTools();
+    const verbs = tools.find((t) => t.name === 'execute_actions').inputSchema.properties.actions.items.properties.verb.enum;
+    assert.ok(verbs.includes('setStyle') && verbs.includes('highlightElement'));
+    for (const danger of ['injectScript', 'injectHtml', 'navigateTo', 'removeElement', 'submitForm']) {
+      assert.equal(verbs.includes(danger), false, `${danger} は enum に無い`);
+      const res = await client.callTool({ name: 'execute_actions', arguments: { tabId: 1, actions: [{ verb: danger, args: {} }] } });
+      assert.equal(res.isError, true, `${danger} は断る`);
+    }
+    assert.equal(sent.length, 0, '範囲外の動詞は拡張へ送らない');
+    const ok = await client.callTool({ name: 'execute_actions', arguments: { tabId: 1, actions: [{ verb: 'setStyle', args: { selector: '#x', styles: { color: 'red' } } }] } });
+    assert.equal(ok.isError, false);
+    assert.equal(sent.length, 1);
+  } finally {
+    await client.close();
+    await new Promise((r) => server.close(r));
+    rmSync(inboxDir, { recursive: true, force: true });
+  }
+});

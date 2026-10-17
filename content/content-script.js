@@ -108,6 +108,20 @@
     'exportContext', 'notify', 'noop',
     'clickAffordance', 'clickElement', 'fillAffordance', 'fillInput', 'selectOption',
   ]);
+  // @term: verb-registry  (外部エージェント経路の allow-list。用語定義: glossary/extension/verb-registry.md)
+  // 外部の AI エージェント(daemon の execute_actions / scripts/cdp-bridge.mjs)からの実行も deny-by-default。
+  // ページ由来の文字列(メモの HTML 等)でエージェントが乗っ取られても、任意 JS(injectScript)・HTML 注入・
+  // 別 URL への遷移(データの持ち出し口)・要素削除・フォーム送信には届かない。許すのは読み取り、
+  // 直した要素を示す/見た目を直す操作、メモの後始末、(autorun と同じガード付きの)クリックと入力だけ。
+  // daemon/src/server.js の EXECUTE_ACTIONS_VERBS と一致必須(test/agent-verbs.test.mjs がパリティ検査)。
+  const AGENT_SOURCES = new Set(['execute_actions', 'cdp_bridge']);
+  const AGENT_ALLOWED_VERBS = new Set([
+    'annotatePage', 'listAffordances', 'readText', 'extractData', 'readSignals', 'listAnnotations',
+    'exportContext', 'explainWorkflow', 'waitForElement', 'notify', 'noop',
+    'scrollToElement', 'highlightElement', 'focusElement', 'outlineElement', 'setStyle', 'removeAnnotation',
+    'clickAffordance', 'clickElement', 'fillAffordance', 'fillInput', 'selectOption',
+  ]);
+  // @endterm: verb-registry
   // autorun で「対象ラベルが確定/購入系、または名前不明なら保留」する対象動詞(クリック系)。
   const AUTORUN_GUARD_VERBS = new Set(['clickAffordance', 'clickElement']);
   // 不可逆/確定系ラベル。lib/workflow.js の IRREVERSIBLE_KEYWORDS と一致必須(test がパリティ検査)。
@@ -4321,6 +4335,7 @@
     if (source === 'recipe' && RECIPE_BLOCKED_VERBS.has(verbName)) return false;
     // autorun は deny-by-default: 許可された安全動詞だけ通す。
     if (source === 'autorun') return AUTORUN_ALLOWED_VERBS.has(verbName);
+    if (AGENT_SOURCES.has(source)) return AGENT_ALLOWED_VERBS.has(verbName);
     return true;
   }
 
@@ -4383,10 +4398,12 @@
           continue;
         }
       }
-      // 自動実行の不可逆ガード: 対象ラベルが「注文を確定/購入/削除」等、または名前が一切取れない
-      // (アイコンのみ等)クリックは自動では押さず保留する(fail-safe)。ユーザーが手動で押す前提。
+      // 自動実行と外部エージェントの不可逆ガード: 対象ラベルが「注文を確定/購入/削除」等、または名前が一切取れない
+      // (アイコンのみ等)クリックは押さず保留する(fail-safe)。ユーザーが手動で押す前提。
+      // 外部エージェントには解除の手段(allowIrreversibleClicks)を渡さない。
       // 要素が解決できない場合は requireEl が例外→クリックされないので安全(保留扱いは不要)。
-      if (source === 'autorun' && !options.allowIrreversibleClicks && AUTORUN_GUARD_VERBS.has(a.verb)) {
+      const agent = AGENT_SOURCES.has(source);
+      if ((agent || (source === 'autorun' && !options.allowIrreversibleClicks)) && AUTORUN_GUARD_VERBS.has(a.verb)) {
         let guardEl = null;
         try {
           guardEl = getEl(a.args || {});
@@ -4402,7 +4419,7 @@
               held: true,
               reason: a.reason || '',
               label: truncate(guardLabel || '(名前不明 / unnamed)', 60),
-              error: t('cs.err.autorunHeld'),
+              error: t(agent ? 'cs.err.agentHeld' : 'cs.err.autorunHeld'),
             });
             continue;
           }

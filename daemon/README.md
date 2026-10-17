@@ -28,17 +28,19 @@
 
 - 拡張からの WebSocket push を受ける（トークン認証）。既定 `memory` は inbox を作らずメモリ保持、`hybrid`/`disk` は inbox を使う。
 - inbox(`<slug>/shot.png` + `annotation.json` + `memo.md`)を新しい順にスキャン。`annotation.json` には URL/title/capturedAt に加えて Chrome タブ情報（`tab.tabId` / `tab.windowId` / `tab.index` / `tab.active`）も入る。
-- 5 つの MCP ツールを公開（接頭辞 `bag_page_feedback:` は**登録時に付けた alias** 例。任意の名前でよい）:
+- 次の MCP ツールを公開（接頭辞 `bag_page_feedback:` は**登録時に付けた alias** 例。任意の名前でよい）:
   - `list_feedback` — 一覧（id・取得元 url/title/tab 付き）
   - `get_latest_feedback_context` — 最新を image なしの text/structured context で返す（**主用途**。対象要素の outerHTML + a11y を含む）
   - `get_feedback_context` — id 指定で image なし context を返す（outerHTML + a11y を含む）
   - `get_latest_feedback_image` — context 確認後のみ最新を image+パスで返す（必要時の vision）
   - `get_feedback_image` — context 確認後のみ id 指定で image+パスを返す
+  - `evaluate_feedback_goal` — キャプチャの画面が目的の状態になっているかを、ローカルの EmbeddingGemma 2(`EG2_URL`)で判定する(既定は success / failure の二択)
+  - `execute_actions` — 接続中の拡張を通して、指定タブで拡張の動詞を実行する（使える動詞は allow-list に限る。下の「セキュリティ」）
 
   > **命名（旧 → 新の経緯）**: かつての `*_visual_feedback*` は「メモ＋HTML 要素だけ欲しい（画像なし）」ケースでも "visual" を
   > 冠して紛らわしかったため、modality 中立な `*_feedback_context`（テキスト/HTML/a11y）と `*_feedback_image`（画像）へ改名し、
   > サーバ内部名も `bag-visual-feedback` → `bag-page-feedback` にした。**旧ツール名（deprecated エイリアス）は撤去済み**で、
-  > 現在は新名 5 ツールのみを公開する（旧名で書かれた古い手順は動かない）。
+  > 現在は新名のツールのみを公開する（旧名で書かれた古い手順は動かない）。
   > なお Claude Code/Codex 等で打つ接頭辞（本 README の例は `bag_page_feedback:`）は**ユーザが登録時に決めた alias**で、
   > サーバ名とは別物。
 
@@ -365,4 +367,9 @@ node scripts/probe.mjs ~/Downloads/ai-inbox --image             # 必要時の�
 - 書き込みは inbox 配下のみ。slug はサーバ側採番でクライアントのパスは信用しない（traversal 防止）。
 - MCP は inbox の絶対パスを返すため、共有マシンでは inbox の場所に注意。
 - 常駐化（launchd/systemd）は `npm run service` で対応（上記「常駐化」節）。
-- まだ未対応（Phase 2 候補）: 複数 inbox root の whitelist、Antigravity の image vision 実測。再接続は拡張側の push が1回限り（push→ack→close、失敗時は `chrome.downloads` フォールバック）なので永続接続の再接続は非該当。
+- **`execute_actions` は動詞の allow-list(入力スキーマの `verb` enum)に限る**。拡張側も同じ一覧を実行時に強制し、
+  経路名は SW が `execute_actions` に固定する(daemon の申告は使わない)。任意 JS(`injectScript`)・HTML 注入・
+  別 URL への遷移・要素削除・フォーム送信はできず、確定/購入/削除や名前の無いボタンのクリックは `held:true` で保留され、人が押す。
+  ページ由来の文字列(メモの HTML 等)で AI が乗っ取られても、ユーザーのタブで任意コードを走らせない・データを持ち出させないため。
+- 拡張は daemon と WS をつなぎっぱなしにし、切れたら再接続する(MV3 の SW が止まらないよう 20 秒ごとに ping)。
+- まだ未対応（Phase 2 候補）: 複数 inbox root の whitelist、Antigravity の image vision 実測。

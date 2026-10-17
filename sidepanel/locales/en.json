@@ -439,6 +439,7 @@
   "workflow.autorunConfirm": "Start auto-run? Recorded steps run one at a time on this tab. AI is only used for steps that choose by condition or when a target cannot be found. Steps marked “needs approval” stop for you.",
   "workflow.autorunStartBanner": "Auto-run started — watch the chat for each step.",
   "cs.err.autorunHeld": "Held: this looks like a final confirm/purchase button, so auto-run did not click it. Please do it manually.",
+  "cs.err.agentHeld": "Held: an external AI agent does not click final confirm/purchase/delete buttons or unnamed buttons. Please click it yourself.",
   "sw.autorun.empty": "No recorded steps to auto-run. Record some notes first.",
   "sw.autorun.started": "▶ Auto-run started ({count} steps). Running this page, then navigating in URL order.",
   "sw.autorun.stopped": "■ Auto-run stopped.",
