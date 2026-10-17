@@ -163,6 +163,13 @@ anchorLabel/html grep が現実の主戦力。何も解決できなければ、�
 
 スコープが未指定/曖昧だった場合は、票の代わりに**候補テーブル**(id / tabId / windowId / url / title / 時刻)を出し、tabId を選ばせる。
 
+**直すのは届いたメモだけ**: キャプチャに入るのは、ユーザーが「AIに渡す」にチェックしたメモ/お描きだけ
+(ページ上のメモカード、またはサイドパネルの各行のチェック)。届いていない要素は推測で直さない。
+
+**後始末(任意・ToolSearch で `execute_actions` が見つかる時)**: 直した要素を
+`execute_actions({ tabId, actions: [{ verb: "highlightElement", args: { selector } }] })` で光らせて人間に示す。
+メモを消す(`removeAnnotation{id}`; id は `listAnnotations{}` で取る)のは、ユーザーが対応済みと認めた後だけ。
+
 ---
 
 ## エスケープハッチ(happy path から外れる時だけ)

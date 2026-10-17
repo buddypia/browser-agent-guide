@@ -227,6 +227,36 @@ test.describe('お描き連動のAIメモ', () => {
     await page.evaluate(() => new Promise((r) => window.__bagListener({ type: 'FINISH_CAPTURE' }, {}, r)));
   });
 
+  // サイドパネルの「AIに渡す」チェック(SET_ANNOTATION_FOR_AI)で、チェックしたメモだけが AI に届く。
+  test('メモの「AIに渡す」を外すと送信・文脈から外れ、件数通知が減り、戻すと再び含まれる', async ({ page }) => {
+    await page.evaluate(() => {
+      const scope = location.origin + location.pathname;
+      const anchor = { selector: '#target', tag: 'button', role: 'button', text: 'CTAボタン' };
+      window.__store.aiAdvisorAnnotations = {
+        [scope]: [
+          { id: 'note-a', kind: 'note', createdAt: '2026-10-17T00:00:00Z', note: '色を濃く', intent: '', anchor },
+          { id: 'note-b', kind: 'note', createdAt: '2026-10-17T00:00:01Z', note: '文言を短く', intent: '', anchor },
+        ],
+      };
+    });
+    const call = (msg) => page.evaluate((m) => new Promise((r) => window.__bagListener(m, {}, r)), msg);
+    await call({ type: 'LIST_ANNOTATIONS' });
+
+    expect(await call({ type: 'SET_ANNOTATION_FOR_AI', id: 'note-b', on: false })).toEqual({ id: 'note-b', forAI: false });
+    const list = (await call({ type: 'LIST_ANNOTATIONS' })).annotations;
+    expect(list.map((a) => [a.id, a.forAI])).toEqual([['note-a', true], ['note-b', false]]);
+    expect((await call({ type: 'COLLECT_PAGE_FEEDBACK' })).items.map((i) => i.note)).toEqual(['色を濃く']);
+    expect((await call({ type: 'EXPORT_CONTEXT' })).text).not.toContain('文言を短く');
+    const notices = await page.evaluate(() => window.__runtimeMessages.filter((m) => m.type === 'PAGE_FEEDBACK_CHANGED'));
+    expect(notices.at(-1).sendCount).toBe(1);
+    await expect(page.locator('.bag-step-caption--off')).toHaveCount(1); // 外したメモはページ上でも淡色
+
+    await call({ type: 'SET_ANNOTATION_FOR_AI', id: 'note-b', on: true });
+    expect((await call({ type: 'COLLECT_PAGE_FEEDBACK' })).items.map((i) => i.note)).toEqual(['色を濃く', '文言を短く']);
+    await expect(page.locator('.bag-step-caption--off')).toHaveCount(0);
+    expect(await call({ type: 'SET_ANNOTATION_FOR_AI', id: 'missing', on: true })).toHaveProperty('error');
+  });
+
   // メモ保存は自動同期用の変更通知を飛ばし、本文ありメモを送信件数に数える。
   // 本文を空にすると送信件数0かつ capture からも外れる（空メモが inbox/件数を汚さない）。
   test('メモ保存で送信件数つき変更通知が飛び、本文を空にすると0件で capture からも外れる', async ({ page }) => {

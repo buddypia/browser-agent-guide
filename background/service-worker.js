@@ -234,6 +234,8 @@ async function handleMessage(msg, sender) {
       return ensureContentAndSend(msg.tabId, { type: 'EDIT_ANNOTATION', id: msg.id });
     case 'REMOVE_ANNOTATION':
       return ensureContentAndSend(msg.tabId, { type: 'REMOVE_ANNOTATION', id: msg.id });
+    case 'SET_ANNOTATION_FOR_AI':
+      return ensureContentAndSend(msg.tabId, { type: 'SET_ANNOTATION_FOR_AI', id: msg.id, on: msg.on === true });
     case 'EXPORT_CONTEXT':
       return ensureContentAndSend(msg.tabId, { type: 'EXPORT_CONTEXT' });
     case 'DOWNLOAD_CHAT':
@@ -441,9 +443,68 @@ const WF_NAV_WAIT_MS = 10000; // クリック後に次ページ(URL一致)を待
 const WF_LOAD_WAIT_MS = 20000; // SW 主導の遷移で読込完了を待つ上限
 const WF_STEP_TIMEOUT_MS = 6000; // 対象の出現待ち(content 側)
 const WF_DRY_TIMEOUT_MS = 1500; // 試走は前手順の結果を待てないので短く
+const WF_DOWNLOAD_WAIT_MS = 60000; // ダウンロード確認: 完了を待つ上限(サーバー側のレポート生成を含む)
+const WF_DOWNLOAD_RECORD_WINDOW_MS = 10000; // 記録: クリックからこの時間内に始まったダウンロードはそのクリックのもの
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// 手順の操作で始まったページのダウンロードを見張る(拡張自身の保存=お描きキャプチャ等は数えない)。
+function watchDownloads() {
+  const ids = [];
+  const onCreated = (item) => {
+    if (item.byExtensionId !== chrome.runtime.id) ids.push(item.id);
+  };
+  chrome.downloads.onCreated.addListener(onCreated);
+  return {
+    stop: () => chrome.downloads.onCreated.removeListener(onCreated),
+    // ファイル名か URL に want を含む(空なら何でも)ダウンロードの完了を待つ。完了した絶対パスか失敗理由を返す。
+    async waitComplete(want, timeoutMs = WF_DOWNLOAD_WAIT_MS) {
+      const needle = String(want || '').trim().toLowerCase();
+      const end = Date.now() + timeoutMs;
+      for (;;) {
+        const found = await Promise.all(ids.map((id) => chrome.downloads.search({ id }).then((r) => r[0], () => null)));
+        const items = found.filter((d) => d && (!needle || `${d.filename}\n${d.finalUrl || d.url}`.toLowerCase().includes(needle)));
+        const done = items.find((d) => d.state === 'complete');
+        if (done) return { ok: true, filename: done.filename };
+        if (items.length && items.every((d) => d.state === 'interrupted')) return { ok: false, reason: 'failed', error: items[0].error || '' };
+        if (Date.now() >= end) return { ok: false, reason: items.length ? 'timeout' : 'none' };
+        await sleep(300);
+      }
+    },
+  };
+}
+
+function downloadFailureText(r) {
+  if (r.reason === 'failed') return t('sw.wf.downloadFailed', { error: r.error });
+  if (r.reason === 'timeout') return t('sw.wf.downloadTimeout', { sec: Math.round(WF_DOWNLOAD_WAIT_MS / 1000) });
+  return t('sw.wf.downloadNone');
+}
+
+// 記録中: クリック直後に始まったページのダウンロードは、そのクリックに「ダウンロードが完了する」確認を付ける
+// (遷移したクリックに content が URL 確認を付けるのと同じ考え方。ダウンロードは content から見えないので SW が付ける)。
+chrome.downloads.onCreated.addListener((item) => {
+  if (item.byExtensionId === chrome.runtime.id) return;
+  attachDownloadCheck().catch(() => {});
+});
+
+async function attachDownloadCheck() {
+  if ((await readWorkflowRun()).active) return; // 自動実行中のダウンロードは記録ではない
+  // content はクリック時に手順を書くが、ダウンロード作成と前後しうるので少しだけ待つ。
+  for (let i = 0; i < 5; i++) {
+    const raw = (await chrome.storage.local.get(WORKFLOW_KEY))[WORKFLOW_KEY];
+    if (raw?.recording !== true) return;
+    const steps = Array.isArray(raw.steps) ? raw.steps : [];
+    const last = steps[steps.length - 1];
+    if (last?.action?.verb === 'click' && Date.now() - Date.parse(last.createdAt || 0) <= WF_DOWNLOAD_RECORD_WINDOW_MS) {
+      if (last.check?.type && last.check.type !== 'none') return;
+      steps[steps.length - 1] = { ...last, check: { type: 'download', value: '' } };
+      await chrome.storage.local.set({ [WORKFLOW_KEY]: { ...raw, steps } });
+      return;
+    }
+    await sleep(200);
+  }
 }
 
 async function readWorkflow() {
@@ -653,11 +714,19 @@ async function driveWorkflow(tabId) {
     }
     tab = (await waitForTab(tabId, (tb) => tb.status === 'complete', WF_LOAD_WAIT_MS)) || tab;
 
-    // 2) 実行
+    // 2) 実行(ダウンロード確認つきの手順は、操作の前からダウンロードを見張る)
     const structured = isStructuredStep(step);
-    const outcome = structured
-      ? await runStructuredStep(tabId, step, run, settings, { title: tab.title, url: tab.url })
-      : await runLegacyStep(tabId, tab.url, step, run, settings);
+    const downloads = structured && step.check.type === 'download' ? watchDownloads() : null;
+    let outcome;
+    let downloaded = null;
+    try {
+      outcome = structured
+        ? await runStructuredStep(tabId, step, run, settings, { title: tab.title, url: tab.url })
+        : await runLegacyStep(tabId, tab.url, step, run, settings);
+      if (downloads && outcome.status === 'ok') downloaded = await downloads.waitComplete(applyVars(step.check.value, run.vars));
+    } finally {
+      downloads?.stop();
+    }
     if (outcome.status === 'stopped') return;
     if (outcome.status === 'held') {
       const byJudge = outcome.heldKind === 'judge';
@@ -672,6 +741,7 @@ async function driveWorkflow(tabId) {
     if (outcome.status !== 'ok') {
       return stop('failed', t('sw.wf.failed', { n, error: outcome.error || t('sw.autorun.failed') }));
     }
+    if (downloaded && !downloaded.ok) return stop('failed', t('sw.wf.failed', { n, error: downloadFailureText(downloaded) }));
 
     // 3) URL 確認(タブの URL で検証。SPA でもフル遷移でも同じ)
     if (structured && step.check.type === 'url' && step.check.value) {
@@ -728,7 +798,8 @@ async function driveWorkflow(tabId) {
     });
     const what = formatStepTitle(step, t);
     const via = outcome.via === 'ai' ? ` ${t('sw.wf.viaAi', { text: outcome.chosenText || outcome.label || '', reason: outcome.aiReason || '' })}` : '';
-    notifyAutoRun({ phase: 'step', stepId: step.id, text: `${t('sw.wf.stepDone', { n, total: all.length, text: what })}${via}` });
+    const saved = downloaded?.ok ? ` ${t('sw.wf.downloaded', { file: downloaded.filename })}` : '';
+    notifyAutoRun({ phase: 'step', stepId: step.id, text: `${t('sw.wf.stepDone', { n, total: all.length, text: what })}${via}${saved}` });
     lastMayNavigate = structured ? step.action.verb === 'click' : true;
   }
 }
@@ -1779,11 +1850,22 @@ async function findMatchingTab({ tabId, windowId, urlContains, titleContains }) 
   return tabs[0].id;
 }
 
+// MV3 の SW は 30 秒無活動で止まり、daemon との WS も切れる(execute_actions が届かなくなる)。
+// WS の送受信はその計時を延ばす(Chrome 116+)ので、接続中は定期的に ping を送って生かしておく。
+const DAEMON_PING_MS = 20000;
+let daemonPingTimer = null;
+
+function stopDaemonPing() {
+  clearInterval(daemonPingTimer);
+  daemonPingTimer = null;
+}
+
 async function connectDaemonWebSocket() {
   if (reconnectTimeout) {
     clearTimeout(reconnectTimeout);
     reconnectTimeout = null;
   }
+  stopDaemonPing();
   if (daemonWs) {
     try {
       daemonWs.onclose = null;
@@ -1806,6 +1888,10 @@ async function connectDaemonWebSocket() {
 
     ws.onopen = () => {
       console.log('[bag] daemon WS connected');
+      stopDaemonPing();
+      daemonPingTimer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }));
+      }, DAEMON_PING_MS);
     };
 
     ws.onmessage = async (event) => {
@@ -1852,6 +1938,7 @@ async function connectDaemonWebSocket() {
     ws.onclose = () => {
       console.log('[bag] daemon WS closed');
       if (daemonWs === ws) {
+        stopDaemonPing();
         daemonWs = null;
         scheduleReconnect();
       }

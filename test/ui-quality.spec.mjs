@@ -89,6 +89,11 @@ async function installChromeMock(page, seed = {}) {
         case 'LIST_ANNOTATIONS':
           // content script の一覧はテストごとに seed の __mockAnnotations で差し替える。
           return { annotations: copy(store.__mockAnnotations) || [] };
+        case 'SET_ANNOTATION_FOR_AI': {
+          const hit = (store.__mockAnnotations || []).find((a) => a.id === message.id);
+          if (hit) hit.forAI = message.on;
+          return { id: message.id, forAI: message.on };
+        }
         case 'RUN_VERB':
           if (message.verb === 'listAffordances') return { ok: true, result: { affordances: [] } };
           return { ok: true, result: {} };
@@ -137,6 +142,7 @@ async function installChromeMock(page, seed = {}) {
       runtime: {
         lastError: null,
         sendMessage(message, callback) {
+          (window.__bagSentMessages ||= []).push(copy(message));
           queueMicrotask(() => callback?.({ ok: true, result: runtimeResult(message) }));
         },
       },
@@ -288,6 +294,37 @@ test.describe('UI quality gates', () => {
     await expect(tray.locator('.anno-sent.pending')).toHaveCount(0);
     await expect(tray.locator('.anno-sent.sent')).toHaveCount(3);
     await page.screenshot({ path: testInfo.outputPath('sidepanel-tray-sent-360.png') });
+    await expectNoAxeViolations(page);
+  });
+
+  test('side panel lets the user check which memos go to AI', async ({ page }, testInfo) => {
+    await installChromeMock(page, {
+      __mockAnnotations: [
+        { id: 'd1', kind: 'drawing', note: 'Right-align the total', intent: '', shapeText: '', step: 1, forAI: true, resolved: true, target: 'Total', sig: 's1', shapePreview: null },
+        { id: 'n1', kind: 'note', note: 'Address field is too narrow', intent: '', step: 1, forAI: true, resolved: true, target: 'Address', sig: 's2' },
+        { id: 'n2', kind: 'note', note: 'Private reminder', intent: '', step: 2, forAI: false, resolved: true, target: 'Name', sig: 's3' },
+        // 目印は送信対象ではないのでチェックを出さない。
+        { id: 'm1', kind: 'marker', name: 'Hero', label: '', note: '', intent: 'hero banner', resolved: true, target: 'Hero', sig: 's4' },
+      ],
+    });
+    await page.setViewportSize({ width: 360, height: 720 });
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+
+    const tray = page.locator('#anno-panel');
+    const checks = tray.getByRole('checkbox', { name: 'Send to AI' });
+    await expect(checks).toHaveCount(3);
+    await expect(checks.nth(0)).toBeChecked();
+    await expect(checks.nth(1)).toBeChecked();
+    await expect(checks.nth(2)).not.toBeChecked();
+    await expect(page.locator('#capture-count')).toHaveText('2');
+
+    await checks.nth(1).uncheck();
+    await expect.poll(() => page.evaluate(() => window.__bagSentMessages.filter((m) => m.type === 'SET_ANNOTATION_FOR_AI'))).toEqual([
+      { type: 'SET_ANNOTATION_FOR_AI', tabId: 1, id: 'n1', on: false },
+    ]);
+    await expect(page.locator('#capture-count')).toHaveText('1');
+    await expect(tray.getByRole('checkbox', { name: 'Send to AI' }).nth(1)).not.toBeChecked();
+    await page.screenshot({ path: testInfo.outputPath('sidepanel-memo-checks-360.png') });
     await expectNoAxeViolations(page);
   });
 

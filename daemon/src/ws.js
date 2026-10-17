@@ -136,6 +136,11 @@ export function attachWebSocketServer(httpServer, { inboxDir, entryStore, token,
         }
         return;
       }
+      // 拡張 SW の keepalive。MV3 の SW は無活動で止まり接続も切れるので、拡張は定期的に ping を送る。
+      if (msg?.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong' }));
+        return;
+      }
       // 'page_feedback' を受ける。
       if (msg?.type !== 'page_feedback') {
         ws.send(JSON.stringify({ type: 'error', error: `unknown type: ${msg?.type}` }));

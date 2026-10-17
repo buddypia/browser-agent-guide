@@ -811,6 +811,21 @@ textarea:focus-visible {
   flex-shrink: 0;
 }
 
+.anno-for-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.anno-for-ai input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .anno-actions button {
   min-height: 28px;
   padding: 0 7px;

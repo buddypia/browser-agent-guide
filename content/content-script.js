@@ -1384,8 +1384,8 @@
       shapeText: drawing ? describeShapes(a.shapes) : '',
       // 補足/お描きは番号付きの手順。AI・人間にステップ順を伝えるための通し番号。
       step: a.kind === 'note' ? annoNoteNumber(a) : drawing ? annoDrawingNumber(a) : undefined,
-      // お描きメモは forAI 未設定 of 旧レコードを ON 扱いにして後方互換にする。
-      forAI: drawing ? memoForAI(a) : undefined,
+      // AIに渡すか(お描き/メモ)。forAI 未設定の旧レコードは ON 扱いにして後方互換にする。
+      forAI: drawing || a.kind === 'note' ? memoForAI(a) : undefined,
       shapePreview: drawing ? buildShapePreview(a.shapes) : undefined,
       target: t ? truncate(labelOf(t), 50) : '',
       resolved,
@@ -1433,7 +1433,7 @@
     return { color, shapes: normalized };
   }
 
-  // お描きメモが AI に渡される対象か。forAI 未設定(旧レコード)は既定でON。
+  // お描き/メモが AI に渡される対象か。forAI 未設定(旧レコード)は既定でON。
   function memoForAI(a) {
     return a.forAI !== false;
   }
@@ -2090,7 +2090,12 @@
       // 対象を赤枠で囲み、その上に「番号＋本文」を常時表示の手順キャプションとして出す。
       // ページ内ピン/CSS outline ではなく独立した最上位レイヤに描くので、祖先の overflow や
       // 兄弟の z-index に隠されず、メモ本文が hover 不要で常に読める。
-      addOutlineBox(target, 'note', { caption: { number, text: a.note || '' } });
+      const entry = addOutlineBox(target, 'note', { caption: { number, text: a.note || '' } });
+      // AIに渡さないメモは枠もキャプションも淡色にして、送る対象から外れたと分かるようにする。
+      if (entry && !memoForAI(a)) {
+        entry.box.classList.add('bag-anno-outline-box--off');
+        entry.caption?.classList.add('bag-step-caption--off');
+      }
     } else {
       // 対象未解決/floating は浮遊キャプションで常時表示する(画面右下に番号順で積む)。
       renderFloatingNote(a, number);
@@ -2105,6 +2110,7 @@
   function renderFloatingNote(a, number) {
     const cap = buildStepCaption(number, a.note || '');
     cap.classList.add('bag-floating');
+    if (!memoForAI(a)) cap.classList.add('bag-step-caption--off');
     cap.setAttribute(ATTR.anno, a.id); // renderAnnotations の [data-bag-anno] 一括クリアで作り直す
     floatingHost().appendChild(cap);
   }
@@ -3388,7 +3394,7 @@
     }
     if (!changed) return;
     await persistAnnotations();
-    if (a.kind === 'drawing') notifyPageFeedbackChanged('update');
+    if (a.kind === 'drawing' || a.kind === 'note') notifyPageFeedbackChanged('update');
   }
 
   // メモ⇄図形の相互ハイライト。on=true で対象ペアを強調し、他ペアを減光する。
@@ -4263,8 +4269,8 @@
     if (annotations.length) {
       lines.push('## 人が付けた補足・目印（最優先で従ってください）');
       for (const a of annotations) {
-        // お描きメモは「AIに渡す」がOFFのものを文脈から除外する(forAI=falseは送らない)。
-        if (a.kind === 'drawing' && !memoForAI(a)) continue;
+        // お描き/メモは「AIに渡す」がOFFのものを文脈から除外する(forAI=falseは送らない)。
+        if ((a.kind === 'drawing' || a.kind === 'note') && !memoForAI(a)) continue;
         const t = a.anchor ? resolveAnchor(a.anchor) : null;
         const where = t
           ? `「${truncate((t.innerText || t.getAttribute('aria-label') || a.anchor.text || '').trim(), 40)}」`
@@ -5009,6 +5015,14 @@
         }
         case 'REMOVE_ANNOTATION':
           return await deleteAnnotation(msg.id);
+        case 'SET_ANNOTATION_FOR_AI': {
+          // サイドパネルの「AIに渡す」チェック。お描きのメモカードの同じチェックと同じ保存経路を通す。
+          const a = annotations.find((x) => x.id === msg.id);
+          if (!a || (a.kind !== 'drawing' && a.kind !== 'note')) return { error: t('cs.err.annotationNotFound') };
+          await updateMemoFields(a.id, { forAI: msg.on === true });
+          renderAnnotations();
+          return { id: a.id, forAI: memoForAI(a) };
+        }
         case 'EXPORT_CONTEXT':
           return { text: buildContextText() };
         case 'COLLECT_PAGE_FEEDBACK': {

@@ -635,6 +635,10 @@ html.bag-drawing .bag-draw-overlay {
 .bag-anno-num--off {
   opacity: 0.45;
 }
+.bag-anno-outline-box--off,
+.bag-step-caption--off {
+  opacity: 0.45;
+}
 
 /* ===== お描きワークフロー(番号付きお描きを「操作手順」として説明する) ===== */
 /* 手順 i→i+1 を結ぶ順序コネクタ(番号バッジ同士を結ぶ点線+矢印) */
