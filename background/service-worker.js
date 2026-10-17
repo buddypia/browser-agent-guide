@@ -234,6 +234,8 @@ async function handleMessage(msg, sender) {
       return ensureContentAndSend(msg.tabId, { type: 'EDIT_ANNOTATION', id: msg.id });
     case 'REMOVE_ANNOTATION':
       return ensureContentAndSend(msg.tabId, { type: 'REMOVE_ANNOTATION', id: msg.id });
+    case 'SET_ANNOTATION_FOR_AI':
+      return ensureContentAndSend(msg.tabId, { type: 'SET_ANNOTATION_FOR_AI', id: msg.id, on: msg.on === true });
     case 'EXPORT_CONTEXT':
       return ensureContentAndSend(msg.tabId, { type: 'EXPORT_CONTEXT' });
     case 'DOWNLOAD_CHAT':
@@ -1779,11 +1781,22 @@ async function findMatchingTab({ tabId, windowId, urlContains, titleContains }) 
   return tabs[0].id;
 }
 
+// MV3 の SW は 30 秒無活動で止まり、daemon との WS も切れる(execute_actions が届かなくなる)。
+// WS の送受信はその計時を延ばす(Chrome 116+)ので、接続中は定期的に ping を送って生かしておく。
+const DAEMON_PING_MS = 20000;
+let daemonPingTimer = null;
+
+function stopDaemonPing() {
+  clearInterval(daemonPingTimer);
+  daemonPingTimer = null;
+}
+
 async function connectDaemonWebSocket() {
   if (reconnectTimeout) {
     clearTimeout(reconnectTimeout);
     reconnectTimeout = null;
   }
+  stopDaemonPing();
   if (daemonWs) {
     try {
       daemonWs.onclose = null;
@@ -1806,6 +1819,10 @@ async function connectDaemonWebSocket() {
 
     ws.onopen = () => {
       console.log('[bag] daemon WS connected');
+      stopDaemonPing();
+      daemonPingTimer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }));
+      }, DAEMON_PING_MS);
     };
 
     ws.onmessage = async (event) => {
@@ -1852,6 +1869,7 @@ async function connectDaemonWebSocket() {
     ws.onclose = () => {
       console.log('[bag] daemon WS closed');
       if (daemonWs === ws) {
+        stopDaemonPing();
         daemonWs = null;
         scheduleReconnect();
       }
