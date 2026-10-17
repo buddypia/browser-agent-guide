@@ -61,7 +61,7 @@ This project lets AI coding CLIs act on the user's tabs through the extension, a
   { "type": "mark_annotations_done_result", "requestId": "unique-id", "ok": true, "marked": ["note-…"] }
   ```
   The service worker matches by annotation id only (ids are unique across pages; `tabId`/`url` are informational). It patches the stored annotations once (`doneAt`, `forAI:false`) and then tells every open tab to update its in-memory copy, so a tab holding a stale list cannot write it back over another tab's memo.
-  Saved workflows use it as `workflow` with `op` = `list` | `run` (`workflowId`, `vars`, optional `tabId`; without it the start page opens in a new tab) | `status` | `stop`. The reply carries names, step counts, variable names and progress, never typed values. There is no `approve` op: confirm steps and judge holds wait for a person in the side panel.
+  Saved workflows use it as `workflow` with `op` = `list` | `run` (`workflowId`, `vars`; the start page always opens in a new tab, never in a tab the user is working in) | `status` | `stop`. The reply carries names, step counts, variable names, progress and the last event's phase, never typed values or step texts. Only the profile that has the workflow (or the run) answers `ok:true`, so several connected profiles do not mix their answers. There is no `approve` op: confirm steps and judge holds wait for a person in the side panel.
 
 ## Code Layout
 - `background/service-worker.js`: WebSocket relay client; finds the tab and forwards `RUN_ACTIONS`.

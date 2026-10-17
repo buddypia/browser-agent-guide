@@ -545,10 +545,10 @@ async function setStepSuggestion(stepId, suggestion) {
     /* 学習候補の保存失敗は実行結果に影響させない */
   }
 }
-// 直近の自動実行イベント(MCP get_workflow_run 用)。手順ごとの文面は入力値を含みうるので残さない。
+// 直近の自動実行イベント(MCP get_workflow_run 用)。文面は記録時の URL・変数を埋めた値・候補を含みうるので、種類と時刻だけ残す。
 let lastAutoRunEvent = null;
 function notifyAutoRun(payload) {
-  lastAutoRunEvent = { phase: payload.phase, at: new Date().toISOString(), ...(payload.phase === 'step' ? {} : { text: payload.text || '' }) };
+  lastAutoRunEvent = { phase: payload.phase, at: new Date().toISOString() };
   // サイドパネル等へブロードキャスト(未起動なら無視)。SW自身には届かない。
   try {
     chrome.runtime.sendMessage({ type: 'WORKFLOW_AUTORUN_EVENT', ...payload }, () => void chrome.runtime.lastError);
@@ -622,35 +622,47 @@ async function stopWorkflowAutoRun() {
 // MCP(list_workflows / run_workflow / get_workflow_run / stop_workflow)から保存済みワークフローを扱う。
 // 返すのは名前・手順数・変数名・進み具合だけで、入力値は返さない。承認はここに無い: 確定系や判断AIの保留は、
 // 人がサイドパネルで承認するまで止まったまま(エージェントが自分の実行を承認できないようにする)。
-async function handleWorkflowRequest({ op, workflowId, vars, tabId }) {
+// 複数のプロファイルが繋がっていても、該当するプロファイルだけが答える(それ以外は throw → ok:false)。
+async function handleWorkflowRequest({ op, workflowId, vars }) {
   const wf = await readWorkflow();
-  if (op === 'list') return { workflows: wf.saved.map(savedWorkflowSummary), run: workflowRunSummary(wf, await readWorkflowRun()) };
-  if (op === 'status') return { run: workflowRunSummary(wf, await readWorkflowRun()) };
+  const run = await readWorkflowRun();
+  if (op === 'list') {
+    if (!wf.saved.length) throw new Error('No saved workflows in this browser.');
+    return { workflows: wf.saved.map(savedWorkflowSummary), run: workflowRunSummary(wf, run) };
+  }
+  if (op === 'status') {
+    if (!run.active && !run.heldStepId && !run.startedAt) throw new Error('No workflow run in this browser.');
+    return { run: workflowRunSummary(wf, run) };
+  }
   if (op === 'stop') {
+    if (!run.active && !run.heldStepId) throw new Error('No workflow run in progress in this browser.');
     await stopWorkflowAutoRun();
     return { run: workflowRunSummary(wf, await readWorkflowRun()) };
   }
   if (op !== 'run') throw new Error(`Unknown workflow op: ${op}`);
-  const run = await readWorkflowRun();
+  const target = wf.saved.find((w) => w.id === String(workflowId || ''));
+  if (!target) throw new Error(`No saved workflow with id "${workflowId}". Call list_workflows.`);
   if (run.active || run.heldStepId) throw new Error('A workflow run is in progress or waiting for approval in the side panel. Stop it first (stop_workflow).');
   if (wf.recording) throw new Error('The side panel is recording steps. Ask the user to stop recording first.');
   // 作業中の手順を置き換えるので、サイドパネルの未保存の変更は捨てない(人が保存か破棄を選ぶ)。
   if (hasUnsavedSteps(wf)) throw new Error('The side panel has unsaved working steps. Ask the user to save or discard them first.');
-  const target = wf.saved.find((w) => w.id === String(workflowId || ''));
-  if (!target) throw new Error(`No saved workflow with id "${workflowId}". Call list_workflows.`);
-  const first = actionableSteps(target)[0];
-  if (!first) throw new Error('The workflow has no steps.');
-  let tab;
-  if (Number.isInteger(tabId)) {
-    tab = await chrome.tabs.get(tabId);
-  } else {
-    if (!/^https?:/.test(first.url)) throw new Error('The first step has no page to open. Pass tabId.');
-    tab = await chrome.tabs.create({ url: first.url, active: true });
-    tab = (await waitForTab(tab.id, (tb) => tb.status === 'complete', WF_NAV_WAIT_MS)) || tab;
+  // タブを開く・手順を置き換える前に、始められるかを確かめる。
+  const steps = actionableSteps(target);
+  if (!steps.length) throw new Error('The workflow has no steps.');
+  const given = vars && typeof vars === 'object' ? vars : {};
+  const missing = stepVariables(steps).filter((name) => !String(given[name] ?? '').length);
+  if (missing.length) throw new Error(`Missing values for: ${missing.join(', ')}. Pass them in vars.`);
+  if (steps.some((st) => !isStructuredStep(st)) && !(await getSettings()).ai.apiKey) {
+    throw new Error('This workflow has memo-only steps that need an AI key, and none is set.');
   }
+  if (!/^https?:/.test(steps[0].url)) throw new Error('The first step has no page to open.');
+  // 開始ページは必ず新しいタブで開く(人が作業中のタブを遷移させない)。
+  const created = await chrome.tabs.create({ url: steps[0].url, active: true });
+  const tab = (await waitForTab(created.id, (tb) => tb.status === 'complete', WF_NAV_WAIT_MS)) || created;
   await chrome.storage.local.set({ [WORKFLOW_KEY]: setActiveWorkflow(wf, target.id) });
-  const res = await startWorkflowAutoRun(tab.id, vars);
-  return { started: res.active === true, reason: res.reason || '', missing: res.missing || [], tabId: tab.id, workflow: savedWorkflowSummary(target) };
+  const res = await startWorkflowAutoRun(tab.id, given);
+  if (!res.active) throw new Error(`The run did not start (${res.reason || 'unknown'}).`);
+  return { started: true, tabId: tab.id, workflow: savedWorkflowSummary(target) };
 }
 
 function savedWorkflowSummary(w) {

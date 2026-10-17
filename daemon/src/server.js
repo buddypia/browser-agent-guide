@@ -419,24 +419,23 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       {
         title: '保存済みワークフローの実行',
         description:
-          '保存済みワークフローを id で選んで自動実行を始める(終わるのを待たない。進み具合は get_workflow_run)。' +
-          'tabId を省くと開始ページを新しいタブで開く。手順に {名前} の変数があれば vars で値を渡す。' +
+          '保存済みワークフローを id で選び、開始ページを新しいタブで開いて自動実行を始める(終わるのを待たない。進み具合は get_workflow_run)。' +
+          '手順に {名前} の変数があれば vars で全部の値を渡す(足りなければ何も開かずにエラー)。' +
           '購入・送信・削除などの確定系の手順と、判断AIが迷った選択では止まり、人がサイドパネルで承認するまで進まない(このツールからは承認できない)。' +
           '別の実行中・承認待ち、記録中、サイドパネルに未保存の手順がある時は始めずにエラーを返す。',
         inputSchema: {
           workflowId: z.string().min(1).describe('list_workflows の id'),
           vars: z.record(z.string()).optional().describe('手順の変数 {名前} に入れる値'),
-          tabId: z.number().int().optional().describe('実行するタブ。省くと開始ページを新しいタブで開く'),
         },
       },
-      async ({ workflowId, vars, tabId }) => workflowCall({ op: 'run', workflowId, vars: vars || {}, ...(tabId != null ? { tabId } : {}) })
+      async ({ workflowId, vars }) => workflowCall({ op: 'run', workflowId, vars: vars || {} })
     );
     server.registerTool(
       'get_workflow_run',
       {
         title: 'ワークフロー実行の状態',
         description:
-          '実行中/直近の自動実行の状態を返す: active・done/total・complete・held(承認待ちの手順番号と種類 confirm|judge)・last(直近の出来事)。' +
+          '実行中/直近の自動実行の状態を返す: active・done/total・complete・held(承認待ちの手順番号・種類 confirm|judge・候補の表示名)・last(直近の出来事の種類 phase と時刻)。' +
           'held がある時は、サイドパネルで承認するようユーザーに伝える。',
         inputSchema: {},
       },

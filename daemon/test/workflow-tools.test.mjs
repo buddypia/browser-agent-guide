@@ -31,7 +31,10 @@ test('workflow tools: 拡張へ op を渡し、応答の ok/type/requestId を�
     return { type: 'workflow_result', requestId: 'r0', ok: true, run: { active: false } };
   };
   await withClient(extensionRequest, async (client) => {
-    const names = (await client.listTools()).tools.map((t) => t.name);
+    const tools = (await client.listTools()).tools;
+    const names = tools.map((t) => t.name);
+    // 実行先のタブは選ばせない(開始ページを新しいタブで開く)。人が作業中のタブを遷移させないため。
+    assert.deepEqual(Object.keys(tools.find((t) => t.name === 'run_workflow').inputSchema.properties).sort(), ['vars', 'workflowId']);
     for (const n of ['list_workflows', 'run_workflow', 'get_workflow_run', 'stop_workflow']) assert.ok(names.includes(n), n);
     assert.equal(names.some((n) => /approve/i.test(n)), false, 'エージェントが自分の実行を承認できない');
 
