@@ -906,7 +906,10 @@ function uniqueCandidateByText(candidates, text) {
   return hits.length === 1 ? hits[0] : null;
 }
 
-// AI に候補キーを1つ選ばせる(閉じた選択)。判断AI(Jev / eg2)が設定済みならそれを使い、確信度で
+// 理由の文に出す判断AIの名前(provider ごと)。
+const JUDGE_NAMES = { jev: 'Jev', clef: 'Clef', eg2: 'eg2' };
+
+// AI に候補キーを1つ選ばせる(閉じた選択)。判断AI(Jev / Clef / eg2)が設定済みならそれを使い、確信度で
 // 「選んで進む / 人間に確認する(choice:'hold', key=最有力)」を分ける。未設定なら従来どおり LLM。
 // 記録した要素が無い(missing)時の差し替えはページ全体から候補を拾うので、確信度に関わらず確認に回す。
 async function chooseCandidateWithAI({ settings, step, candidates, reason, url, title }) {
@@ -914,10 +917,11 @@ async function chooseCandidateWithAI({ settings, step, candidates, reason, url, 
     const r = await callJudgeChoice({ judge: settings.judge, eg2: settings.eg2, step, candidates, reason, url, title });
     const pct = (p) => `${Math.round(p * 100)}%`;
     const model = r.model || settings.judge.model;
-    if (!r.best || (r.confident && r.choice === 'none')) return { choice: 'none', reason: t('sw.wf.judgeNone', { pct: pct(r.probability), model }) };
-    if (r.confident && reason !== 'missing') return { choice: r.choice, reason: t('sw.wf.judgeReason', { pct: pct(r.probability), model }) };
+    const judge = JUDGE_NAMES[settings.judge.provider] || 'Jev';
+    if (!r.best || (r.confident && r.choice === 'none')) return { choice: 'none', reason: t('sw.wf.judgeNone', { judge, pct: pct(r.probability), model }) };
+    if (r.confident && reason !== 'missing') return { choice: r.choice, reason: t('sw.wf.judgeReason', { judge, pct: pct(r.probability), model }) };
     const why = reason === 'missing' ? 'sw.wf.judgeMissing' : 'sw.wf.judgeUnsure';
-    return { choice: 'hold', key: r.best, reason: t(why, { pct: pct(r.bestProbability), model }) };
+    return { choice: 'hold', key: r.best, reason: t(why, { judge, pct: pct(r.bestProbability), model }) };
   }
   if (!settings.ai.apiKey) return { choice: 'none', reason: t('sw.wf.noKeyForChoice') };
   const messages = buildChoiceMessages({ step, candidates, reason, url, title });

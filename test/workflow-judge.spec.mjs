@@ -259,6 +259,7 @@ test.describe('判断AI(Jev / Clef / eg2) E2E (拡張ロード)', () => {
     expect(sg.pending).not.toBe(true); // 実行済みの記録(提案中ではない)
     expect(sg.label).toContain('新パッケージ');
     expect(sg.reason).toMatch(/95%/);
+    expect(sg.reason).toContain('Jev');
     await page.close();
   });
 
@@ -474,6 +475,7 @@ test.describe('判断AI(Jev / Clef / eg2) E2E (拡張ロード)', () => {
       const sg = (await stepOf()).suggestion;
       expect(sg.label).toContain('新パッケージ');
       expect(sg.reason).toContain('eg2-270m');
+      expect(sg.reason).not.toContain('Jev'); // 理由の文は選んだ判断AIの名前で書く
       await page.close();
     } finally {
       await sw.evaluate(async (base) => {
@@ -512,6 +514,8 @@ test.describe('判断AI(Jev / Clef / eg2) E2E (拡張ロード)', () => {
       const sg = (await stepOf()).suggestion;
       expect(sg.label).toContain('新パッケージ');
       expect(sg.reason).toMatch(/95%.*clef-flash|clef-flash.*95%/);
+      expect(sg.reason).toContain('Clef');
+      expect(sg.reason).not.toContain('Jev');
       await page.close();
     } finally {
       await setJudge({ provider: 'jev', apiKey: 'test-key', baseUrl: `${origin}/v1`, model: 'jev-fake', minConfidence: 0.7 });

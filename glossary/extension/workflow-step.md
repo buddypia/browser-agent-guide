@@ -23,7 +23,7 @@ code_refs:
 api_refs: []
 db_refs: []
 related: ["verb-registry", "affordance"]
-last_verified: 2026-10-17
+last_verified: 2026-10-18
 confidence: medium
 ---
 
@@ -49,7 +49,7 @@ confidence: medium
   判断AI(`settings.judge.provider:'jev' | 'clef' | 'eg2'`)を設定すると、この候補選択だけを System 1
   (TypeSafe Jev / Cloudflare Clef / ローカル EmbeddingGemma 2) に任せる(`callJudgeChoice`。チャット/verbs 生成は LLM のまま)。
   選んだ候補の確信度(Jev / Clef の確率または eg2 のコサイン類似度。Jev と Clef は同じ {state, questions} → probabilities の契約)が `minConfidence` 以上なら進んで
-  確信度つきの `suggestion` を残し、未満なら最有力を `suggestion.pending` に残して `heldKind:'judge'` で保留する。
+  確信度つきの `suggestion` を残し(理由の文には選んだ判断AIの名前 Jev / Clef / eg2 を入れる)、未満なら最有力を `suggestion.pending` に残して `heldKind:'judge'` で保留する。
   記録要素が無い時の差し替え(候補がページ全体)は確信度に関わらず保留する。判断の承認は
   `judgeApprovedStepId`(候補選択だけを通す)で、確定系ゲートの `approvedStepId` とは別に持つ。
 - **承認の不変条件**: 承認が許すのは「保留時に人間へ示した候補」だけ。保留時に `run.heldLabel` へ候補の

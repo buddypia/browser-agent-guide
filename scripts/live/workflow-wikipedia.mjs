@@ -1,8 +1,8 @@
 // 実地確認(要件2, ja.wikipedia.org): 人の操作で記録 → 別セッションで自動実行し、ページを跨いでダウンロード完了まで進むこと。
 // 入力 → 動的な検索候補から選ぶ → 記事 → ツール → PDF ページ → ダウンロード(check.type='download')。
-// TYPESAFE_API_KEY があれば、2回目は候補選びを System One(Jev) に任せる。テスト(npm run check)ではない。
-// 使い方: [TYPESAFE_API_KEY=...] node scripts/live/workflow-wikipedia.mjs
-import { launchWithExtension, log, summarizeSteps, waitSteps } from './workflow-lib.mjs';
+// TYPESAFE_API_KEY があれば Jev、BAG_LIVE_JUDGE=eg2 ならローカル eg2 に、2回目の候補選びを任せる。テスト(npm run check)ではない。
+// 使い方: [TYPESAFE_API_KEY=... | BAG_LIVE_JUDGE=eg2] node scripts/live/workflow-wikipedia.mjs
+import { launchWithExtension, liveJudge, log, summarizeSteps, waitSteps } from './workflow-lib.mjs';
 
 const MAIN = 'https://ja.wikipedia.org/wiki/%E3%83%A1%E3%82%A4%E3%83%B3%E3%83%9A%E3%83%BC%E3%82%B8';
 const x = await launchWithExtension('wikipedia');
@@ -32,23 +32,30 @@ try {
   report.steps = summarizeSteps(steps);
   log('recorded steps', JSON.stringify(report.steps, null, 1));
 
-  // 2) 別セッションで自動実行する(ルールの選び方) / 3) 候補選びを Jev に任せる
+  // 2) 別セッションで自動実行する(ルールの選び方) / 3) 候補選びを判断AI(Jev / eg2)に任せる
   const runOnce = async (label, mutate) => {
     const s = JSON.parse(JSON.stringify(steps));
     mutate?.(s);
     await page.goto(MAIN);
     await x.waitReady(page);
     const before = await x.sw.evaluate(async () => (await chrome.downloads.search({})).length);
-    const { start, run } = await x.runSteps(await x.tabIdOf(MAIN), s);
+    const tabId = await x.tabIdOf(MAIN);
+    let { start, run } = await x.runSteps(tabId, s);
+    // 判断AIが確信を持てずに止めたら、人が示された候補を確かめて承認する役をする(その候補で進む)。
+    const judgeHeld = run?.heldKind === 'judge' ? { step: run.heldStepId, label: run.heldLabel || null } : null;
+    if (judgeHeld) {
+      judgeHeld.approve = await x.sendToSw({ type: 'APPROVE_WORKFLOW_STEP', tabId });
+      run = await x.waitRunStopped();
+    }
     const downloads = await x.sw.evaluate(async () => (await chrome.downloads.search({ orderBy: ['-startTime'] })).map((d) => ({ file: d.filename.split('/').pop(), state: d.state, bytes: d.bytesReceived })));
-    const r = { label, start, done: run?.doneStepIds?.length, total: s.length, held: run?.heldStepId || null, finalUrl: decodeURIComponent(page.url()), newDownloads: downloads.length - before, latestDownload: downloads[0], messages: (await x.autorunMessages()).slice(-8) };
+    const r = { label, start, judgeHeld, done: run?.doneStepIds?.length, total: s.length, held: run?.heldStepId || null, finalUrl: decodeURIComponent(page.url()), newDownloads: downloads.length - before, latestDownload: downloads[0], messages: (await x.autorunMessages()).slice(-8) };
     r.ok = r.done === r.total && r.newDownloads > 0 && r.latestDownload?.state === 'complete';
     report.runs.push(r);
     log(label, JSON.stringify(r, null, 1));
   };
   await runOnce('rule');
-  if (process.env.TYPESAFE_API_KEY) {
-    await runOnce('jev', (s) => {
+  if (liveJudge) {
+    await runOnce(liveJudge, (s) => {
       const pick = s.find((st) => st.locator?.kind === 'pick');
       if (pick) pick.choice = { by: 'ai', value: '東京都港区にある電波塔そのものの記事(小説・映画・駅などではない)' };
     });
