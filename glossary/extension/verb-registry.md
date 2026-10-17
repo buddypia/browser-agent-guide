@@ -42,7 +42,8 @@ Structured Outputs の enum としてそれを強制する。LLM は `AI_VERBS` 
   同じ一覧で、`test/agent-verbs.test.mjs` が一致を検査する。`inject*` / `navigateTo` / `removeElement` /
   `submitForm` は含めず、確定/購入/削除や名前の無いボタンのクリックは `held:true` で保留する(解除の手段は渡さない)。
   `setStyle` は `agentStyleProblem` で色・枠線・文字・余白・大きさのプロパティに限り、`url()` などの外部参照を断る
-  (読んだ内容の持ち出しや、要素を重ねて人に誤クリックさせることに使えるため)。
+  (読んだ内容の持ち出しや、要素を重ねて人に誤クリックさせることに使えるため)。重ねる・動かす・透過させる
+  プロパティ(position / z-index / transform / opacity 等)は断るが、色や大きさで目立たなくすることまでは防げない。
   経路名は SW が `execute_actions` に固定し、daemon の申告を使わない。
 - 秘密を含みうるページ由来のデータ(ページがクリップボードへ書いたテキスト等)を `COLLECT_CONTEXT` に自動で混ぜない。
   読む verb(`readSignals` の `clipboard`)で明示的に求めた時だけ返す。
