@@ -1,12 +1,12 @@
 // 実地確認(要件1): 実拡張 + 実 daemon + MCP + 実 CLI で、ユーザーが「AIに渡す」にチェックした要素だけが直ることを確かめる。
 // テスト(npm run check)ではない。実 CLI を呼ぶのでトークンを消費し、各 CLI のログインが要る。
-// agy は一時的に `agy mcp add baglive <url>` でグローバル設定へ登録し、終了時に remove する。
+// agy は CLI 引数で MCP を渡せないので、実行中だけ一意な名前(baglive_<乱数>)でグローバル設定へ登録し、終了時(Ctrl-C を含む)に外す。
 // 使い方: node scripts/live/element-fix-via-cli.mjs claude codex agy   (1つ以上)
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
@@ -20,6 +20,8 @@ if (!clis.length || clis.some((c) => !['claude', 'codex', 'agy'].includes(c))) {
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bag-live-req1-'));
 const FIXTURE = 'test/fixtures/playground.html';
 const TOKEN = randomBytes(16).toString('hex');
+// 利用者が登録済みの MCP 名と衝突させない(agy では上書き・削除してしまう)。
+const MCP = `baglive_${TOKEN.slice(0, 8)}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -85,6 +87,14 @@ const userDataDir = fs.mkdtempSync(path.join(workDir, 'chrome-'));
 const report = { clis: {} };
 let context;
 let agyAdded = false;
+// 中断されても agy のグローバル設定に死んだポートの登録を残さない。
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.once(sig, () => {
+    if (agyAdded) spawnSync('agy', ['mcp', 'remove', MCP], { stdio: 'ignore', timeout: 30000 });
+    daemon.kill('SIGTERM');
+    process.exit(130);
+  });
+}
 try {
   for (let i = 0; i < 50; i++) {
     if (await fetch(`http://127.0.0.1:${port}/healthz`).then((r) => r.ok, () => false)) break;
@@ -144,7 +154,7 @@ try {
       b: getComputedStyle(document.querySelector('[data-testid="login-submit"]')).color,
     }));
   const PROMPT = [
-    'MCP サーバー baglive が使えます。まず get_latest_feedback_context で、ユーザーがブラウザ上でチェックしたメモを読んでください。',
+    `MCP サーバー ${MCP} が使えます。まず get_latest_feedback_context で、ユーザーがブラウザ上でチェックしたメモを読んでください。`,
     '次に、そのメモの指示どおりに、メモが付いた要素だけを execute_actions で直してください(urlContains に "playground.html" を渡す。setStyle を使ってよい)。',
     'メモに書かれていない要素は触らないでください。ファイルの編集やシェルコマンドは使わず、MCP ツールだけを使ってください。最後に何をしたか1行で答えてください。',
   ].join('\n');
@@ -157,12 +167,12 @@ try {
     log(`running ${cli} ...`);
     let r;
     if (cli === 'claude') {
-      const cfg = JSON.stringify({ mcpServers: { baglive: { type: 'http', url: mcpUrl } } });
-      r = await run('claude', ['-p', PROMPT, '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__baglive__get_latest_feedback_context,mcp__baglive__execute_actions'], { cwd });
+      const cfg = JSON.stringify({ mcpServers: { [MCP]: { type: 'http', url: mcpUrl } } });
+      r = await run('claude', ['-p', PROMPT, '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', `mcp__${MCP}__get_latest_feedback_context,mcp__${MCP}__execute_actions`], { cwd });
     } else if (cli === 'codex') {
-      r = await run('codex', ['exec', '--skip-git-repo-check', '-s', 'read-only', '-c', `mcp_servers.baglive.url="${mcpUrl}"`, '-c', 'mcp_servers.baglive.default_tools_approval_mode="approve"', PROMPT], { cwd });
+      r = await run('codex', ['exec', '--skip-git-repo-check', '-s', 'read-only', '-c', `mcp_servers.${MCP}.url="${mcpUrl}"`, '-c', `mcp_servers.${MCP}.default_tools_approval_mode="approve"`, PROMPT], { cwd });
     } else {
-      agyAdded = (await run('agy', ['mcp', 'add', '--type', 'http', 'baglive', mcpUrl], { cwd, timeoutMs: 30000 })).code === 0;
+      agyAdded = (await run('agy', ['mcp', 'add', '--type', 'http', MCP, mcpUrl], { cwd, timeoutMs: 30000 })).code === 0;
       r = await run('agy', ['-p', PROMPT, '--add-dir', cwd, '--print-timeout', '280s'], { cwd });
     }
     const after = await styles();
@@ -179,7 +189,7 @@ try {
   report.error = String(e?.stack || e);
   log('ERROR', report.error);
 } finally {
-  if (agyAdded) await run('agy', ['mcp', 'remove', 'baglive'], { timeoutMs: 30000 });
+  if (agyAdded) await run('agy', ['mcp', 'remove', MCP], { timeoutMs: 30000 });
   await context?.close().catch(() => {});
   daemon.kill('SIGTERM');
   staticSrv.close();
