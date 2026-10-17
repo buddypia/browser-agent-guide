@@ -298,6 +298,39 @@ test.describe('決定的ワークフロー: RUN_STEP', () => {
     expect(await state(page)).toBe('open:黒ペン');
   });
 
+  test('pick 手順: 押した要素のテキストが他の項目の全文にも含まれるなら、選び方は項目全文のまま', async ({ page }) => {
+    await load(page, { recording: true });
+    await page.evaluate(() => {
+      const card = (t, p) => `<div class="card"><a href="#" class="ttl">${t}</a> <span>${p}</span></div>`;
+      document.body.insertAdjacentHTML('beforeend', `<div id="cards">${card('赤ペン', '¥100')}${card('赤ペン替芯', '¥80')}${card('青ペン', '¥100')}</div>`);
+      document.getElementById('cards').addEventListener('click', (e) => e.preventDefault());
+    });
+    await page.click('#cards > div:nth-child(1) .ttl');
+    await page.waitForTimeout(50);
+    const [step] = await steps(page);
+    expect(step.choice).toEqual({ by: 'text', value: '赤ペン ¥100' });
+  });
+
+  test('クリック: target=_blank や文書内に無い名前のリンクは同じタブで開き、既存フレームを狙うリンクはフレームだけ遷移する', async ({ page }) => {
+    await load(page);
+    await page.evaluate(() => {
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        `<iframe name="main" src="about:blank"></iframe><a id="to-frame" href="/frame-page" target="main">枠で開く</a>
+         <a id="to-win" href="/reports/42" target="report-win">別窓で開く</a>`
+      );
+    });
+    const click = (selector) => runStep(page, { action: { verb: 'click' }, locator: { kind: 'fixed', anchor: { selector, tag: 'a' } } });
+    expect((await click('#to-frame')).status).toBe('ok');
+    await expect.poll(() => page.frame({ name: 'main' })?.url()).toBe('http://bag.test/frame-page');
+    expect(page.url()).toBe('http://bag.test/orders/new');
+    expect(await page.getAttribute('#to-frame', 'target')).toBe('main');
+    const popup = page.context().waitForEvent('page', { timeout: 2000 }).catch(() => null);
+    await click('#to-win');
+    await page.waitForURL('http://bag.test/reports/42');
+    expect(await popup).toBeNull();
+  });
+
   test('pick 手順: 「数値が最小」ルールは実行時の候補から決定的に選ぶ', async ({ page }) => {
     await load(page, { recording: true });
     await page.click('#ship li:nth-child(1) button');

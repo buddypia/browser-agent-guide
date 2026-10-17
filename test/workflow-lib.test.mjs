@@ -361,6 +361,8 @@ const ok = (name) => {
   assert.deepEqual(pickCandidate(c, { by: 'text', value: '便' }), { status: 'ambiguous', indices: [1, 2, 3] });
   assert.deepEqual(pickCandidate(c, { by: 'text', value: '日本郵便 ¥1,100' }), { status: 'ok', index: 3 }); // 完全一致優先
   assert.deepEqual(pickCandidate(c, { by: 'text', value: 'ＦｅｄＥｘ' }), { status: 'none' });
+  assert.deepEqual(pickCandidate(c, { by: 'text', value: 'チャーター…' }), { status: 'ok', index: 2 }); // 記録時に切った値は前方部分で照合
+  assert.deepEqual(pickCandidate(c, { by: 'text', value: '…' }), { status: 'none' });
   assert.deepEqual(pickCandidate(c, { by: 'min' }), { status: 'ok', index: 3 });
   assert.deepEqual(pickCandidate(c, { by: 'max' }), { status: 'ok', index: 2 });
   assert.deepEqual(pickCandidate(c, { by: 'index', value: '2' }), { status: 'ok', index: 1 });

@@ -4661,7 +4661,11 @@
       if (own && el !== rep.item) {
         const items = Array.from(rep.container.children).filter((c) => matchesItemSignature(c, rep.sig));
         const same = items.filter((it) => normalizeItemText(innerTargetOf(it, step.locator.inner, step.locator.anchor?.selector)) === own);
-        if (same.length === 1) step.choice = { by: 'text', value: truncate(own, 80) };
+        // 実行時は項目全文への部分一致で選ぶので、全文でも1件に絞れる時だけ(『赤ペン』と『赤ペン替芯』は全文のまま)。
+        const value = truncate(own, 80);
+        const norm = (x) => x.replace(/…$/, '').normalize('NFKC').toLowerCase();
+        const inFull = items.filter((it) => norm(normalizeItemText(it)).includes(norm(value)));
+        if (same.length === 1 && inFull.length === 1) step.choice = { by: 'text', value };
       }
       step.needsReview = true;
       step.gate = isIrreversibleLabel(label);
@@ -4917,10 +4921,13 @@
       }
       const value = String(step.action.value ?? '');
       if (verb === 'click') {
-        // ランナーは1つのタブで進む。新しいタブで開くリンク(target=_blank 等)はこのタブで開く。
+        // ランナーは1つのタブで進む。新しいタブで開くリンク(_blank、または文書内に無いフレーム名)はこのタブで開く。
+        // 既存の iframe/frame を名前で狙うリンクはそのフレームが遷移するだけなので触らない。
         const link = target.closest('a[href][target]');
         const linkTarget = link?.getAttribute('target') || '';
-        const newTab = link && !['', '_self', '_top', '_parent'].includes(linkTarget.toLowerCase());
+        const lower = linkTarget.toLowerCase();
+        const toFrame = Array.from(document.querySelectorAll('iframe[name], frame[name]')).some((f) => f.name === linkTarget);
+        const newTab = Boolean(link) && (lower === '_blank' || (!['', '_self', '_top', '_parent'].includes(lower) && !toFrame));
         if (newTab) link.setAttribute('target', '_self');
         try {
           target.click();
