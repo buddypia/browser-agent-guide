@@ -5125,6 +5125,7 @@
         }
         case 'MARK_ANNOTATIONS_DONE': {
           // AI がメモに対応し終えた(MCP resolve_feedback)。「AI対応済み」にして「AIに渡す」を外し、次の送信に含めない。
+          // 保存は SW が最新の一覧に対して済ませている。ここで書き戻すと、このタブの古い一覧で他タブのメモを消しうる。
           const ids = new Set(Array.isArray(msg.ids) ? msg.ids.map(String) : []);
           const marked = [];
           for (const a of annotations) {
@@ -5134,7 +5135,6 @@
             marked.push(a.id);
           }
           if (marked.length) {
-            await persistAnnotations();
             renderAnnotations();
             notifyPageFeedbackChanged('update');
           }

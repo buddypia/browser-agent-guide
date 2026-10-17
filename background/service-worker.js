@@ -1971,40 +1971,35 @@ async function connectDaemonWebSocket() {
   }
 }
 
-// 指定 id のお描き/メモを「AI対応済み」にして「AIに渡す」を外す。content は注釈をメモリに持ち、保存時に
-// 自分のページ分を丸ごと書き戻すので、そのページを開いている全タブの content に任せる(同じページを2つ開いて
-// いても、どちらも古い forAI:true で送ったり上書きで消したりしない)。どのタブも持っていない分(閉じたページ)
-// だけ保存済みの注釈を直接書き換える(id は全ページで一意)。
+// 指定 id のお描き/メモを「AI対応済み」にして「AIに渡す」を外す。保存済みの注釈は最新の一覧に対して該当 id だけを
+// ここで1回書き換える(content にページ分を丸ごと書き戻させると、同じページを開いた別タブの古い一覧が後勝ちで
+// 人のメモを消しうる)。開いているタブの content にはメモリの更新と再描画だけを頼み、古い forAI:true で送らせない。
 async function markAnnotationsDone({ ids }) {
-  const want = (Array.isArray(ids) ? ids : []).map(String);
+  const want = new Set((Array.isArray(ids) ? ids : []).map(String));
   const at = new Date().toISOString();
   const marked = new Set();
+  const key = 'aiAdvisorAnnotations';
+  const map = (await chrome.storage.local.get(key))[key] || {};
+  for (const list of Object.values(map)) {
+    for (const a of Array.isArray(list) ? list : []) {
+      if (!a || !want.has(a.id) || (a.kind !== 'drawing' && a.kind !== 'note')) continue;
+      a.doneAt = at;
+      a.forAI = false;
+      marked.add(a.id);
+    }
+  }
+  if (marked.size) await chrome.storage.local.set({ [key]: map });
   const tabs = await chrome.tabs.query({});
   await Promise.all(
     tabs.map(async (tab) => {
       try {
-        const res = await chrome.tabs.sendMessage(tab.id, { type: 'MARK_ANNOTATIONS_DONE', ids: want, at }, { frameId: 0 });
+        const res = await chrome.tabs.sendMessage(tab.id, { type: 'MARK_ANNOTATIONS_DONE', ids: [...want], at }, { frameId: 0 });
         for (const id of Array.isArray(res?.marked) ? res.marked : []) marked.add(id);
       } catch {
         /* content の居ないタブ(chrome:// 等)は対象外 */
       }
     }),
   );
-  const rest = want.filter((id) => !marked.has(id));
-  if (!rest.length) return [...marked];
-  const key = 'aiAdvisorAnnotations';
-  const map = (await chrome.storage.local.get(key))[key] || {};
-  let changed = false;
-  for (const list of Object.values(map)) {
-    for (const a of Array.isArray(list) ? list : []) {
-      if (!a || !rest.includes(a.id) || (a.kind !== 'drawing' && a.kind !== 'note')) continue;
-      a.doneAt = at;
-      a.forAI = false;
-      marked.add(a.id);
-      changed = true;
-    }
-  }
-  if (changed) await chrome.storage.local.set({ [key]: map });
   return [...marked];
 }
 

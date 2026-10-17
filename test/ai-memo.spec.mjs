@@ -273,14 +273,18 @@ test.describe('お描き連動のAIメモ', () => {
     const call = (msg) => page.evaluate((m) => new Promise((r) => window.__bagListener(m, {}, r)), msg);
     await call({ type: 'LIST_ANNOTATIONS' });
 
+    // SW が保存済みの一覧を先に書き換え、開いているタブにはメモリの更新だけを頼む(content は書き戻さない)。
+    await page.evaluate(() => {
+      const map = JSON.parse(JSON.stringify(window.__store.aiAdvisorAnnotations));
+      Object.assign(Object.values(map)[0][0], { forAI: false, doneAt: '2026-10-17T01:00:00.000Z' });
+      window.__store.aiAdvisorAnnotations = map;
+    });
     expect(await call({ type: 'MARK_ANNOTATIONS_DONE', ids: ['note-a', 'other-page'], at: '2026-10-17T01:00:00.000Z' })).toEqual({ marked: ['note-a'] });
     const list = (await call({ type: 'LIST_ANNOTATIONS' })).annotations;
     expect(list.map((a) => [a.id, a.forAI, a.doneAt])).toEqual([['note-a', false, '2026-10-17T01:00:00.000Z'], ['note-b', true, '']]);
     expect((await call({ type: 'COLLECT_PAGE_FEEDBACK' })).items.map((i) => i.note)).toEqual(['文言を短く']);
     await expect(page.locator('.bag-step-caption--done')).toHaveCount(1);
     await expect(page.locator('.bag-step-caption--done')).toContainText('AI対応済み');
-    const stored = await page.evaluate(() => Object.values(window.__store.aiAdvisorAnnotations)[0].find((a) => a.id === 'note-a'));
-    expect(stored).toMatchObject({ forAI: false, doneAt: '2026-10-17T01:00:00.000Z' });
 
     await call({ type: 'SET_ANNOTATION_FOR_AI', id: 'note-a', on: true });
     expect((await call({ type: 'LIST_ANNOTATIONS' })).annotations[0].doneAt).toBe('');
