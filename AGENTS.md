@@ -38,6 +38,7 @@ npm run test:pf                  # node test/page-feedback/compositor.test.mjs  
 npm run test:ui                  # playwright test -c playwright.config.mjs  (only **/*.spec.mjs)
 npm run debug:playground         # headed Chromium with the unpacked extension loaded, serving test/fixtures/playground.html
 npm run zip                      # the ONLY build/package step: zip source dirs into browser-agent-guide.zip
+node scripts/live/workflow-wikipedia.mjs  # opt-in live checks on real sites / CLIs (not in check or CI) — scripts/live/README.md
 ```
 Single test:
 ```bash
