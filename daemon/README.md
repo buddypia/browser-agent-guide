@@ -369,7 +369,9 @@ node scripts/probe.mjs ~/Downloads/ai-inbox --image             # 必要時の�
 - 常駐化（launchd/systemd）は `npm run service` で対応（上記「常駐化」節）。
 - **`execute_actions` は動詞の allow-list(入力スキーマの `verb` enum)に限る**。拡張側も同じ一覧を実行時に強制し、
   経路名は SW が `execute_actions` に固定する(daemon の申告は使わない)。任意 JS(`injectScript`)・HTML 注入・
-  別 URL への遷移・要素削除・フォーム送信はできず、確定/購入/削除や名前の無いボタンのクリックは `held:true` で保留され、人が押す。
-  ページ由来の文字列(メモの HTML 等)で AI が乗っ取られても、ユーザーのタブで任意コードを走らせない・データを持ち出させないため。
+  `navigateTo`・要素削除・`submitForm` は無い。`setStyle` で変えられるのは色・枠線・文字・余白・大きさだけで、
+  `url()` などの外部参照や、要素を重ねる/隠す/動かすプロパティは断る。確定/購入/削除や名前の無いボタンのクリックは
+  `held:true` で保留され、人が押す。ページ由来の文字列(メモの HTML 等)で AI が乗っ取られても、ユーザーのタブで
+  任意コードを走らせず、読んだ内容を外へ送る口を減らすため。ただし普通のボタンやリンクは押せるので、それによる送信・遷移は起こりうる。
 - 拡張は daemon と WS をつなぎっぱなしにし、切れたら再接続する(MV3 の SW が止まらないよう 20 秒ごとに ping)。
 - まだ未対応（Phase 2 候補）: 複数 inbox root の whitelist、Antigravity の image vision 実測。

@@ -29,7 +29,7 @@ const FILTER_SCHEMA = {
 // @term: verb-registry  (用語定義: glossary/extension/verb-registry.md。この一覧を変えたら last_verified を更新)
 // execute_actions で実行できる動詞。拡張側(content-script.js の AGENT_ALLOWED_VERBS)が実行時に強制する
 // allow-list と一致必須(test/agent-verbs.test.mjs がパリティ検査)。ここでは入力スキーマの enum にして、
-// 呼び出す AI に使える動詞を示し、範囲外は拡張へ送る前に断る。任意 JS・HTML 注入・遷移・要素削除・送信は含めない。
+// 呼び出す AI に使える動詞を示し、範囲外は拡張へ送る前に断る。任意 JS・HTML 注入・navigateTo・要素削除・submitForm は含めない。
 export const EXECUTE_ACTIONS_VERBS = [
   'annotatePage', 'listAffordances', 'readText', 'extractData', 'readSignals', 'listAnnotations',
   'exportContext', 'explainWorkflow', 'waitForElement', 'notify', 'noop',
@@ -344,8 +344,10 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
           'メモ対応の後始末によく使う動詞: listAnnotations{} (このページのメモ一覧と id)、highlightElement{selector} (直した要素を光らせて人間に示す)、' +
           'setStyle{selector,styles} (見た目をその場で直す)、removeAnnotation{id} (人間が対応済みと認めたメモを消す)。' +
           '読み取り/操作: readText{selector}、listAffordances{}、clickElement{selector}、fillInput{selector,value}。' +
-          '使える動詞は verb の enum に限る(任意 JS・HTML 注入・別 URL への遷移・要素削除・フォーム送信はできない)。' +
-          '確定/購入/削除などのボタンと名前の無いボタンのクリックは held:true で保留され、人が押す必要がある。',
+          '使える動詞は verb の enum に限る(任意 JS・HTML 注入・navigateTo・要素削除・submitForm は無い)。' +
+          'setStyle で変えられるのは色・枠線・文字・余白・大きさだけで、url() などの外部参照は使えない。' +
+          '確定/購入/削除などのボタンと名前の無いボタンのクリックは held:true で保留され、人が押す必要がある。' +
+          'それ以外のボタンやリンクは押せるので、クリックで送信・遷移が起こりうることに注意する。',
         inputSchema: {
           actions: z.array(z.object({
             verb: z.enum(EXECUTE_ACTIONS_VERBS).describe('実行する動詞の名前'),

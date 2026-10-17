@@ -440,6 +440,7 @@
   "workflow.autorunStartBanner": "已开始自动执行 — 每步结果会显示在聊天中。",
   "cs.err.autorunHeld": "已保留：这看起来是最终确认/购买/删除按钮，自动执行未点击。请手动操作。",
   "cs.err.agentHeld": "已保留：外部 AI 不会点击最终确认/购买/删除按钮或没有名称的按钮。请您手动点击。",
+  "cs.err.agentStyleBlocked": "外部 AI 无法更改此样式（{prop}）。只能更改颜色、边框、文字、间距和尺寸，且值不能引用 url() 等外部资源。",
   "sw.autorun.empty": "没有可自动执行的步骤。请先记录批注。",
   "sw.autorun.started": "▶ 已开始自动执行（{count} 个步骤）。先执行本页，再按 URL 顺序跳转。",
   "sw.autorun.stopped": "■ 已停止自动执行。",
