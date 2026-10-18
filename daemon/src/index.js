@@ -154,8 +154,14 @@ server.listen(port, host, () => {
   process.stderr.write(`[bag-pf] inbox: ${getInbox()}${inboxState.pinned ? ' (固定)' : ' (自動検出。拡張の報告で更新される場合あり)'}\n`);
   process.stderr.write(`[bag-pf] storage: ${storageMode}${STORAGE_DESC[storageMode] || ''}\n`);
   process.stderr.write(`[bag-pf] latest freshness/window: ${effectiveLatestWindowMin}m (--latest-window-min / BAG_PF_LATEST_WINDOW_MIN)\n`);
-  process.stderr.write(`[bag-pf] token: ${token}\n`);
-  process.stderr.write(`[bag-pf]   ↑ これを拡張オプションの「ページフィードバック デーモン」に貼る (保存先: ${tokenPath()})\n`);
+  // launchd/systemd は stderr をログファイルに残すので、値は端末にだけ出す。
+  if (process.stderr.isTTY) {
+    process.stderr.write(`[bag-pf] token: ${token}\n`);
+    process.stderr.write(`[bag-pf]   ↑ これを拡張オプションの「ページフィードバック デーモン」に貼る (保存先: ${tokenPath()})\n`);
+  } else {
+    const from = args.token || process.env.BAG_PF_TOKEN ? '--token / BAG_PF_TOKEN' : tokenPath();
+    process.stderr.write(`[bag-pf] token: ${from} の値 (端末でないので表示しない。拡張オプションの「ページフィードバック デーモン」に貼る)\n`);
+  }
   if (retentionPolicy.enabled) {
     const min = (ms) => Math.round(ms / 60000);
     process.stderr.write(
@@ -185,6 +191,8 @@ function shutdown() {
     /* tmp 後始末失敗は無視 */
   }
   try {
+    // wss.close() は接続中の WS を閉じない。拡張が繋がったままだと server.close が終わらない。
+    for (const client of wss.clients) client.terminate();
     wss.close();
   } catch {
     /* wss close 失敗は無視 */
