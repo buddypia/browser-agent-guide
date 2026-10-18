@@ -8,6 +8,7 @@ import {
   launchdPlist,
   systemdUnit,
   servicePlan,
+  stableNodePath,
 } from '../src/service-template.mjs';
 
 test('xmlEscape は & < > を実体参照に変換する', () => {
@@ -94,4 +95,25 @@ test('servicePlan: 未対応 platform は throw', () => {
 
 test('servicePlan: home 必須', () => {
   assert.throws(() => servicePlan({ platform: 'darwin', home: '', nodePath: 'node', scriptPath: 'i.js' }), /home is required/);
+});
+
+test('stableNodePath: mise/asdf の実体パスは shims/node に置き換える', () => {
+  const has = (p) => p === '/u/.local/share/mise/shims/node' || p === '/u/.asdf/shims/node';
+  assert.deepEqual(stableNodePath('/u/.local/share/mise/installs/node/24.21.0/bin/node', has), {
+    nodePath: '/u/.local/share/mise/shims/node',
+    pinned: false,
+  });
+  assert.deepEqual(stableNodePath('/u/.asdf/installs/nodejs/22.1.0/bin/node', has), {
+    nodePath: '/u/.asdf/shims/node',
+    pinned: false,
+  });
+});
+
+test('stableNodePath: shim が無いバージョン固定パスは pinned、それ以外はそのまま', () => {
+  const none = () => false;
+  assert.deepEqual(stableNodePath('/u/.nvm/versions/node/v22.1.0/bin/node', none), {
+    nodePath: '/u/.nvm/versions/node/v22.1.0/bin/node',
+    pinned: true,
+  });
+  assert.deepEqual(stableNodePath('/opt/homebrew/bin/node', none), { nodePath: '/opt/homebrew/bin/node', pinned: false });
 });

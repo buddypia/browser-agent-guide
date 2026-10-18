@@ -229,6 +229,9 @@ launchctl load -w ~/Library/LaunchAgents/com.buddypia.bag-pf-daemon.plist
 systemctl --user daemon-reload && systemctl --user enable --now bag-pf-daemon.service
 ```
 
+> node が mise/asdf の管理下なら、ユニットにはバージョン付きの実体パスではなく `shims/node` を書く
+> （node を上げても起動し続ける）。nvm などで shim が無い時は警告を出すので、node 更新後に作り直す。
+>
 > `--write` は**ユーザー領域にユニットを書き出すだけ**で、load（システムへの登録）は実行しない。
 > 解除/停止コマンドも `--write` 実行時に併せて表示される。Windows は未対応（`nohup`/`pm2`/タスク
 > スケジューラ等で `node src/index.js` を常駐させる）。

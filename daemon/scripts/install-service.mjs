@@ -13,11 +13,11 @@
 //
 // デーモン本体の引数(--inbox/--port/--host/--storage)はそのままユニットの起動引数になる。
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
-import { servicePlan } from '../src/service-template.mjs';
+import { servicePlan, stableNodePath } from '../src/service-template.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DAEMON_ENTRY = resolve(SCRIPT_DIR, '..', 'src', 'index.js');
@@ -72,12 +72,17 @@ function main() {
     return 0;
   }
 
+  const node = stableNodePath(process.execPath, existsSync);
+  if (node.pinned) {
+    process.stderr.write(`[bag-pf] 注意: ${node.nodePath} はバージョン固定のパスです。node を更新したらユニットを作り直してください。\n`);
+  }
+
   let plan;
   try {
     plan = servicePlan({
       platform: process.platform,
       home: homedir(),
-      nodePath: process.execPath,
+      nodePath: node.nodePath,
       scriptPath: DAEMON_ENTRY,
       args: opts.daemonArgs,
       env: opts.env,
