@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { decide, parseReview, prTitle } from '../scripts/auto-ship.mjs';
+import { decide, mergedPr, parseReview, prTitle } from '../scripts/auto-ship.mjs';
 
 const ok = { verdict: 'approve', scope: 'small', summary: '', issues: [] };
 
@@ -37,4 +37,13 @@ test('PR title is the oldest commit subject, not the branch name', () => {
   assert.equal(prTitle('- Fix follow-up\n- Add the feature', 'feat/x'), 'Add the feature');
   assert.equal(prTitle('- Only commit', 'feat/x'), 'Only commit');
   assert.equal(prTitle('', 'feat/x'), 'feat/x');
+});
+
+test('a merged PR counts only when its head is exactly this HEAD', () => {
+  const prs = [{ number: 7, headRefOid: 'aaa' }, { number: 9, headRefOid: 'bbb' }];
+  assert.equal(mergedPr(prs, 'bbb').number, 9);
+  // New commits after the merge are new work, not a merged worktree to clean up.
+  assert.equal(mergedPr(prs, 'ccc'), null);
+  assert.equal(mergedPr([], 'aaa'), null);
+  assert.equal(mergedPr(undefined, 'aaa'), null);
 });

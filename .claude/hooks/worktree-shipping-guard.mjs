@@ -362,7 +362,8 @@ export function buildBlockMessage(projectDir, candidates) {
   }
   lines.push('');
   lines.push('commit 이 이미 있는 worktree 는 make ship 으로 출하합니다 (AGENTS.md Git workflow — 테스트·AI 리뷰·게이트 통과 시에만 자동 머지, 멱등).');
-  lines.push('AUTO_SHIP NEEDS_HUMAN 이면 PR URL 과 사유를 보고하고, 머지는 사용자 컨펌 후 수동 경로로 진행합니다:');
+  lines.push('AUTO_SHIP NEEDS_HUMAN 이면 PR URL 과 사유를 보고하고, 머지는 사용자 컨펌 후 수동 경로로 진행합니다.');
+  lines.push('PR 이 이미 merge 된 worktree(수동 gh pr merge / GitHub Web)도 같은 make ship 이 감지해 cleanup 만 수행합니다:');
   lines.push('');
   for (const c of candidates.filter((item) => item.commits > 0 && !item.commit_required)) {
     const rel = relativizePath(c.path, projectDir);
