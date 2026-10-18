@@ -10,7 +10,7 @@ progress:
   state: shipped
   tracking: ""
 source_refs:
-  - { type: spec, path: "AGENTS.md", anchor: "main-chat-flow-page-action-end-to-end" }
+  - { type: spec, path: ".agents/skills/extension-architecture/SKILL.md", anchor: "main-chat-flow-page-action-end-to-end" }
 code_refs:
   - { path: "lib/recipe-merge.js", symbol: "mergeRecipeActions" }
   - { path: "background/service-worker.js", symbol: "RECIPE_VERBS" }

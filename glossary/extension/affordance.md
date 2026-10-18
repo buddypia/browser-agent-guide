@@ -10,7 +10,7 @@ progress:
   state: shipped
   tracking: ""
 source_refs:
-  - { type: spec, path: "AGENTS.md", anchor: "extension-architecture" }
+  - { type: spec, path: ".agents/skills/extension-architecture/SKILL.md", anchor: "extension-architecture" }
 code_refs:
   - { path: "content/content-script.js", symbol: "data-bag-id" }
 api_refs: []

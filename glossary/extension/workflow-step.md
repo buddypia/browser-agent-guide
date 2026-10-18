@@ -10,7 +10,7 @@ progress:
   state: shipped
   tracking: ""
 source_refs:
-  - { type: spec, path: "AGENTS.md", anchor: "extension-architecture" }
+  - { type: spec, path: ".agents/skills/workflow-steps/SKILL.md", anchor: "workflow-steps" }
 code_refs:
   - { path: "lib/workflow.js", symbol: "normalizeStep" }
   - { path: "lib/workflow.js", symbol: "pickCandidate" }

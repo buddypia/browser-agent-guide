@@ -11,7 +11,7 @@ progress:
   tracking: ""
 source_refs:
   - { type: doc, path: "docs/page-feedback-mvp-usage.md" }
-  - { type: spec, path: "AGENTS.md", anchor: "daemon-architecture" }
+  - { type: spec, path: ".agents/skills/daemon-mcp/SKILL.md", anchor: "daemon-architecture" }
 code_refs:
   - { path: "content/content-script.js", symbol: "collectPageFeedbackData" }
   - { path: "lib/page-feedback/compositor.js", symbol: "drawShape" }

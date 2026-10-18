@@ -49,6 +49,17 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "^(apply_patch|Edit|Write|MultiEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/codex/post-edit-invariants.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Post-Edit Invariants: harness / sync-pair / hook-ref checks"
+          }
+        ]
+      },
+      {
         "matcher": "^(Bash|shell|run_shell|run_shell_command|exec_command)$",
         "hooks": [
           {
