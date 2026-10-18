@@ -102,6 +102,17 @@ function startServer(state) {
         });
         return;
       }
+      // 偽 LLM (OpenAI 互換): 候補選択に「該当なし」と答える(価格の無い候補から「一番安い」を選ばせた状況)。
+      if (url.pathname === '/v1/chat/completions' && req.method === 'POST') {
+        let raw = '';
+        req.on('data', (c) => (raw += c));
+        req.on('end', () => {
+          state.llmCalls.push(JSON.parse(raw));
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ choice: 'none', reason: '候補に価格情報がないため選べません' }) } }] }));
+        });
+        return;
+      }
       if (url.pathname === '/v1/embeddings' && req.method === 'POST') {
         let raw = '';
         req.on('data', (c) => (raw += c));
@@ -157,7 +168,7 @@ const readStore = (sw, key) => sw.evaluate(async (k) => (await chrome.storage.lo
 
 test.describe('判断AI(Jev / Clef / eg2) E2E (拡張ロード)', () => {
   test.describe.configure({ mode: 'serial' });
-  const state = { variant: 'rec', button: '選ぶ', formLabel: '保存する', jevCalls: [], clefCalls: [], eg2Calls: [], prefer: 'Anker', flip: false, fail: false, visualPass: true };
+  const state = { variant: 'rec', button: '選ぶ', formLabel: '保存する', jevCalls: [], clefCalls: [], eg2Calls: [], llmCalls: [], prefer: 'Anker', flip: false, fail: false, visualPass: true };
   let server;
   let origin;
   let context;
@@ -360,12 +371,59 @@ test.describe('判断AI(Jev / Clef / eg2) E2E (拡張ロード)', () => {
       const msgs = await extPage.evaluate(() => window.__autorun.join('\n'));
       expect(msgs).toContain('Jev API error 500');
       expect(msgs).not.toContain('手順?');
-      expect(await runOf()).toMatchObject({ heldStepId: '', doneStepIds: [] });
+      const run = await runOf();
+      expect(run).toMatchObject({ heldStepId: '', doneStepIds: [], failure: { stepId: recorded.id, n: 1, phase: 'failed', stage: 'ai' } });
+      // 生データ: どの判断AIに・どの候補で問い合わせ、何が返ったか。
+      expect(run.failure.text).toContain('Jev API error 500');
+      expect(run.failure.detail.ai).toMatchObject({ engine: 'jev', model: 'jev-fake', reason: 'none' }); // テキストのルールに合う候補が無かった
+      expect(run.failure.detail.ai.error).toContain('Jev API error 500');
+      expect(run.failure.detail.ai.candidates).toHaveLength(4);
       await expect(page.locator('#state')).toHaveText('idle');
     } finally {
       state.fail = false;
     }
     await page.close();
+  });
+
+  test('条件で選ぶ手順で LLM が「該当なし」と答えたら、止まった手順・段階・理由と生データ(候補とAIの判断)を run に残す', async () => {
+    const saved = await readStore(sw, 'aiAdvisorSettings');
+    await sw.evaluate(async (base) => {
+      const k = 'aiAdvisorSettings';
+      const s = (await chrome.storage.local.get(k))[k];
+      await chrome.storage.local.set({ [k]: { ...s, judge: { ...s.judge, provider: 'llm' }, ai: { ...s.ai, provider: 'custom', apiKey: 'llm-key', baseUrl: base, model: 'fake-llm' } } });
+    }, `${origin}/v1`);
+    try {
+      await setSteps([{ ...recorded, choice: { by: 'ai', value: '一番安いものを選ぶ' } }]);
+      const { page, tabId } = await openList('rec');
+      state.llmCalls.length = 0;
+      expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+      await expect.poll(async () => (await runOf())?.failure?.stage ?? '', { timeout: 15_000 }).toBe('choose');
+      const run = await runOf();
+      expect(run).toMatchObject({ active: false, doneStepIds: [], failure: { stepId: recorded.id, n: 1, phase: 'failed' } });
+      // 人向け: 「この手順は条件でAIが選びます」ではなく、条件・候補数・AIの理由を示す。
+      expect(run.failure.text).toBe('■ Stopped at step 1: The AI found no item matching "一番安いものを選ぶ" among 4 candidates. AI\'s reasoning: 候補に価格情報がないため選べません');
+      // 生データ: 手順(入力値なし)・タブの URL・content の応答・AI への問い合わせと答え。
+      const { detail } = run.failure;
+      expect(detail.step).toMatchObject({ id: recorded.id, verb: 'click', choice: { by: 'ai', value: '一番安いものを選ぶ' }, locator: { kind: 'pick' } });
+      expect(detail.step).not.toHaveProperty('value');
+      expect(detail.tabUrl).toBe(`${origin}/list`);
+      expect(detail.status).toBe('failed');
+      expect(detail.ai).toMatchObject({ engine: 'custom', model: 'fake-llm', reason: 'needs-ai', choice: 'none', why: '候補に価格情報がないため選べません' });
+      expect(detail.ai.candidates).toHaveLength(4);
+      expect(detail.ai.candidates[0]).toContain('Belkin');
+      expect(detail.responses.at(-1)).toMatchObject({ status: 'choose' });
+      expect(detail.responses.at(-1).candidates).toHaveLength(4);
+      expect(state.llmCalls).toHaveLength(1);
+      await expect(page.locator('#state')).toHaveText('idle');
+
+      // 次の実行を始めると、前回の停止理由は消える。
+      expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+      expect((await runOf()).failure?.at).not.toBe(run.failure.at);
+      await expect.poll(async () => (await runOf())?.active, { timeout: 15_000 }).toBe(false);
+      await page.close();
+    } finally {
+      await sw.evaluate((s) => chrome.storage.local.set({ aiAdvisorSettings: s }), saved);
+    }
   });
 
   test('記録した要素が消えた時の差し替えは、確信度が高くても承認を待つ', async () => {

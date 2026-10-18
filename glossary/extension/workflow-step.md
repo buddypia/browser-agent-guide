@@ -23,7 +23,7 @@ code_refs:
 api_refs: []
 db_refs: []
 related: ["verb-registry", "affordance"]
-last_verified: 2026-10-18
+last_verified: 2026-10-19
 confidence: medium
 ---
 
@@ -45,7 +45,7 @@ confidence: medium
   実行時の項目内の対象は、記録した要素のセレクタが項目内で1つに当たればそれ、無ければ位置のパス。
 - `choice.by` は `index | text | first | last | min | max | ai`。候補からの選択は SW の純関数
   `pickCandidate` が決め、決まらない時(曖昧/該当なし/`ai`)だけ AI に **候補キーの enum から1つ**
-  を選ばせる(`callAIChoice`)。AI が補った結果は `suggestion` として残り、人間が採用した時だけ学習される。
+  を選ばせる(`callAIChoice`。応答が無ければ1回 `AI_CHOICE_TIMEOUT_MS` で打ち切って失敗にする)。AI が補った結果は `suggestion` として残り、人間が採用した時だけ学習される。
   判断AI(`settings.judge.provider:'jev' | 'clef' | 'eg2'`)を設定すると、この候補選択だけを System 1
   (TypeSafe Jev / Cloudflare Clef / ローカル EmbeddingGemma 2) に任せる(`callJudgeChoice`。チャット/verbs 生成は LLM のまま)。
   選んだ候補の確信度(Jev / Clef の確率または eg2 のコサイン類似度。Jev と Clef は同じ {state, questions} → probabilities の契約)が `minConfidence` 以上なら進んで
@@ -63,6 +63,9 @@ confidence: medium
   ファイル名か URL に `value` を含む(空なら何でも)ものが `complete` になるまで待つ(上限60秒)。始まらない・中断・
   時間切れは失敗で止まる。記録中、クリック直後(10秒以内)に始まったダウンロードはそのクリックにこの確認を SW が自動で付ける。
 - `gate: true`(確定系ラベルは自動付与)の手順は承認まで `held` で止まる。
+- 失敗で止まると(`failed` / `mismatch`)、`run.failure` に止まった手順(`stepId`/`n`)・段階(`stage`: `page | resolve | choose | ai | act | check | exception`)・
+  人向けの文面(`text`)・生データ(`detail`: 手順の要約、タブの URL、content の直近の応答と候補の表示テキスト、AI の種類/モデル/候補/答え/理由)を残す。
+  手順の入力値は載せない。サイドパネルはこの記録からワークフロー欄の上に理由と「次にすること」と生データ(JSON・コピー可)を出し、止まった手順の番号を `!` にする。次の開始で消える。
 
 実行は SW の `driveWorkflow` が1手ずつ: ページ合わせ → `RUN_STEP`(content の `runStep`)→ 確認 →
 前進。`dryRun` は操作せず対象を光らせるだけ。`kind` を持たない旧来のメモ手順は従来どおり AI が verbs 化する。
@@ -71,6 +74,6 @@ confidence: medium
 AI CLI は MCP の `run_workflow`(daemon → WS `workflow` `{op:'run'}` → SW `handleWorkflowRequest`)で保存済みワークフローを
 id と変数で始められる。開始ページは常に新しいタブで開く(人が作業中のタブを遷移させない)。実行中/承認待ち・記録中・
 サイドパネルに未保存の手順がある時や変数が足りない時は、何も開かずに断る(人の編集を捨てない)。
-状態(`get_workflow_run`)は進み具合・`held` の手順番号と種類と候補の表示名・直近の出来事の種類(phase)だけを返し、
+状態(`get_workflow_run`)は進み具合・`held` の手順番号と種類と候補の表示名・止まった手順番号と段階(`failed`)・直近の出来事の種類(phase)だけを返し、
 入力値と手順ごとの文面は返さない。
 承認する手段は MCP に無く、確定系も判断AIの保留も人がサイドパネルで承認する。

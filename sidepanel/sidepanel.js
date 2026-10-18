@@ -77,6 +77,7 @@ const els = {
   workflowVarsFields: document.getElementById('workflow-vars-fields'),
   workflowHeld: document.getElementById('workflow-held'),
   workflowHeldText: document.getElementById('workflow-held-text'),
+  workflowFailure: document.getElementById('workflow-failure'),
   btnWorkflowApprove: document.getElementById('btn-workflow-approve'),
 };
 
@@ -1679,8 +1680,9 @@ function renderWorkflowRun(run) {
     const total = (state.workflow?.steps || []).length;
     els.workflowAutorunState.textContent = run.active
       ? t('workflow.autorunProgress', { done: run.doneStepIds.length, total })
-      : '';
+      : visibleFailure(run) ? t('workflow.autorunFailed') : '';
   }
+  renderWorkflowFailure(run);
   // 承認ゲートで止まっている時だけ「承認して続行」を出す。
   const held = !run.active && run.heldStepId ? (state.workflow?.steps || []).find((s) => s.id === run.heldStepId) : null;
   if (els.workflowHeld) els.workflowHeld.hidden = !held;
@@ -1700,17 +1702,73 @@ function renderWorkflowRun(run) {
     const del = row.querySelector('.wf-saved-del');
     if (del) del.disabled = run.active;
   });
-  // 実行状況(完了/保留)を手順の行にも反映する。
+  // 実行状況(完了/保留/停止)を手順の行にも反映する。
+  const failedId = visibleFailure(run)?.stepId || '';
   if (els.workflowSteps && state.workflow?.steps?.length) {
     els.workflowSteps.querySelectorAll('.workflow-step').forEach((row, i) => {
       const id = row.dataset.stepId;
       const done = run.doneStepIds.includes(id);
+      const failed = Boolean(failedId) && failedId === id;
       row.classList.toggle('is-done', done);
       row.classList.toggle('is-held', run.heldStepId === id);
+      row.classList.toggle('is-failed', failed);
       const num = row.querySelector('.wf-num');
-      if (num) num.textContent = done ? '✓' : String(i + 1);
+      if (num) num.textContent = done ? '✓' : failed ? '!' : String(i + 1);
     });
   }
+}
+
+// 直近の停止理由。実行中は出さず、別のワークフローへ切り替えた後(該当する手順が無い)も出さない。
+function visibleFailure(run) {
+  const f = run.active ? null : run.failure;
+  if (!f) return null;
+  return !f.stepId || (state.workflow?.steps || []).some((s) => s.id === f.stepId) ? f : null;
+}
+
+// 止まった理由を、人向け(段階・手順・理由・次にすること)と生データ(JSON)の両方で出す。
+// チャットの通知はパネルを開き直すと消えるので、run に残った記録から描く。
+function renderWorkflowFailure(run) {
+  const box = els.workflowFailure;
+  if (!box) return;
+  const f = visibleFailure(run);
+  box.hidden = !f;
+  if (!f) {
+    box.replaceChildren();
+    box.dataset.key = '';
+    return;
+  }
+  const step = (state.workflow?.steps || []).find((s) => s.id === f.stepId);
+  const key = JSON.stringify([f.at, state.language, step ? stepTitle(step) : '']);
+  if (box.dataset.key === key) return; // 同じ失敗の再描画で「詳細」の開閉を崩さない
+  box.dataset.key = key;
+  const raw = JSON.stringify(f, null, 2);
+  const details = createEl('details', 'wf-fail-raw');
+  details.appendChild(createEl('summary', '', t('wf.fail.raw')));
+  const pre = createEl('pre', 'wf-fail-json', raw);
+  pre.tabIndex = 0; // スクロールする領域をキーボードでも読めるように
+  pre.setAttribute('aria-label', t('wf.fail.raw'));
+  details.appendChild(pre);
+  const copy = createEl('button', 'wf-mini', t('wf.fail.copy'));
+  copy.type = 'button';
+  copy.addEventListener('click', async () => {
+    try {
+      await copyTextToClipboard(raw);
+      copy.textContent = t('wf.fail.copied');
+      setTimeout(() => (copy.textContent = t('wf.fail.copy')), 1500);
+    } catch (e) {
+      addMessage('error', String(e?.message || e));
+    }
+  });
+  const actions = createEl('div', 'wf-fail-actions');
+  actions.appendChild(copy);
+  box.replaceChildren(
+    createEl('div', 'wf-fail-head', t('wf.fail.head', { stage: t(`wf.fail.stage.${f.stage}`), time: formatHistoryDate(f.at) })),
+    ...(step ? [createEl('div', 'wf-fail-step', t('wf.fail.step', { n: f.n, text: stepTitle(step) }))] : []),
+    createEl('div', 'wf-fail-text', f.text),
+    createEl('div', 'wf-fail-next', t('wf.fail.next', { hint: t(`wf.fail.hint.${f.stage}`) })),
+    details,
+    actions
+  );
 }
 
 function shortUrl(u) {
@@ -2284,6 +2342,8 @@ if (els.themeSelect) els.themeSelect.addEventListener('change', (e) => changeThe
 chrome.runtime.onMessage?.addListener?.((msg) => {
   if (msg?.type === 'WORKFLOW_AUTORUN_EVENT' && msg.text) {
     addMessage('assistant', msg.text);
+    // 開始時の「結果はチャットに表示」のバナーを、止まった理由で置き換える(チャットを見ていなくても気付ける)。
+    if (msg.phase === 'failed' || msg.phase === 'mismatch') showBanner(escapeHtml(msg.text), false);
   }
   if (msg?.type === 'PAGE_FEEDBACK_CHANGED' && msg.reason === 'resolution_change') {
     refreshAnnotations();

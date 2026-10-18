@@ -700,6 +700,8 @@ function workflowRunSummary(wf, run) {
     held: run.heldStepId
       ? { step: steps.findIndex((s) => s.id === run.heldStepId) + 1, kind: run.heldKind === 'judge' ? 'judge' : 'confirm', label: run.heldLabel }
       : null,
+    // 止まった手順の番号と段階(閉じた集合)だけ。理由の文面と生データは候補テキスト等を含むのでサイドパネルにだけ出す。
+    failed: run.failure ? { step: run.failure.n, stage: run.failure.stage } : null,
     startedAt: run.startedAt,
     last: lastAutoRunEvent,
   };
@@ -738,9 +740,17 @@ async function maybeAutoRunWorkflow(tabId) {
   try {
     await driveWorkflow(tabId);
   } catch (e) {
+    // 想定外の例外(content への注入失敗など)。実行中だった手順に結び付けて、例外の生データごと残す。
     const latest = await readWorkflowRun();
-    await writeWorkflowRun({ ...latest, active: false });
-    notifyAutoRun({ phase: 'failed', text: t('sw.wf.failed', { n: '?', error: String(e?.message || e) }) });
+    const workflow = await readWorkflow();
+    const step = nextPendingStep(workflow, latest);
+    const n = step ? actionableSteps(workflow).findIndex((s) => s.id === step.id) + 1 : 0;
+    const error = String(e?.message || e);
+    const text = n ? t('sw.wf.failed', { n, error }) : t('sw.wf.crashed', { error });
+    const failure = { stepId: step?.id || '', n, phase: 'failed', stage: 'exception', text, at: new Date().toISOString(), detail: { step: step ? stepDigest(step) : null, error, stack: String(e?.stack || '') } };
+    await writeWorkflowRun({ ...latest, active: false, failure });
+    console.warn('[workflow] crashed', failure);
+    notifyAutoRun({ phase: 'failed', text, stepId: step?.id || '' });
   } finally {
     autoRunInFlight.delete(tabId);
   }
@@ -770,38 +780,47 @@ async function driveWorkflow(tabId) {
       return;
     }
     const n = all.findIndex((s) => s.id === step.id) + 1;
-    const stop = async (phase, text, extra = {}) => {
+    let tab = null;
+    // 失敗(failed / mismatch)は、どの手順の・どの段階で・なぜ止まったかを run.failure に残す
+    // (text = 人向けの文面、detail = 生データ)。チャットの通知はパネルを開き直すと消えるため。
+    const stop = async (phase, text, { extra = {}, stage = 'exception', detail = {} } = {}) => {
       const latest = await readWorkflowRun();
       if (!latest.active) return; // 実行中にユーザーが停止済み → 保留状態などを書き戻さない
-      await writeWorkflowRun({ ...latest, active: false, ...extra });
+      const failure =
+        phase === 'failed' || phase === 'mismatch'
+          ? { stepId: step.id, n, phase, stage, text, at: new Date().toISOString(), detail: { step: stepDigest(step), tabUrl: tab?.url || '', ...detail } }
+          : null;
+      await writeWorkflowRun({ ...latest, active: false, ...extra, ...(failure ? { failure } : {}) });
+      if (failure) console.warn('[workflow] stopped', failure);
       notifyAutoRun({ phase, text, stepId: step.id });
     };
 
     // 1) ページ合わせ
-    let tab = await getTab(tabId);
-    if (!tab) return stop('failed', t('sw.wf.tabGone'));
+    tab = await getTab(tabId);
+    if (!tab) return stop('failed', t('sw.wf.tabGone'), { stage: 'page' });
     if (!stepMatchesUrl(step, tab.url) && lastMayNavigate) {
       tab = await waitForTab(tabId, (tb) => stepMatchesUrl(step, tb.url), WF_NAV_WAIT_MS);
-      if (!tab) return stop('failed', t('sw.wf.tabGone'));
+      if (!tab) return stop('failed', t('sw.wf.tabGone'), { stage: 'page' });
     }
     if (!stepMatchesUrl(step, tab.url)) {
       const navUrl = navigationTargetFor(step, run);
       const navCap = all.length * 2 + 5;
+      const pageDetail = { expectedUrl: step.urlPattern || step.url, navUrl, navCount: run.navCount, navCap, alreadyNavigated: navigatedFor === step.id };
       if (!navUrl || navigatedFor === step.id || run.navCount > navCap) {
-        return stop('mismatch', t('sw.wf.mismatch', { n, url: step.urlPattern || step.url }));
+        return stop('mismatch', t('sw.wf.mismatch', { n, url: step.urlPattern || step.url }), { stage: 'page', detail: pageDetail });
       }
       navigatedFor = step.id;
       run = await writeWorkflowRun({ ...run, navCount: run.navCount + 1 });
       notifyAutoRun({ phase: 'navigate', text: t('sw.autorun.navigate', { url: navUrl }) });
       try {
         await chrome.tabs.update(tabId, { url: navUrl });
-      } catch {
-        return stop('mismatch', t('sw.wf.mismatch', { n, url: navUrl }));
+      } catch (e) {
+        return stop('mismatch', t('sw.wf.mismatch', { n, url: navUrl }), { stage: 'page', detail: { ...pageDetail, error: String(e?.message || e) } });
       }
       // tabs.update 直後は旧URLのまま complete のことがあるので、URL一致 + 完了の両方を待つ。
       tab = await waitForTab(tabId, (tb) => tb.status === 'complete' && stepMatchesUrl(step, tb.url), WF_LOAD_WAIT_MS);
       if (!tab || !stepMatchesUrl(step, tab.url)) {
-        return stop('mismatch', t('sw.wf.mismatch', { n, url: step.urlPattern || navUrl }));
+        return stop('mismatch', t('sw.wf.mismatch', { n, url: step.urlPattern || navUrl }), { stage: 'page', detail: pageDetail });
       }
     }
     tab = (await waitForTab(tabId, (tb) => tb.status === 'complete', WF_LOAD_WAIT_MS)) || tab;
@@ -824,23 +843,28 @@ async function driveWorkflow(tabId) {
       const byJudge = outcome.heldKind === 'judge';
       const label = outcome.label || step.target || '';
       return stop('held', byJudge ? t('sw.wf.judgeHeld', { n, label, reason: outcome.aiReason || '' }) : t('sw.wf.held', { n, label }), {
-        heldStepId: step.id,
-        heldKind: byJudge ? 'judge' : '',
-        heldLabel: outcome.heldLabel || '',
-        approvedStepId: '',
+        extra: { heldStepId: step.id, heldKind: byJudge ? 'judge' : '', heldLabel: outcome.heldLabel || '', approvedStepId: '' },
       });
     }
     if (outcome.status !== 'ok') {
-      return stop('failed', t('sw.wf.failed', { n, error: outcome.error || t('sw.autorun.failed') }));
+      return stop('failed', t('sw.wf.failed', { n, error: outcome.error || t('sw.autorun.failed') }), {
+        stage: outcome.stage || 'act',
+        detail: { status: outcome.status, error: outcome.error || '', ...outcome.detail },
+      });
     }
-    if (downloaded && !downloaded.ok) return stop('failed', t('sw.wf.failed', { n, error: downloadFailureText(downloaded) }));
+    if (downloaded && !downloaded.ok) {
+      return stop('failed', t('sw.wf.failed', { n, error: downloadFailureText(downloaded) }), { stage: 'check', detail: { download: downloaded } });
+    }
 
     // 3) URL 確認(タブの URL で検証。SPA でもフル遷移でも同じ)
     if (structured && step.check.type === 'url' && step.check.value) {
       const pattern = applyVars(step.check.value, run.vars);
       const tb = await waitForTab(tabId, (x) => urlMatchesPattern(x.url, pattern), WF_NAV_WAIT_MS);
       if (!tb || !urlMatchesPattern(tb.url, pattern)) {
-        return stop('failed', t('sw.wf.failed', { n, error: t('sw.wf.checkUrl', { url: pattern }) }));
+        return stop('failed', t('sw.wf.failed', { n, error: t('sw.wf.checkUrl', { url: pattern }) }), {
+          stage: 'check',
+          detail: { expectedUrl: pattern, actualUrl: tb?.url || '', waitedMs: WF_NAV_WAIT_MS },
+        });
       }
     }
 
@@ -851,7 +875,7 @@ async function driveWorkflow(tabId) {
       try {
         const curTab = (await waitForTab(tabId, (x) => x.status === 'complete', WF_LOAD_WAIT_MS)) || (await getTab(tabId)) || tab;
         if (!curTab?.active) {
-          return stop('failed', t('sw.wf.failed', { n, error: t('sw.err.captureTabNotActive') }));
+          return stop('failed', t('sw.wf.failed', { n, error: t('sw.err.captureTabNotActive') }), { stage: 'check', detail: { goal, tabActive: false } });
         }
         await ensureContentAndSend(tabId, { type: 'PREPARE_VISUAL_CHECK' });
         let shot;
@@ -868,10 +892,16 @@ async function driveWorkflow(tabId) {
         });
         if (!vRes.passed) {
           const pct = `${Math.round((vRes.probability || 0) * 100)}%`;
-          return stop('failed', t('sw.wf.failed', { n, error: t('sw.wf.checkVisual', { goal, pct, model: vRes.model || '' }) }));
+          return stop('failed', t('sw.wf.failed', { n, error: t('sw.wf.checkVisual', { goal, pct, model: vRes.model || '' }) }), {
+            stage: 'check',
+            detail: { goal, visual: vRes },
+          });
         }
       } catch (e) {
-        return stop('failed', t('sw.wf.failed', { n, error: t('sw.wf.aiError', { error: String(e?.message || e) }) }));
+        return stop('failed', t('sw.wf.failed', { n, error: t('sw.wf.aiError', { error: String(e?.message || e) }) }), {
+          stage: 'ai',
+          detail: { goal, error: String(e?.message || e) },
+        });
       }
     }
 
@@ -928,6 +958,36 @@ async function chooseCandidateWithAI({ settings, step, candidates, reason, url, 
   return callAIChoice({ ai: settings.ai, messages, keys: candidates.map((c) => c.key), t });
 }
 
+// 失敗の生データに載せる手順の要約。入力値(action.value)は載せない。
+function stepDigest(step) {
+  return {
+    id: step.id,
+    verb: step.action?.verb || '',
+    target: step.target || '',
+    url: step.urlPattern || step.url || '',
+    locator: step.locator ? { kind: step.locator.kind, selector: step.locator.anchor?.selector || '', scope: step.locator.scope?.selector || '' } : null,
+    choice: step.choice || null,
+    check: step.check || null,
+  };
+}
+
+// content の RUN_STEP 応答の要約(候補は表示テキストだけ)。
+function contentDigest(r) {
+  if (!r || typeof r !== 'object') return { status: '', raw: String(r) };
+  const out = { status: r.status || '' };
+  for (const k of ['stage', 'error', 'label', 'chosenText', 'detail']) if (r[k]) out[k] = r[k];
+  if (Array.isArray(r.candidates)) out.candidates = r.candidates.map((c) => c.text);
+  return out;
+}
+
+// 候補選択に使う判断AI / LLM と、そのモデル名(生データ用)。
+function choiceEngineOf(settings) {
+  if (isJudgeReady(settings.judge)) return { engine: settings.judge.provider, model: settings.judge.model || '' };
+  const ai = settings.ai || {};
+  const model = ai.provider === 'anthropic' ? ai.anthropicModel : ai.provider === 'gemini' ? ai.geminiModel : ai.model;
+  return { engine: ai.provider || 'openai', model: model || '' };
+}
+
 /**
  * 構造化手順を1つ実行する(dryRun なら対象を示すだけ)。
  * 承認の不変条件: 人間が承認するのは「保留時に示した候補」(heldLabel)。承認後の再実行は AI に問い直さず、
@@ -945,21 +1005,33 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
     dryRun,
     timeoutMs: dryRun ? WF_DRY_TIMEOUT_MS : WF_STEP_TIMEOUT_MS,
   };
-  const send = (extra = {}) => ensureContentAndSend(tabId, { type: 'RUN_STEP', step, options: { ...options, ...extra } });
+  // 失敗時の生データ: content の直近の応答(候補の表示テキストつき)と AI の判断。手順の入力値は載せない。
+  const trace = { responses: [], ai: null };
+  const send = async (extra = {}) => {
+    const r = await ensureContentAndSend(tabId, { type: 'RUN_STEP', step, options: { ...options, ...extra } });
+    trace.responses = [...trace.responses.slice(-2), contentDigest(r)];
+    return r;
+  };
+  const fail = (stage, error) => ({ status: 'failed', stage, error, detail: { ...trace } });
   let res = await send();
   let via = 'rule';
   let aiReason = '';
   let suggestion = null;
   let sentText = ''; // 押す候補のテキスト(保留時の承認の束縛先)
   let sentFrom = []; // その候補を選んだ時の候補一覧(一意性の判定用)
-  const unbindable = (label) => ({ status: 'failed', error: t('sw.wf.unbindable', { label: label || '?' }) });
+  const unbindable = (label) => fail('choose', t('sw.wf.unbindable', { label: label || '?' }));
   const askAI = async (args) => {
     let r;
+    const engine = choiceEngineOf(settings);
+    const t0 = Date.now();
     try {
       r = await chooseCandidateWithAI({ settings, step, url, title, ...args });
     } catch (e) {
-      return { failed: { status: 'failed', error: t('sw.wf.aiError', { error: String(e?.message || e) }) } };
+      const error = String(e?.message || e);
+      trace.ai = { ...engine, reason: args.reason, candidates: args.candidates.map((c) => c.text), error, ms: Date.now() - t0 };
+      return { failed: fail('ai', t('sw.wf.aiError', { error })) };
     }
+    trace.ai = { ...engine, reason: args.reason, candidates: args.candidates.map((c) => c.text), choice: r.choice, key: r.key, why: r.reason, ms: Date.now() - t0 };
     // 判断待ちの間にユーザーが停止していたら(停止→再開始で別の run になった場合も)、何も押さず保留も書かない。
     const now = dryRun ? null : await readWorkflowRun();
     if (now && (!now.active || now.startedAt !== run.startedAt)) return { failed: { status: 'stopped' } };
@@ -981,7 +1053,7 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
     if (approvedLabel) {
       // 承認済み: 人間が見た候補だけを押す(見つからない/複数なら押さずに止める)。
       const hit = uniqueCandidateByText(res.candidates, approvedLabel);
-      if (!hit) return { status: 'failed', error: t('sw.wf.approvedGone', { label: approvedLabel }) };
+      if (!hit) return fail('choose', t('sw.wf.approvedGone', { label: approvedLabel }));
       key = hit.key;
       via = 'approved';
       aiReason = t('sw.wf.approvedReason');
@@ -999,7 +1071,14 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
         const { r, failed } = await askAI({ candidates: pool, reason: pick.status });
         if (failed) return failed;
         if (r.choice === 'hold') return holdForJudge(r, 'choice');
-        if (r.choice === 'none') return { status: 'failed', error: `${t(`sw.wf.pick.${pick.status}`)} ${r.reason}`.trim() };
+        if (r.choice === 'none') {
+          // 条件で選ぶ手順(choice.by==='ai')は「この手順は条件でAIが選びます」では理由にならないので、条件と候補数を示す。
+          const error =
+            pick.status === 'needs-ai'
+              ? t('sw.wf.aiNoMatch', { cond: step.choice?.value || '', count: pool.length, reason: r.reason || '' })
+              : `${t(`sw.wf.pick.${pick.status}`)} ${r.reason}`.trim();
+          return fail('choose', error);
+        }
         key = r.choice;
         via = 'ai';
         aiReason = r.reason;
@@ -1012,7 +1091,7 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
       const { r, failed } = await askAI({ candidates: res.candidates, reason: 'missing' });
       if (failed) return failed;
       if (r.choice === 'hold') return holdForJudge(r, 'anchor');
-      if (r.choice === 'none') return { status: 'failed', error: `${t('sw.wf.pick.missing')} ${r.reason}`.trim() };
+      if (r.choice === 'none') return fail('choose', `${t('sw.wf.pick.missing')} ${r.reason}`.trim());
       key = r.choice;
       via = 'ai';
       aiReason = r.reason;
@@ -1022,7 +1101,10 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
     sentText = res.candidates.find((c) => c.key === key)?.text || '';
     res = await send({ choiceKey: key, token: res.token });
   }
-  if (!res || !res.status) return { status: 'failed', error: t('sw.autorun.failed') };
+  if (!res || !res.status) return fail('resolve', t('sw.wf.noResponse'));
+  // 候補の列挙をやり直しても選び終わらない(描画し直され続ける等)。
+  if (['choose', 'missing', 'stale'].includes(res.status)) return fail('resolve', t('sw.wf.unsettled', { status: res.status }));
+  if (res.status === 'failed') return { ...fail(res.stage || 'act', res.error || t('sw.autorun.failed')), label: res.label, chosenText: res.chosenText };
   if (res.status === 'held') {
     // 承認は保留時に示した候補に束縛する。ルールで選んだ候補も、承認までに一覧が並び替わりうるので同じ扱い。
     // ルールの候補が一意に示せない(候補なし/同じ表記が複数)ときだけ、従来どおり束縛しない。

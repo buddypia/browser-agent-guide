@@ -531,6 +531,83 @@ test.describe('UI quality gates', () => {
     await expectNoAxeViolations(page);
   });
 
+  test('side panel shows why the auto-run stopped, both readable and as raw data, at side-panel width and passes axe', async ({ page }, testInfo) => {
+    const base = { kind: 'action', url: 'https://shop.example/', matchType: 'page', pattern: 'https://shop.example/', text: '' };
+    const failure = {
+      stepId: 's2',
+      n: 2,
+      phase: 'failed',
+      stage: 'choose',
+      text: '■ Stopped at step 2: The AI found no item matching "cheapest banana" among 3 candidates. AI\'s reasoning: the candidates are search suggestions with no prices.',
+      at: '2026-10-18T16:35:35.621Z',
+      detail: {
+        step: { id: 's2', verb: 'click', target: 'banana', locator: { kind: 'pick', selector: '#sac-suggestion-row-1-cell-1 > div', scope: '#sac-autocomplete-results-container' }, choice: { by: 'ai', value: 'cheapest banana' } },
+        tabUrl: 'https://shop.example/',
+        status: 'failed',
+        ai: { engine: 'gemini', model: 'gemini-flash', reason: 'needs-ai', candidates: ['banana', 'banana plug', 'banana stand'], choice: 'none', why: 'the candidates are search suggestions with no prices.', ms: 2400 },
+        responses: [{ status: 'choose', candidates: ['banana', 'banana plug', 'banana stand'] }],
+      },
+    };
+    await installChromeMock(page, {
+      aiAdvisorWorkflow: {
+        recording: false,
+        saved: [],
+        steps: [
+          { ...base, id: 's1', target: 'Search', action: { verb: 'fill', value: 'banana' }, locator: { kind: 'fixed', anchor: { selector: '#q', tag: 'input' } } },
+          {
+            ...base,
+            id: 's2',
+            target: 'banana',
+            action: { verb: 'click', value: '' },
+            locator: { kind: 'pick', anchor: { selector: '#sac-suggestion-row-1-cell-1 > div', tag: 'div', role: 'button', text: 'banana' }, scope: { selector: '#sac-autocomplete-results-container', tag: 'div' }, item: { tag: 'div', classes: [], role: 'row' }, inner: ':scope > div' },
+            choice: { by: 'ai', value: 'cheapest banana' },
+          },
+        ],
+      },
+      aiAdvisorWorkflowRun: { active: false, tabId: 1, doneStepIds: ['s1'], failure },
+    });
+    await page.setViewportSize({ width: 360, height: 900 });
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+    await page.locator('#btn-workspace-workflow').click();
+
+    // 人向け: 段階・どの手順か・理由・次にすること。手順の行も停止した印(!)になる。
+    const box = page.locator('#workflow-failure');
+    await expect(box).toBeVisible();
+    await expect(box).toContainText('⚠ Stopped — No candidate chosen');
+    await expect(box).toContainText('Step 2: In “banana”, click the item matching “cheapest banana”');
+    await expect(box).toContainText('among 3 candidates');
+    await expect(box).toContainText('What to do: Check that the candidates in the raw data');
+    await expect(page.locator('#workflow-steps .wf-num')).toHaveText(['✓', '!']);
+    await expect(page.locator('#workflow-steps .workflow-step').nth(1)).toHaveClass(/is-failed/);
+    await expect(page.locator('#workflow-autorun-state')).toHaveText('Stopped — the reason is shown at the top of the workflow');
+    await box.scrollIntoViewIfNeeded();
+    await box.screenshot({ path: testInfo.outputPath('workflow-failure-box-360.png') });
+
+    // 生データ: 開くと run に残った記録がそのまま JSON で見え、コピーもできる。
+    await box.getByText('Details (raw data)').click();
+    const json = JSON.parse(await box.locator('.wf-fail-json').innerText());
+    expect(json).toEqual(failure);
+    await box.getByRole('button', { name: 'Copy raw data' }).click();
+    await expect(box.getByRole('button', { name: 'Copied' })).toBeVisible();
+    expect(JSON.parse(await page.evaluate(() => window.__bagCopiedText))).toEqual(failure);
+
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    await page.screenshot({ path: testInfo.outputPath('sidepanel-workflow-failure-360.png'), fullPage: true });
+    await expectNoAxeViolations(page);
+  });
+
+  test('side panel hides the stop reason once the run is active again', async ({ page }) => {
+    await installChromeMock(page, {
+      aiAdvisorWorkflow: { recording: false, saved: [], steps: [{ id: 's1', kind: 'action', url: 'https://shop.example/', target: 'Search', action: { verb: 'fill', value: 'x' }, locator: { kind: 'fixed', anchor: { selector: '#q', tag: 'input' } } }] },
+      aiAdvisorWorkflowRun: { active: true, tabId: 1, doneStepIds: [], failure: { stepId: 's1', n: 1, stage: 'page', text: 'old', at: 't' } },
+    });
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+    await page.locator('#btn-workspace-workflow').click();
+    await expect(page.locator('#workflow-failure')).toBeHidden();
+    await expect(page.locator('#workflow-steps .wf-num')).toHaveText(['1']);
+  });
+
   test('side panel copies the current tab ID from the target chip', async ({ page }) => {
     await page.goto(pageUrl('sidepanel/sidepanel.html'));
 

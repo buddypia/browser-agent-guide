@@ -435,8 +435,9 @@ export function createMcpServer(entrySource, { shotUrlFor, latestWindowMs = DEFA
       {
         title: 'ワークフロー実行の状態',
         description:
-          '実行中/直近の自動実行の状態を返す: active・done/total・complete・held(承認待ちの手順番号・種類 confirm|judge・候補の表示名)・last(直近の出来事の種類 phase と時刻)。' +
-          'held がある時は、サイドパネルで承認するようユーザーに伝える。',
+          '実行中/直近の自動実行の状態を返す: active・done/total・complete・held(承認待ちの手順番号・種類 confirm|judge・候補の表示名)・' +
+          'failed(止まった手順番号と段階 stage: page|resolve|choose|ai|act|check|exception)・last(直近の出来事の種類 phase と時刻)。' +
+          'held がある時は、サイドパネルで承認するようユーザーに伝える。failed がある時は、理由と生データがサイドパネルのワークフロー欄に出ていると伝える。',
         inputSchema: {},
       },
       async () => workflowCall({ op: 'status' })
