@@ -82,6 +82,7 @@ English
 | Permission | Type | Justification |
 |------------|------|---------------|
 | `storage` | permissions | Used to save user preferences, model selection, prompt history, and page memory rules locally on the device. |
+| `alarms` | permissions | Used to retry the connection to the optional local page-feedback daemon (127.0.0.1) every 30 seconds while it is enabled but not connected, so a daemon started later is picked up. |
 | `sidePanel` | permissions | Used to display the primary user interface and AI chat guide alongside web content. |
 | `scripting` | permissions | Used to inject the action executor and interactive canvas overlays into active web tabs. |
 | `tabs` | permissions | Used to retrieve the URL and title of the active tab in order to query/apply matching rules. |

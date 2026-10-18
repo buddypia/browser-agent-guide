@@ -29,6 +29,7 @@
   "options_page": "options/options.html",
   "permissions": [
     "storage",
+    "alarms",
     "sidePanel",
     "scripting",
     "tabs",
