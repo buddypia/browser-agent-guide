@@ -4910,7 +4910,7 @@
     const opts = msg.options || {};
     const verb = step.action?.verb;
     const locator = step.locator;
-    if (!verb || !locator?.anchor) return { status: 'failed', error: t('cs.err.stepNotStructured') };
+    if (!verb || !locator?.anchor) return { status: 'failed', stage: 'resolve', error: t('cs.err.stepNotStructured') };
     const timeoutMs = Number(opts.timeoutMs) || 6000;
     const isPick = locator.kind === 'pick';
 
@@ -4932,17 +4932,20 @@
         const list = pickItemsOf(locator);
         return list.length ? list : null;
       }, timeoutMs);
-      if (!items) return { status: 'failed', error: t('cs.err.stepListMissing', { label: step.target || '' }) };
+      if (!items) {
+        const scopeFound = Boolean(locator.scope && resolveAnchor(locator.scope));
+        return { status: 'failed', stage: 'resolve', error: t('cs.err.stepListMissing', { label: step.target || '' }), detail: { scope: locator.scope?.selector || '', scopeFound, item: locator.item } };
+      }
       return { status: 'choose', ...publishCandidates(items.map((item) => ({ el: innerTargetOf(item, locator.inner, locator.anchor?.selector), text: normalizeItemText(item) }))) };
     } else {
       target = await waitUntil(() => resolveAnchor(locator.anchor), timeoutMs);
       if (!target) {
         const items = fallbackCandidatesFor(locator.anchor).map((c) => ({ ...c, fallback: true }));
-        if (!items.length) return { status: 'failed', error: t('cs.err.stepTargetMissing', { label: step.target || '' }) };
+        if (!items.length) return { status: 'failed', stage: 'resolve', error: t('cs.err.stepTargetMissing', { label: step.target || '' }), detail: { selector: locator.anchor.selector || '' } };
         return { status: 'missing', ...publishCandidates(items) };
       }
       if (verb === 'select') {
-        if (target.tagName !== 'SELECT') return { status: 'failed', error: t('cs.err.stepNotSelect') };
+        if (target.tagName !== 'SELECT') return { status: 'failed', stage: 'resolve', error: t('cs.err.stepNotSelect') };
         const opts2 = Array.from(target.options).filter((o) => !o.disabled);
         return {
           status: 'choose',
@@ -4998,20 +5001,20 @@
         }
       } else if (verb === 'fill') {
         fillValue(target, value);
-        if (valueOf(target) !== value) return { status: 'failed', label, error: t('cs.err.stepVerifyValue', { label }) };
+        if (valueOf(target) !== value) return { status: 'failed', stage: 'act', label, error: t('cs.err.stepVerifyValue', { label }) };
       } else if (verb === 'select') {
-        if (!option) return { status: 'failed', label, error: t('cs.err.stepNotSelect') };
+        if (!option) return { status: 'failed', stage: 'act', label, error: t('cs.err.stepNotSelect') };
         target.value = option.value;
         target.dispatchEvent(new Event('input', { bubbles: true }));
         target.dispatchEvent(new Event('change', { bubbles: true }));
-        if (target.value !== option.value) return { status: 'failed', label, error: t('cs.err.stepVerifyValue', { label }) };
+        if (target.value !== option.value) return { status: 'failed', stage: 'act', label, error: t('cs.err.stepVerifyValue', { label }) };
       } else if (verb === 'check') {
         const want = value !== 'off';
         if (Boolean(target.checked) !== want) target.click();
-        if (Boolean(target.checked) !== want) return { status: 'failed', label, error: t('cs.err.stepVerifyValue', { label }) };
+        if (Boolean(target.checked) !== want) return { status: 'failed', stage: 'act', label, error: t('cs.err.stepVerifyValue', { label }) };
       }
     } catch (e) {
-      return { status: 'failed', label, error: String(e?.message || e) };
+      return { status: 'failed', stage: 'act', label, error: String(e?.message || e) };
     } finally {
       runnerActing = false;
     }
@@ -5020,7 +5023,7 @@
     const check = step.check || {};
     if (check.type === 'text' && check.value) {
       const okText = await waitUntil(() => (document.body?.innerText || '').includes(check.value), timeoutMs);
-      if (!okText) return { status: 'failed', label, chosenText, error: t('cs.err.stepCheckText', { text: check.value }) };
+      if (!okText) return { status: 'failed', stage: 'check', label, chosenText, error: t('cs.err.stepCheckText', { text: check.value }) };
     } else if (check.type === 'appears' && check.value) {
       const okEl = await waitUntil(() => {
         try {
@@ -5029,7 +5032,7 @@
           return null;
         }
       }, timeoutMs);
-      if (!okEl) return { status: 'failed', label, chosenText, error: t('cs.err.stepCheckAppears', { selector: check.value }) };
+      if (!okEl) return { status: 'failed', stage: 'check', label, chosenText, error: t('cs.err.stepCheckAppears', { selector: check.value }) };
     }
     return { status: 'ok', label, chosenText, anchor: anchorOut };
   }

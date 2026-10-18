@@ -16,6 +16,7 @@ Invariants:
 2. An approval authorizes only the candidate the human was shown (`heldLabel` → `approvedLabel` → content `expectText`), never a re-asked AI pick.
 3. Neither typed step values nor live field values go to the judge/LLM chooser. For `check.type:'visual'`, `PREPARE_VISUAL_CHECK` masks live `input`/`textarea`/`contenteditable` text before `captureVisibleTab`, and refuses to shoot when the target tab is not active.
 4. A judge error or malformed answer fails the step — never read it as "no match".
+5. Every stop that is a failure (`failed`/`mismatch`) writes `run.failure` `{stepId, n, stage, text, detail}` through `driveWorkflow`'s `stop` — `text` for people, `detail` the raw trace (content responses, AI engine/candidates/verdict) without typed values. The side panel renders it from storage; chat notices alone vanish on reload.
 
 ## Judge client
 
@@ -23,4 +24,4 @@ Invariants:
 
 ## Workflow MCP tools
 
-`list_workflows`/`run_workflow`/`get_workflow_run`/`stop_workflow` (`daemon/src/server.js`, over WS `workflow` `{op}`). There is deliberately no approve tool — confirm steps and judge holds wait for a person in the side panel. `run` always opens the start page in a new tab and refuses — before opening anything — while a run is active/held, while recording, when the side panel has unsaved working steps, or when vars are missing. Status returns only progress, the held step and the last event's phase, never typed values or step texts.
+`list_workflows`/`run_workflow`/`get_workflow_run`/`stop_workflow` (`daemon/src/server.js`, over WS `workflow` `{op}`). There is deliberately no approve tool — confirm steps and judge holds wait for a person in the side panel. `run` always opens the start page in a new tab and refuses — before opening anything — while a run is active/held, while recording, when the side panel has unsaved working steps, or when vars are missing. Status returns only progress, the held step, the failed step number + closed `stage` and the last event's phase, never typed values or step texts.

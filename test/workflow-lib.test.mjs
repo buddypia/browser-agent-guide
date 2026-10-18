@@ -138,8 +138,15 @@ const ok = (name) => {
   assert.equal(RUN_KEY, 'aiAdvisorWorkflowRun');
   assert.deepEqual(normalizeRun(null), {
     active: false, doneStepIds: [], tabId: null, navCount: 0, startedAt: '', vars: {}, heldStepId: '', approvedStepId: '',
-    heldKind: '', judgeApprovedStepId: '', heldLabel: '', approvedLabel: '',
+    heldKind: '', judgeApprovedStepId: '', heldLabel: '', approvedLabel: '', failure: null,
   });
+  // 停止理由: 人向けの文面と生データを持ち、段階は閉じた集合に丸める。文面の無い記録は捨てる。
+  const f = normalizeRun({ failure: { stepId: 's2', n: 2, phase: 'failed', stage: 'choose', text: '手順2で停止', detail: { ai: { choice: 'none' } }, at: 't' } }).failure;
+  assert.deepEqual(f, { stepId: 's2', n: 2, phase: 'failed', stage: 'choose', text: '手順2で停止', detail: { ai: { choice: 'none' } }, at: 't' });
+  assert.equal(normalizeRun({ failure: { text: 'x', stage: 'rm -rf', n: '?' } }).failure.stage, 'exception');
+  assert.equal(normalizeRun({ failure: { text: 'x', n: '?' } }).failure.n, 0);
+  assert.equal(normalizeRun({ failure: { stage: 'choose' } }).failure, null);
+  assert.equal(normalizeRun({ failure: { text: 'x', detail: { big: 'a'.repeat(30000) } } }).failure.detail.truncated, true);
   const r = normalizeRun({ active: true, doneStepIds: ['a', 1, 'b'], tabId: 7, navCount: 3, startedAt: 't' });
   assert.equal(r.active, true);
   assert.deepEqual(r.doneStepIds, ['a', 'b']); // 非文字列は落とす

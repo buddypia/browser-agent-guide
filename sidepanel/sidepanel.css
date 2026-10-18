@@ -1817,6 +1817,41 @@ textarea:focus-visible {
   font-size: 12px;
 }
 .workflow-held[hidden] { display: none; }
+
+/* 自動実行が止まった理由: 人向けの文面 + 生データ(JSON) */
+.workflow-failure {
+  margin: 0 8px 8px;
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--err);
+  border-radius: 8px;
+  background: var(--err-soft);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.workflow-failure[hidden] { display: none; }
+.wf-fail-head { font-weight: 700; color: var(--err); }
+.wf-fail-step { color: var(--muted); word-break: break-word; }
+.wf-fail-text { word-break: break-word; }
+.wf-fail-next { font-size: 11px; word-break: break-word; }
+.wf-fail-raw summary { cursor: pointer; font-size: 11px; color: var(--muted); }
+.wf-fail-json {
+  max-height: 240px;
+  overflow: auto;
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  font: 10.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.wf-fail-actions { display: flex; gap: 6px; }
+.workflow-step.is-failed { border-color: var(--err); }
+.workflow-step.is-failed .wf-num { background: var(--err); }
 .workflow-held-text { flex: 1 1 160px; }
 .workflow-approve-btn {
   min-height: 30px;
