@@ -24,6 +24,24 @@ function oneLine(value) {
   return String(value).replace(/[\r\n]+/g, ' ').trim();
 }
 
+// mise/asdf の <data>/installs/node(js)/<ver>/bin/node(nvm は versions/node/<ver>)。
+const VERSIONED_NODE = /^(.+)\/(?:installs|versions)\/node(?:js)?\/[^/]+\/bin\/node$/;
+
+/**
+ * ユニットに書く node のパスを選ぶ。バージョン管理ツールの実体パスは node を上げると消え、
+ * ユニットが起動しなくなる(旧 plist は削除済みの 22.22.1 を指していた)。<data>/shims/node が
+ * あればそれを使う(起動時にその時点のバージョンを解決する)。無ければ実体パスのまま pinned=true。
+ * @param {string} nodePath process.execPath
+ * @param {(p: string) => boolean} exists
+ * @returns {{ nodePath: string, pinned: boolean }}
+ */
+export function stableNodePath(nodePath, exists) {
+  const m = VERSIONED_NODE.exec(String(nodePath || ''));
+  if (!m) return { nodePath, pinned: false };
+  const shim = `${m[1]}/shims/node`;
+  return exists(shim) ? { nodePath: shim, pinned: false } : { nodePath, pinned: true };
+}
+
 /**
  * 共通設定を正規化する。platform 依存の既定パスを与える。
  * @param {{ platform?: string, nodePath: string, scriptPath: string, args?: string[], env?: Record<string,string>, home?: string }} opts
