@@ -45,7 +45,7 @@ Daemon: `cd daemon && npm test`. Runners, single tests and live checks: the test
 - **GitHub Flow** — never commit straight to `main`; work in your own worktree (`make wt.new`), never in another session's.
 - **Commit messages in English**, imperative mood; subject ≤ ~72 chars, body explains the *why* when non-trivial.
 - **Default shipping = `make -C <worktree> ship`** (all CLIs). On `AUTO_SHIP NEEDS_HUMAN`, report the PR URL + reasons and use the manual flow in the ship-flow skill (Pre-Ship panel + human confirmation before `gh pr merge`). Never loosen its thresholds or protected list.
-- **After any merge, clean up the worktree and branches** (`scripts/agent-worktree-guard/agent-worktree-guard cleanup --confirmed` from the main checkout) before reporting completion.
+- **After any merge, clean up the worktree and branches** before reporting completion: after `gh pr merge` or a GitHub Web merge, run `make -C <worktree> ship` again — it detects the merged PR and only cleans up.
 - **Start Claude Code at the repo root** — `.claude/settings.json` hooks load only from the launch directory.
 
 ## Harness budget

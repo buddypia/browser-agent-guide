@@ -32,6 +32,7 @@ Goes through `gh` directly:
 2. After the human agrees to a PR, run `agent-worktree-guard confirm-pr --confirmed`, then `gh pr create`.
 3. Before `gh pr merge` (irreversible), present the 7-section Pre-Ship Human Review Panel, get explicit user confirmation, and run `node .claude/scripts/mark-pre-ship-confirmed.mjs <branch> --quality <agent_go|self_review_pass|trivial_skip>` as a separate command; `pre-ship-review-guard` blocks the merge until that marker is fresh (10 min) and its deny message lists the panel sections.
 4. Run `gh pr merge` from the worktree **without `--delete-branch`/`-d`** (gh would fail its local `main` checkout yet exit 0 — verify with `gh pr view <n> --json state`; `merge-guard.mjs` denies the flag).
+5. Right after the merge, run `make -C <wt> ship` again. It finds the merged PR for this HEAD, skips tests and review, and only cleans up (below). The merge is not finished until it prints `AUTO_SHIP MERGED: … (worktree cleaned up)`.
 
 The guard CLI is the wrapper `scripts/agent-worktree-guard/agent-worktree-guard` (`confirm-pr`/`mark-merged`/`cleanup`/`status`); `.claude/hooks/agent-worktree-guard.mjs` only dispatches hooks. Background: `docs/retros/` (`orphaned-ship-gate`, `ledger-entry-orphaned-from-resource-lifecycle`, `gh-pr-merge-delete-branch-from-worktree`).
 
@@ -42,9 +43,9 @@ Run `git fetch origin main && git diff --name-status origin/main...HEAD` and re-
 ## Mandatory post-merge cleanup (all CLIs)
 
 When a PR is merged — through `make ship`, manual `gh pr merge`, or GitHub Web review — clean up the worktree and branches before reporting completion or ending the session:
-1. **Primary path**: for worktrees tracked by the guard, run `scripts/agent-worktree-guard/agent-worktree-guard cleanup --confirmed` from the main checkout. It removes the worktree, force-deletes the merged local branch (`git branch -D`), removes the remote branch and branch-specific stashes, and reconciles ledger entries whose directory is already gone.
-2. **Unregistered worktree fallback**: if the worktree was created outside the guard ledger, ensure the PR is merged, then `agent-worktree-guard register <path>` → `mark-merged <path>` → `cleanup --confirmed` (raw `git worktree remove` is blocked by the guard hook).
-3. **Verification**: sync main (`git pull --ff-only origin main`) and verify with `git branch` (or `make clean.branches`) that no stale feature/fix branches linger.
+1. **Primary path, every merge route**: `make -C <wt> ship`. On the auto path it cleans up after its own merge. After a manual or GitHub Web merge, re-running it finds the merged PR whose head is this HEAD (`gh pr list --state merged`; a squash merge still looks "ahead" of main to git) and runs `mark-merged` → `cleanup --confirmed` → main fast-forward. A failed cleanup is `AUTO_SHIP FAILED: … is merged, but cleanup failed`: fix it and re-run, never report the merge as done.
+2. **By hand** (when `make ship` cannot run): for worktrees tracked by the guard, run `scripts/agent-worktree-guard/agent-worktree-guard cleanup --confirmed` from the main checkout. It removes the worktree, force-deletes the merged local branch (`git branch -D`), removes the remote branch and branch-specific stashes, and reconciles ledger entries whose directory is already gone. If the worktree was created outside the guard ledger, ensure the PR is merged, then `agent-worktree-guard register <path>` → `mark-merged <path>` → `cleanup --confirmed` (raw `git worktree remove` is blocked by the guard hook).
+3. **Verification**: sync main (`git pull --ff-only origin main`) and verify with `git branch` and `git worktree list` (or `make clean.branches`) that no stale worktrees or feature/fix branches linger.
 
 Reporting a successful merge while leaving the local branch behind is prohibited.
 

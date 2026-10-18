@@ -3,6 +3,7 @@
 //
 // Run from inside a finished, fully committed worktree: `make ship` (or `node scripts/auto-ship.mjs`).
 // Large or guardrail-touching changes, a failed review, or any error stop at an open PR for a human.
+// Re-run it after any other merge (`gh pr merge`, GitHub Web): it finds the merged PR for HEAD and only cleans up.
 // --dry-run runs checks + review and prints the decision without pushing.
 //
 // The guard hooks only see `make ship`, not the gh calls inside it, so this script IS the merge gate
@@ -38,6 +39,11 @@ export function decide({ files, lines, review }) {
 export function prTitle(commits, branch) {
   const subjects = commits.split('\n').filter(Boolean);
   return subjects.length ? subjects.at(-1).replace(/^- /, '') : branch;
+}
+
+/** The merged PR whose head is exactly this HEAD. Commits added after the merge are new work: no match. */
+export function mergedPr(prs, head) {
+  return (Array.isArray(prs) ? prs : []).find((p) => p?.headRefOid === head) || null;
 }
 
 export function parseReview(stdout) {
@@ -76,7 +82,13 @@ function main(dryRun) {
   if (sh('git', ['status', '--porcelain'], wt)) stop('FAILED', 'worktree has uncommitted changes; commit first');
   const head = sh('git', ['rev-parse', 'HEAD'], wt);
 
+  const guard = join(mainRoot, 'scripts/agent-worktree-guard/agent-worktree-guard');
+
   sh('git', ['fetch', '-q', 'origin', 'main'], wt);
+  // Merged by hand or on GitHub Web: a squash merge leaves HEAD "ahead" of main, so ask GitHub instead.
+  const merged = mergedPr(JSON.parse(sh('gh', ['pr', 'list', '--head', branch, '--state', 'merged', '--json', 'number,url,headRefOid'], wt)), head);
+  if (merged && dryRun) stop('MERGED', `${merged.url} is already merged (dry run: cleanup skipped)`);
+  if (merged) finish({ wt, mainRoot, branch, guard }, merged);
   const range = 'origin/main...HEAD';
   if (sh('git', ['rev-list', '--count', 'origin/main..HEAD'], wt) === '0') stop('FAILED', 'no commits ahead of origin/main');
   const numstat = sh('git', ['diff', '--numstat', '--no-renames', range], wt).split('\n').filter(Boolean).map((l) => l.split('\t'));
@@ -116,7 +128,6 @@ ${diff}
   if (dryRun) stop(reasons.length ? 'NEEDS_HUMAN' : 'WOULD_MERGE', reasons.join('; ') || 'all gates passed');
 
   // Push + PR (reuse only an OPEN PR for this branch).
-  const guard = join(mainRoot, 'scripts/agent-worktree-guard/agent-worktree-guard');
   spawnSync(guard, ['mark-done', wt, '--reason', 'push'], { cwd: wt, stdio: 'ignore' });
   if (!run('git', ['push', '-u', 'origin', 'HEAD'], wt)) stop('FAILED', 'git push failed');
   const openPr = () => JSON.parse(sh('gh', ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number,url'], wt))[0];
@@ -127,9 +138,15 @@ ${diff}
   }
   if (reasons.length) stop('NEEDS_HUMAN', `${pr.url} — ${reasons.join('; ')}`);
 
-  // Merge (no --delete-branch: cleanup deletes the remote branch), verify, clean up.
+  // No --delete-branch: cleanup deletes the remote branch.
   // --match-head-commit: refuse if the branch moved after the tested/reviewed HEAD.
   run('gh', ['pr', 'merge', String(pr.number), '--squash', '--match-head-commit', head], wt);
+  finish({ wt, mainRoot, branch, guard }, pr);
+}
+
+// Verify the merge, then remove the worktree and its branches and fast-forward main.
+// A merge without cleanup is not done, so a failed cleanup is FAILED rather than MERGED.
+function finish({ wt, mainRoot, branch, guard }, pr) {
   if (JSON.parse(sh('gh', ['pr', 'view', String(pr.number), '--json', 'state'], wt)).state !== 'MERGED') stop('FAILED', `merge did not complete: ${pr.url}`);
   const registered = existsSync(join(wt, '.tmp/.agent_worktree_owner.json'));
   let cleaned = false;
@@ -161,7 +178,8 @@ ${diff}
     spawnSync('git', ['pull', '--ff-only', '-q', 'origin', 'main'], { cwd: mainRoot, stdio: 'ignore' });
   }
   const failHint = registered ? 'run agent-worktree-guard cleanup --confirmed' : 'clean up worktree and branch manually';
-  stop('MERGED', `${pr.url}${cleaned ? ' (worktree cleaned up)' : ` (cleanup failed; ${failHint})`}`);
+  if (!cleaned) stop('FAILED', `${pr.url} is merged, but cleanup failed; ${failHint}`);
+  stop('MERGED', `${pr.url} (worktree cleaned up)`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
