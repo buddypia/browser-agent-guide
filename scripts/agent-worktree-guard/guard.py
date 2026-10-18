@@ -1377,7 +1377,10 @@ def gh_pr_target(command: str, action: str) -> str | None:
 def github_pr_state(pr: str | None, cwd: Path) -> str:
     """GitHub が答える PR の state (MERGED / OPEN / CLOSED)。確かめられなければ空文字。"""
     gh = os.environ.get("AGENT_WORKTREE_GUARD_GH") or "gh"
-    cmd = [gh, "pr", "view", *([pr] if pr else []), "--json", "state", "--jq", ".state"]
+    # gh_pr_target は値付きフラグの値(--match-head-commit <sha> 等)を拾いうる。番号/URL 以外は渡さず、
+    # worktree のブランチから gh に PR を引かせる。
+    ref = [pr] if pr and (pr.isdigit() or "://" in pr) else []
+    cmd = [gh, "pr", "view", *ref, "--json", "state", "--jq", ".state"]
     try:
         result = subprocess.run(cmd, cwd=str(cwd), text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30, check=False)
     except (OSError, subprocess.SubprocessError):
