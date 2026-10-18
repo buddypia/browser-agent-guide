@@ -39,8 +39,16 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         (self.repo / "README.md").write_text("test\n", encoding="utf-8")
         subprocess.run(["git", "add", "README.md"], cwd=self.repo, check=True)
         subprocess.run(["git", "commit", "-m", "initial"], cwd=self.repo, check=True, stdout=subprocess.PIPE)
+        # The post-tool hook asks GitHub whether a merge really happened; this stand-in answers from a file.
+        self.gh_state = self.tmp / "gh-state"
+        self.gh_state.write_text("MERGED\n", encoding="utf-8")
+        fake_gh = self.tmp / "fake-gh"
+        fake_gh.write_text(f"#!/bin/sh\ncat '{self.gh_state}'\n", encoding="utf-8")
+        fake_gh.chmod(0o755)
+        os.environ["AGENT_WORKTREE_GUARD_GH"] = str(fake_gh)
 
     def tearDown(self) -> None:
+        os.environ.pop("AGENT_WORKTREE_GUARD_GH", None)
         shutil.rmtree(self.tmp)
 
     def test_lifecycle_and_hooks(self) -> None:
@@ -139,6 +147,17 @@ class AgentWorktreeGuardTest(unittest.TestCase):
                 "tool_response": {"exit_code": 0},
             }
         )
+        # exit 0 with the PR still open (a failure hidden behind `| tail`) must not unlock cleanup.
+        self.gh_state.write_text("OPEN\n", encoding="utf-8")
+        unverified = run(["hook", "post-tool"], self.repo, stdin=merge_payload)
+        self.assertIn("NOT recorded as merged", unverified.stdout)
+        ledger = json.loads((self.repo / ".tmp/worktree-guard-ledger/test-session.json").read_text())
+        self.assertFalse(ledger["worktrees"][0].get("pr_merged_at"))
+        blocked_cleanup = run(["cleanup", "--confirmed"], self.repo, check=False)
+        self.assertNotEqual(blocked_cleanup.returncode, 0)
+        self.assertTrue(wt.exists())
+
+        self.gh_state.write_text("MERGED\n", encoding="utf-8")
         merged = run(["hook", "post-tool"], self.repo, stdin=merge_payload)
         self.assertIn("Cleanup is now mandatory", merged.stdout)
         ledger = json.loads((self.repo / ".tmp/worktree-guard-ledger/test-session.json").read_text())

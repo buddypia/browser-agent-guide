@@ -1374,6 +1374,31 @@ def gh_pr_target(command: str, action: str) -> str | None:
     return None
 
 
+def github_pr_state(pr: str | None, cwd: Path) -> str:
+    """GitHub が答える PR の state (MERGED / OPEN / CLOSED)。確かめられなければ空文字。"""
+    gh = os.environ.get("AGENT_WORKTREE_GUARD_GH") or "gh"
+    # gh_pr_target は値付きフラグの値(--match-head-commit <sha> 等)を拾いうる。番号/URL 以外は渡さず、
+    # worktree のブランチから gh に PR を引かせる。
+    ref = [pr] if pr and (pr.isdigit() or "://" in pr) else []
+    cmd = [gh, "pr", "view", *ref, "--json", "state", "--jq", ".state"]
+    try:
+        result = subprocess.run(cmd, cwd=str(cwd), text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def build_merge_unverified_message(item: dict[str, Any], pr: str | None, state: str) -> str:
+    target = f"#{pr}" if pr else f"for {item.get('branch')}"
+    return "\n".join(
+        [
+            f"[agent-worktree-guard] The merge command exited 0, but GitHub reports PR {target} as "
+            f"{state or 'unknown (gh pr view failed)'}. It is NOT recorded as merged, so cleanup stays blocked.",
+            "Check `gh pr view <n> --json state`, then retry the merge. Once it is MERGED, re-run `make -C <worktree> ship` to clean up.",
+        ]
+    )
+
+
 def worktree_create_branch(command: str) -> str | None:
     for tokens in shell_segments(command):
         for token in tokens:
@@ -1578,7 +1603,13 @@ def hook_post_tool(args: argparse.Namespace) -> int:
         if item:
             verify_owner_marker(item, session_id, root)
             if reason == "merge":
-                mark_item_merged(ledger, item, source="hook", pr=gh_pr_target(command, "merge"))
+                # exit 0 だけでは merge 済みと言えない(`| tail` で失敗が隠れる、--auto は予約だけ)。cleanup は
+                # この記録だけを見て worktree とブランチを消すので、GitHub が MERGED と答えた時だけ記録する。
+                pr = gh_pr_target(command, "merge")
+                state = github_pr_state(pr, Path(str(item["path"])))
+                if state != "MERGED":
+                    return hook_json(hook_block(build_merge_unverified_message(item, pr, state)))
+                mark_item_merged(ledger, item, source="hook", pr=pr)
             else:
                 item["done"] = True
                 item["status"] = "done"
