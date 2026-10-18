@@ -365,6 +365,26 @@ test.describe('Milestone 2 Integration', () => {
     await tab.close();
   });
 
+  test('a6. An alarm reconnects to the daemon even when the 5-second retry timer is gone', async () => {
+    const sw = await getServiceWorker(context);
+    await expect.poll(() => daemonWss.getBridgeStatus().connected).toBe(true);
+    const alarm = await sw.evaluate(() => chrome.alarms.get('bag-daemon-reconnect'));
+    expect(alarm?.periodInMinutes).toBe(0.5);
+
+    // The retry timer dies with the SW while the daemon is down; here the alarm has to beat its 5 seconds.
+    const before = daemonWss.getBridgeStatus().lastConnectedAt;
+    for (const client of daemonWss.clients) client.terminate();
+    await expect.poll(() => daemonWss.getBridgeStatus().connected).toBe(false);
+    // Unpacked extensions may fire alarms sooner than the 30-second minimum.
+    await sw.evaluate(() => chrome.alarms.create('bag-daemon-reconnect', { when: Date.now() + 100 }));
+    await expect
+      .poll(() => daemonWss.getBridgeStatus().lastConnectedAt !== before && daemonWss.getBridgeStatus().connected, { timeout: 3500 })
+      .toBe(true);
+    expect(daemonWss.clients.size).toBe(1);
+    // The one-shot alarm is gone once it fires; the reconnect puts the periodic one back.
+    await expect.poll(() => sw.evaluate(() => chrome.alarms.get('bag-daemon-reconnect').then((a) => a?.periodInMinutes))).toBe(0.5);
+  });
+
   test('b. Action execution and result recovery via the fallback CDP bridge CLI', async () => {
     const sw = await getServiceWorker(context);
     const extId = new URL(sw.url()).hostname;

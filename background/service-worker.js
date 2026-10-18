@@ -1956,7 +1956,21 @@ function stopDaemonPing() {
   daemonPingTimer = null;
 }
 
+// 接続に失敗した試行は SW を生かさないので、daemon が落ちている間に SW が止まると 5 秒の再接続タイマーも
+// 消える(後から daemon を起動しても繋がらない)。daemon 連携が有効な間は alarm で SW を起こして試し直す。
+const DAEMON_RETRY_ALARM = 'bag-daemon-reconnect';
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== DAEMON_RETRY_ALARM) return;
+  if (daemonWs && daemonWs.readyState <= WebSocket.OPEN) return; // CONNECTING / OPEN
+  connectDaemonWebSocket().catch(() => {});
+});
+
+// 起動時・設定変更・再接続・alarm から重なって呼ばれうる。await の後は最後の呼び出しだけが接続する
+// (先の呼び出しも WS を作ると、同じ拡張が daemon に二重に繋がり要求を二度実行する)。
+let daemonConnectSeq = 0;
+
 async function connectDaemonWebSocket() {
+  const seq = ++daemonConnectSeq;
   if (reconnectTimeout) {
     clearTimeout(reconnectTimeout);
     reconnectTimeout = null;
@@ -1972,10 +1986,16 @@ async function connectDaemonWebSocket() {
   }
 
   const settings = await getSettings();
+  if (seq !== daemonConnectSeq) return;
   const daemon = settings.daemon || {};
   if (!daemon.enabled || !daemon.url || !daemon.token) {
+    chrome.alarms.clear(DAEMON_RETRY_ALARM).catch(() => {});
     return;
   }
+  chrome.alarms
+    .get(DAEMON_RETRY_ALARM)
+    .then((a) => a || chrome.alarms.create(DAEMON_RETRY_ALARM, { periodInMinutes: 0.5 }))
+    .catch(() => {});
 
   const wsUrl = `${daemon.url}?token=${encodeURIComponent(daemon.token)}`;
   try {
