@@ -20,7 +20,7 @@ Invariants:
 
 ## Judge client
 
-`lib/judge-client.js` — builds the closed `choice` request (candidate keys + `none`; asks "same target as recorded?", which separates relabeled-same from different far better than "matches intent?") or ranks candidates via `eg2` cosine similarity, parses probabilities/scores into a closed set, and enforces https-only base URL (http only for loopback). Jev and Clef share the request/answer contract; Clef goes to a Worker proxy (`clefEndpoint`) or Workers AI REST (`clefAccountId` must be 32 hex — it lands in the URL path). Unit-tested by `test/judge-client.test.mjs` (no network); opt-in live checks in `scripts/live/` (`scripts/live/README.md`).
+`lib/judge-client.js` — builds the closed `choice` request (candidate keys + `none`; asks "same target as recorded?", which separates relabeled-same from different far better than "matches intent?") or ranks candidates via `eg2` cosine similarity, parses probabilities/scores into a closed set, and enforces https-only base URL (http only for loopback). Each judge is one entry in `JUDGE_PROVIDERS` (`ready` / `choose` / `visual`); `judgeChain` orders `provider` then the optional `fallback`, and the fallback is asked only when the primary cannot answer (error or malformed answer) — a low-confidence or `none` answer is final. Jev and Clef share the request/answer contract; Clef goes to a Worker proxy (`clefEndpoint`) or Workers AI REST (`clefAccountId` must be 32 hex — it lands in the URL path). Unit-tested by `test/judge-client.test.mjs` (no network); opt-in live checks in `scripts/live/` (`scripts/live/README.md`).
 
 ## Workflow MCP tools
 

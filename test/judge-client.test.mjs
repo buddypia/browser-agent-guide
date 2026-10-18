@@ -12,6 +12,7 @@ import {
   callJudgeChoice,
   callJudgeVisualCheck,
   clefRoute,
+  judgeChain,
 } from '../lib/judge-client.js';
 import { DEFAULT_SETTINGS } from '../lib/storage.js';
 import { normalizeRun, normalizeStep } from '../lib/workflow.js';
@@ -289,6 +290,52 @@ async function run() {
     const failingEg2 = async () => ({ ok: false, status: 500, text: async () => 'eg2 down' });
     await assert.rejects(() => callJudgeChoice({ judge, eg2, step: pickStep, candidates, reason: 'none', fetchImpl: failingEg2 }), /eg2/);
     ok('callJudgeChoice supports provider eg2 with confidence/margin gating and secret-free queries');
+  }
+
+  // 主 → 予備: 主が答えられない時だけ予備に聞き、答えた判断AIを provider で返す。低確信は答えなので回さない。
+  {
+    const judge = { ...DEFAULT_JUDGE, provider: 'clef', fallback: 'jev', clefEndpoint: 'https://clef.example.workers.dev', apiKey: 'jev-key' };
+    assert.equal(DEFAULT_JUDGE.fallback, '');
+    assert.deepEqual(judgeChain(judge), ['clef', 'jev']);
+    assert.deepEqual(judgeChain({ ...judge, fallback: 'clef' }), ['clef'], 'a fallback equal to the primary collapses');
+    assert.deepEqual(judgeChain({ ...judge, fallback: 'bogus' }), ['clef']);
+    assert.deepEqual(judgeChain({ ...judge, clefEndpoint: '' }), ['jev'], 'an unconfigured primary is skipped');
+    assert.equal(isJudgeReady({ ...judge, clefEndpoint: '' }), true);
+    assert.deepEqual(judgeChain({ ...judge, provider: 'llm' }), [], 'an LLM primary means no judge');
+
+    const answer = (probabilities) => ({ ok: true, json: async () => ({ model: 'jev-1', answers: { pick: { probabilities } } }) });
+    const down = { ok: false, status: 503, text: async () => 'down' };
+    const isClef = (url) => url.startsWith('https://clef.example.workers.dev');
+    const calls = [];
+    const clefDown = async (url) => {
+      calls.push(url);
+      return isClef(url) ? down : answer({ c0: 0.1, c1: 0.9, none: 0 });
+    };
+    const r = await callJudgeChoice({ judge, step: pickStep, candidates: candidates.slice(0, 2), reason: 'none', fetchImpl: clefDown });
+    assert.deepEqual([r.provider, r.choice, r.confident, r.model], ['jev', 'c1', true, 'jev-1']);
+    assert.deepEqual(calls, ['https://clef.example.workers.dev', 'https://api.typesafe.ai/v1/systemone']);
+
+    calls.length = 0;
+    const unsure = await callJudgeChoice({ judge, step: pickStep, candidates: candidates.slice(0, 2), reason: 'none', fetchImpl: async (url) => {
+      calls.push(url);
+      return answer({ c0: 0.45, c1: 0.5, none: 0.05 });
+    } });
+    assert.deepEqual([unsure.provider, unsure.confident], ['clef', false]);
+    assert.equal(calls.length, 1, 'a low-confidence answer is not passed to the fallback');
+
+    // 契約外の応答も「答えられない」として予備へ。全部だめならそれぞれの理由で例外(該当なしとは読まない)。
+    await assert.rejects(
+      () => callJudgeChoice({ judge, step: pickStep, candidates, reason: 'none', fetchImpl: async (url) =>
+        isClef(url) ? { ok: true, json: async () => ({}) } : { ok: false, status: 401, text: async () => 'no' } }),
+      /Clef: Judge response has no usable probabilities.* \/ Jev: Jev API error 401/
+    );
+    await assert.rejects(() => callJudgeChoice({ judge: { ...judge, provider: 'llm' }, step: pickStep, candidates, reason: 'none' }), /No judge AI/);
+
+    // 視覚確認も同じ順で試し、答えた判断AIを返す。
+    const v = await callJudgeVisualCheck({ judge, imageDataUrl: 'data:image/png;base64,AAAA', goal: '正常表示', fetchImpl: async (url) =>
+      isClef(url) ? down : { ok: true, json: async () => ({ model: 'jev-1', answers: { visual: { probabilities: { pass: 0.9, fail: 0.1 } } } }) } });
+    assert.deepEqual([v.passed, v.provider, v.model], [true, 'jev', 'jev-1']);
+    ok('the judge chain asks the fallback only when the primary cannot answer');
   }
 
   // callJudgeVisualCheck: Jev マルチモーダル と eg2 /v1/evaluate の両方で視覚・UI崩れ判定ができる

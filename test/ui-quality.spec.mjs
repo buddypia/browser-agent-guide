@@ -849,6 +849,7 @@ test.describe('UI quality gates', () => {
     // 既定(LLM)は追加の欄なし。
     await expect(page.locator('#judge-apiKey')).toBeHidden();
     await expect(page.locator('#judge-clefAccountId')).toBeHidden();
+    await expect(page.locator('#judge-fallback')).toBeHidden();
 
     await page.locator('#judge-provider').selectOption('jev');
     await expect(page.getByLabel('Jev APIキー')).toBeVisible();
@@ -864,6 +865,15 @@ test.describe('UI quality gates', () => {
     // 宛先が無いまま接続テストしても外へは送らず、入力を促す。
     await page.locator('#test-judge').click();
     await expect(page.locator('#judge-status')).toContainText('Cloudflare アカウントID');
+
+    // 予備に Jev を選ぶと Jev の欄も出る。主と同じものは予備に選べない。予備は判断AIを使う時だけ。
+    await expect(page.locator('#judge-fallback option[value="clef"]')).toHaveJSProperty('disabled', true);
+    await page.getByLabel('予備の判断AI (エラー時)').selectOption('jev');
+    await expect(page.getByLabel('Jev APIキー')).toBeVisible();
+    await expect(page.getByLabel('Cloudflare アカウントID')).toBeVisible();
+    await page.locator('#test-judge').click();
+    await expect(page.locator('#judge-status')).toContainText('Clef: ');
+    await expect(page.locator('#judge-status')).toContainText('Jev: ');
 
     await page.locator('.card', { has: page.locator('#judge-provider') }).screenshot({ path: testInfo.outputPath('options-judge-clef.png') });
     await expectNoAxeViolations(page);

@@ -18,6 +18,7 @@ code_refs:
   - { path: "background/service-worker.js", symbol: "driveWorkflow" }
   - { path: "background/service-worker.js", symbol: "handleWorkflowRequest" }
   - { path: "lib/judge-client.js", symbol: "callJudgeChoice" }
+  - { path: "lib/judge-client.js", symbol: "judgeChain" }
   - { path: "lib/judge-client.js", symbol: "askClef" }
   - { path: "lib/judge-client.js", symbol: "callJudgeVisualCheck" }
 api_refs: []
@@ -48,6 +49,8 @@ confidence: medium
   を選ばせる(`callAIChoice`。応答が無ければ1回 `AI_CHOICE_TIMEOUT_MS` で打ち切って失敗にする)。AI が補った結果は `suggestion` として残り、人間が採用した時だけ学習される。
   判断AI(`settings.judge.provider:'jev' | 'clef' | 'eg2'`)を設定すると、この候補選択だけを System 1
   (TypeSafe Jev / Cloudflare Clef / ローカル EmbeddingGemma 2) に任せる(`callJudgeChoice`。チャット/verbs 生成は LLM のまま)。
+  3つは同じ形の provider(`JUDGE_PROVIDERS`)で、予備(`settings.judge.fallback`)を選ぶと主が答えられない時(HTTP/通信エラー・契約外の応答)
+  だけ予備に聞く(`judgeChain` の順)。確信度が低い・該当なしは答えなので予備に回さず、全部だめなら全部の理由で失敗する。
   選んだ候補の確信度(Jev / Clef の確率または eg2 のコサイン類似度。Jev と Clef は同じ {state, questions} → probabilities の契約)が `minConfidence` 以上なら進んで
   確信度つきの `suggestion` を残し(理由の文には選んだ判断AIの名前 Jev / Clef / eg2 を入れる)、未満なら最有力を `suggestion.pending` に残して `heldKind:'judge'` で保留する。
   記録要素が無い時の差し替え(候補がページ全体)は確信度に関わらず保留する。判断の承認は
