@@ -92,6 +92,21 @@ export const HOOK_REGISTRY = {
       ],
     },
   ],
+  PostToolUse: [
+    {
+      matcher: 'Edit|Write|MultiEdit',
+      hooks: [
+        {
+          id: 'post-edit-invariants',
+          module: './post-edit-invariants.mjs',
+          priority: 10,
+          profile: 'standard',
+          orchestrated: false,
+          timeout: 10,
+        },
+      ],
+    },
+  ],
   Stop: [
     {
       matcher: '',

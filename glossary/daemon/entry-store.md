@@ -10,7 +10,7 @@ progress:
   state: shipped
   tracking: ""
 source_refs:
-  - { type: spec, path: "AGENTS.md", anchor: "daemon-architecture" }
+  - { type: spec, path: ".agents/skills/daemon-mcp/SKILL.md", anchor: "daemon-architecture" }
   - { type: doc, path: "daemon/README.md" }
 code_refs:
   - { path: "daemon/src/store.js", symbol: "normalizeStorageMode" }

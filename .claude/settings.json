@@ -80,6 +80,17 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/post-edit-invariants.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Post-Edit Invariants: harness / sync-pair / hook-ref checks"
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {

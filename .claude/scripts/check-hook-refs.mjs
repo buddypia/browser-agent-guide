@@ -23,7 +23,7 @@
  *
  * Exit 0 = OK · 1 = dangling reference(s) found.
  */
-import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, readdirSync, realpathSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -98,7 +98,9 @@ export function collectProblems(scanDirs, repoRoot) {
   return problems;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// realpath: a symlinked, space-containing or non-ASCII path made the old `file://${argv[1]}` compare
+// fail, so the lint skipped main and exited 0 — fail-open, the very thing it exists to catch.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const problems = collectProblems([join(CLAUDE_DIR, 'hooks'), join(CLAUDE_DIR, 'scripts')], REPO_ROOT);
   if (problems.length) {
     console.error(
