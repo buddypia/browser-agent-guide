@@ -34,7 +34,7 @@ import {
 } from '../lib/workflow.js';
 import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18n.js';
 import { matchAffordanceFastPath, resolveFastPathAction } from '../lib/eg2-client.js';
-import { isJudgeReady, callJudgeChoice, callJudgeVisualCheck } from '../lib/judge-client.js';
+import { judgeChain, judgeName, callJudgeChoice, callJudgeVisualCheck } from '../lib/judge-client.js';
 
 // ---- 設定ブロブのメモリキャッシュ ----
 // 1メッセージ処理で getSettings が複数回(例: handleMessage 冒頭の ensureI18n と
@@ -936,22 +936,21 @@ function uniqueCandidateByText(candidates, text) {
   return hits.length === 1 ? hits[0] : null;
 }
 
-// 理由の文に出す判断AIの名前(provider ごと)。
-const JUDGE_NAMES = { jev: 'Jev', clef: 'Clef', eg2: 'eg2' };
-
 // AI に候補キーを1つ選ばせる(閉じた選択)。判断AI(Jev / Clef / eg2)が設定済みならそれを使い、確信度で
 // 「選んで進む / 人間に確認する(choice:'hold', key=最有力)」を分ける。未設定なら従来どおり LLM。
+// 主の判断AIが答えられなければ予備が答える。理由の文には実際に答えた判断AIの名前を入れる。
 // 記録した要素が無い(missing)時の差し替えはページ全体から候補を拾うので、確信度に関わらず確認に回す。
 async function chooseCandidateWithAI({ settings, step, candidates, reason, url, title }) {
-  if (isJudgeReady(settings.judge)) {
+  if (judgeChain(settings.judge).length) {
     const r = await callJudgeChoice({ judge: settings.judge, eg2: settings.eg2, step, candidates, reason, url, title });
     const pct = (p) => `${Math.round(p * 100)}%`;
     const model = r.model || settings.judge.model;
-    const judge = JUDGE_NAMES[settings.judge.provider] || 'Jev';
-    if (!r.best || (r.confident && r.choice === 'none')) return { choice: 'none', reason: t('sw.wf.judgeNone', { judge, pct: pct(r.probability), model }) };
-    if (r.confident && reason !== 'missing') return { choice: r.choice, reason: t('sw.wf.judgeReason', { judge, pct: pct(r.probability), model }) };
+    const judge = judgeName(r.provider);
+    const by = { engine: r.provider, model };
+    if (!r.best || (r.confident && r.choice === 'none')) return { choice: 'none', reason: t('sw.wf.judgeNone', { judge, pct: pct(r.probability), model }), by };
+    if (r.confident && reason !== 'missing') return { choice: r.choice, reason: t('sw.wf.judgeReason', { judge, pct: pct(r.probability), model }), by };
     const why = reason === 'missing' ? 'sw.wf.judgeMissing' : 'sw.wf.judgeUnsure';
-    return { choice: 'hold', key: r.best, reason: t(why, { judge, pct: pct(r.bestProbability), model }) };
+    return { choice: 'hold', key: r.best, reason: t(why, { judge, pct: pct(r.bestProbability), model }), by };
   }
   if (!settings.ai.apiKey) return { choice: 'none', reason: t('sw.wf.noKeyForChoice') };
   const messages = buildChoiceMessages({ step, candidates, reason, url, title });
@@ -980,9 +979,10 @@ function contentDigest(r) {
   return out;
 }
 
-// 候補選択に使う判断AI / LLM と、そのモデル名(生データ用)。
+// 候補選択に使う判断AI(主→予備の順。例 'clef→jev') / LLM と、そのモデル名(生データ用)。
 function choiceEngineOf(settings) {
-  if (isJudgeReady(settings.judge)) return { engine: settings.judge.provider, model: settings.judge.model || '' };
+  const chain = judgeChain(settings.judge);
+  if (chain.length) return { engine: chain.join('→'), model: settings.judge.model || '' };
   const ai = settings.ai || {};
   const model = ai.provider === 'anthropic' ? ai.anthropicModel : ai.provider === 'gemini' ? ai.geminiModel : ai.model;
   return { engine: ai.provider || 'openai', model: model || '' };
@@ -1031,7 +1031,7 @@ async function runStructuredStep(tabId, rawStep, run, settings, { title = '', ur
       trace.ai = { ...engine, reason: args.reason, candidates: args.candidates.map((c) => c.text), error, ms: Date.now() - t0 };
       return { failed: fail('ai', t('sw.wf.aiError', { error })) };
     }
-    trace.ai = { ...engine, reason: args.reason, candidates: args.candidates.map((c) => c.text), choice: r.choice, key: r.key, why: r.reason, ms: Date.now() - t0 };
+    trace.ai = { ...engine, ...r.by, reason: args.reason, candidates: args.candidates.map((c) => c.text), choice: r.choice, key: r.key, why: r.reason, ms: Date.now() - t0 };
     // 判断待ちの間にユーザーが停止していたら(停止→再開始で別の run になった場合も)、何も押さず保留も書かない。
     const now = dryRun ? null : await readWorkflowRun();
     if (now && (!now.active || now.startedAt !== run.startedAt)) return { failed: { status: 'stopped' } };

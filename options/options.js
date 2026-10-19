@@ -2,7 +2,7 @@
 import { getSettings, saveSettings, DEFAULT_SETTINGS, migrateEg2 } from '../lib/storage.js';
 import { createI18n, resolveLocale, normalizeLocale, languageName } from '../sidepanel/i18n.js';
 import { checkEg2Health, DEFAULT_EG2_URL } from '../lib/eg2-client.js';
-import { askJudge, askClef, clefRoute, CLEF_MODELS } from '../lib/judge-client.js';
+import { askJudge, askClef, clefRoute, CLEF_MODELS, JUDGE_PROVIDER_IDS, judgeName } from '../lib/judge-client.js';
 
 const $ = (id) => document.getElementById(id);
 const SAFE_RECIPE_VERBS = new Set(['injectHtml', 'injectCss', 'injectScript', 'outlineElement', 'injectButton', 'injectPanel']);
@@ -194,11 +194,12 @@ function fillWorkflowForm() {
 }
 
 // ---- 判断AI (Jev / Clef / EmbeddingGemma 2) ----
-const JUDGE_PROVIDERS = ['llm', 'jev', 'clef', 'eg2'];
+const JUDGE_PROVIDERS = ['llm', ...JUDGE_PROVIDER_IDS];
 
 function fillJudgeForm() {
   const j = { ...DEFAULT_SETTINGS.judge, ...(settings.judge || {}) };
   $('judge-provider').value = JUDGE_PROVIDERS.includes(j.provider) ? j.provider : 'llm';
+  $('judge-fallback').value = JUDGE_PROVIDER_IDS.includes(j.fallback) ? j.fallback : '';
   $('judge-apiKey').value = j.apiKey;
   $('judge-model').value = j.model;
   $('judge-clefAccountId').value = j.clefAccountId;
@@ -209,20 +210,28 @@ function fillJudgeForm() {
   toggleJudgeFields();
 }
 
-// 選んだ判断AIの欄だけを見せる(LLM / eg2 は追加の欄なし)。
+// 選んだ判断AI(主と予備)の欄だけを見せる(LLM / eg2 は追加の欄なし)。予備は主が判断AIの時だけ選べ、主と同じものは選べない。
 function toggleJudgeFields() {
   const provider = $('judge-provider').value;
-  for (const el of document.querySelectorAll('[data-judge-for]')) el.hidden = el.dataset.judgeFor !== provider;
+  const fallback = $('judge-fallback');
+  for (const o of fallback.options) o.disabled = o.value === provider;
+  if (fallback.value === provider) fallback.value = '';
+  const active = provider === 'llm' ? [provider] : [provider, fallback.value];
+  for (const el of document.querySelectorAll('[data-judge-for]')) {
+    el.hidden = !el.dataset.judgeFor.split(' ').some((p) => active.includes(p));
+  }
 }
 
 function readJudgeForm() {
   const min = Number.parseFloat($('judge-minConfidence').value);
   const rawProv = $('judge-provider').value;
   const provider = JUDGE_PROVIDERS.includes(rawProv) ? rawProv : 'llm';
+  const rawFallback = $('judge-fallback').value;
   return {
     ...DEFAULT_SETTINGS.judge,
     ...(settings.judge || {}),
     provider,
+    fallback: JUDGE_PROVIDER_IDS.includes(rawFallback) && rawFallback !== provider ? rawFallback : '',
     apiKey: $('judge-apiKey').value.trim(),
     model: $('judge-model').value.trim() || DEFAULT_SETTINGS.judge.model,
     clefAccountId: $('judge-clefAccountId').value.trim(),
@@ -239,33 +248,37 @@ async function saveJudge() {
   setStatus('judge-status', t('opt.status.saved'), true);
 }
 
-// ユーザー操作時のみ接続テストを送る(eg2 選択時はローカル eg2 サーバーのヘルスチェック)。
-async function testJudge() {
-  const judge = readJudgeForm();
-  if (judge.provider === 'eg2') {
+// 判断AIを1つ接続テストする(eg2 はローカル eg2 サーバーのヘルスチェック)。
+async function testOneJudge(id, judge) {
+  if (id === 'eg2') {
     const url = $('eg2-url').value.trim() || settings.eg2?.url || DEFAULT_SETTINGS.eg2.url;
-    setStatus('judge-status', t('opt.eg2.connecting'), true);
     const res = await checkEg2Health({ url });
-    if (res.ok) {
-      setStatus('judge-status', t('opt.eg2.testOk', { status: res.status }), true);
-    } else {
-      setStatus('judge-status', t('opt.eg2.testFailed', { error: res.error || 'unreachable' }), false);
-    }
-    return;
+    return res.ok
+      ? { ok: true, text: t('opt.eg2.testOk', { status: res.status }) }
+      : { ok: false, text: t('opt.eg2.testFailed', { error: res.error || 'unreachable' }) };
   }
-  const clef = judge.provider === 'clef';
+  const clef = id === 'clef';
   if (clef ? !clefRoute(judge)?.url : !judge.apiKey) {
-    setStatus('judge-status', clefRoute(judge)?.error || t(clef ? 'opt.judge.enterClef' : 'opt.judge.enterKey'), false);
-    return;
+    return { ok: false, text: clefRoute(judge)?.error || t(clef ? 'opt.judge.enterClef' : 'opt.judge.enterKey') };
   }
-  setStatus('judge-status', t('opt.eg2.connecting'), true);
   try {
     const body = { state: 'connection test', questions: { pick: { type: 'noul', instructions: 'This is a connection test.' } } };
     const data = clef ? await askClef({ judge, body }) : await askJudge({ judge, body });
-    setStatus('judge-status', t('opt.judge.testOk', { model: data?.model || judge.model }), true);
+    return { ok: true, text: t('opt.judge.testOk', { model: data?.model || judge.model }) };
   } catch (e) {
-    setStatus('judge-status', t('opt.judge.testFailed', { error: e.message }), false);
+    return { ok: false, text: t('opt.judge.testFailed', { error: e.message }) };
   }
+}
+
+// ユーザー操作時のみ接続テストを送る。予備があれば主と予備を順に試し、それぞれの結果を並べる。
+async function testJudge() {
+  const judge = readJudgeForm();
+  const ids = judge.provider === 'llm' ? ['jev'] : [judge.provider, judge.fallback].filter(Boolean);
+  setStatus('judge-status', t('opt.eg2.connecting'), true);
+  const results = [];
+  for (const id of ids) results.push({ id, ...(await testOneJudge(id, judge)) });
+  const text = results.length > 1 ? results.map((r) => `${judgeName(r.id)}: ${r.text}`).join(' / ') : results[0].text;
+  setStatus('judge-status', text, results.every((r) => r.ok));
 }
 
 // ---- AI設定 ----
@@ -582,6 +595,7 @@ function bindEvents() {
   $('save-judge').addEventListener('click', saveJudge);
   $('test-judge').addEventListener('click', testJudge);
   $('judge-provider').addEventListener('change', toggleJudgeFields);
+  $('judge-fallback').addEventListener('change', toggleJudgeFields);
   $('test-eg2').addEventListener('click', testEg2);
   $('add-rule').addEventListener('click', addRule);
   $('recipe-site').addEventListener('change', loadRecipeJson);

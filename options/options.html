@@ -139,12 +139,21 @@
               <option value="eg2" data-i18n="opt.judge.providerEg2">EmbeddingGemma 2 (ローカル)</option>
             </select>
           </label>
+          <label data-judge-for="jev clef eg2">
+            <span data-i18n="opt.judge.fallback">予備の判断AI (エラー時)</span>
+            <select id="judge-fallback">
+              <option value="" data-i18n="opt.judge.fallbackNone">なし</option>
+              <option value="jev">TypeSafe Jev</option>
+              <option value="clef">Cloudflare Clef</option>
+              <option value="eg2" data-i18n="opt.judge.providerEg2">EmbeddingGemma 2 (ローカル)</option>
+            </select>
+          </label>
           <label data-judge-for="jev">
             <span data-i18n="opt.judge.apiKey">Jev APIキー</span>
             <input id="judge-apiKey" type="password" placeholder="APIキー / ローカルにのみ保存" data-i18n-placeholder="opt.ai.apiKeyPlaceholder" autocomplete="off" />
           </label>
           <label data-judge-for="jev">
-            <span data-i18n="opt.judge.model">モデル</span>
+            <span data-i18n="opt.judge.jevModel">Jev モデル</span>
             <input id="judge-model" type="text" placeholder="jev-latest" />
           </label>
           <label data-judge-for="clef">
@@ -160,7 +169,7 @@
             <input id="judge-clefEndpoint" type="text" placeholder="https://clef-proxy.example.workers.dev" autocomplete="off" spellcheck="false" />
           </label>
           <label data-judge-for="clef">
-            <span data-i18n="opt.judge.model">モデル</span>
+            <span data-i18n="opt.judge.clefModel">Clef モデル</span>
             <select id="judge-clefModel">
               <option value="clef">clef (27B)</option>
               <option value="clef-flash">clef-flash (9B)</option>
@@ -178,6 +187,9 @@
         </div>
         <p class="hint" data-i18n-html="opt.judge.hint">
           確信度以上なら選んで進み、手順に「選んだ項目と確信度」のメモを残します（「次回から固定」で確定）。未満なら手順を保留し、迷った候補をメモに残して「承認して続行」を待ちます。この承認では購入・確定系の保留は解除されません。候補テキスト、記録した手順の説明・対象名・選び方の条件・メモ（入力する値は送りません）、ページのタイトル/URLが選んだ判断AI（Jev: <code>api.typesafe.ai</code> / Clef: Cloudflare Workers AI）に送信されます（eg2 はローカルのみ）。
+        </p>
+        <p class="hint" data-i18n="opt.judge.fallbackHint">
+          予備を選ぶと、主の判断AIがエラーやタイムアウトで答えられなかった時だけ、同じ内容を予備に送って判断させます。確信度が低いだけなら予備には回さず、保留して確認を待ちます。
         </p>
       </section>
 

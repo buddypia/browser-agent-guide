@@ -98,6 +98,10 @@ function startServer(state) {
           const body = JSON.parse(raw);
           state.clefCalls.push({ auth: req.headers.authorization, body });
           res.setHeader('content-type', 'application/json');
+          if (state.clefFail) {
+            res.statusCode = 503;
+            return res.end('{"error":"clef down"}');
+          }
           res.end(JSON.stringify({ ...fakeJev(body, state), model: body.model }));
         });
         return;
@@ -168,7 +172,7 @@ const readStore = (sw, key) => sw.evaluate(async (k) => (await chrome.storage.lo
 
 test.describe('判断AI(Jev / Clef / eg2) E2E (拡張ロード)', () => {
   test.describe.configure({ mode: 'serial' });
-  const state = { variant: 'rec', button: '選ぶ', formLabel: '保存する', jevCalls: [], clefCalls: [], eg2Calls: [], llmCalls: [], prefer: 'Anker', flip: false, fail: false, visualPass: true };
+  const state = { variant: 'rec', button: '選ぶ', formLabel: '保存する', jevCalls: [], clefCalls: [], eg2Calls: [], llmCalls: [], prefer: 'Anker', flip: false, fail: false, clefFail: false, visualPass: true };
   let server;
   let origin;
   let context;
@@ -577,6 +581,66 @@ test.describe('判断AI(Jev / Clef / eg2) E2E (拡張ロード)', () => {
       await page.close();
     } finally {
       await setJudge({ provider: 'jev', apiKey: 'test-key', baseUrl: `${origin}/v1`, model: 'jev-fake', minConfidence: 0.7 });
+    }
+  });
+
+  test('主の Clef が答えられない時は予備の Jev に聞いて完走し、理由と生データに Jev と残す', async () => {
+    const setJudge = (judge) =>
+      sw.evaluate(async (j) => {
+        const k = 'aiAdvisorSettings';
+        const cur = (await chrome.storage.local.get(k))[k] || {};
+        await chrome.storage.local.set({ [k]: { ...cur, judge: j } });
+      }, judge);
+    const jev = { apiKey: 'test-key', baseUrl: `${origin}/v1`, model: 'jev-fake', minConfidence: 0.7 };
+    await setJudge({ ...jev, provider: 'clef', fallback: 'jev', clefEndpoint: `${origin}/clef`, clefModel: 'clef-flash' });
+    state.clefFail = true;
+    try {
+      await setSteps([recorded]);
+      const { page, tabId } = await openList('relabeled');
+      state.clefCalls.length = 0;
+      state.jevCalls.length = 0;
+      expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+      await expect(page.locator('#state')).toHaveText('picked:【新パッケージ】Anker USB-C to USB-C ケーブル (1m)', { timeout: 15_000 });
+      await expect.poll(async () => (await runOf())?.doneStepIds?.length ?? 0).toBe(1);
+      expect(state.clefCalls).toHaveLength(1);
+      expect(state.jevCalls).toHaveLength(1);
+      const sg = (await stepOf()).suggestion;
+      expect(sg.label).toContain('新パッケージ');
+      expect(sg.reason).toContain('Jev');
+      expect(sg.reason).not.toContain('Clef');
+      await page.close();
+    } finally {
+      state.clefFail = false;
+      await setJudge({ ...jev, provider: 'jev' });
+    }
+  });
+
+  test('主も予備も答えられなければ、両方の理由つきで止まる(該当なしとは読まない)', async () => {
+    const setJudge = (judge) =>
+      sw.evaluate(async (j) => {
+        const k = 'aiAdvisorSettings';
+        const cur = (await chrome.storage.local.get(k))[k] || {};
+        await chrome.storage.local.set({ [k]: { ...cur, judge: j } });
+      }, judge);
+    const jev = { apiKey: 'test-key', baseUrl: `${origin}/v1`, model: 'jev-fake', minConfidence: 0.7 };
+    await setJudge({ ...jev, provider: 'clef', fallback: 'jev', clefEndpoint: `${origin}/clef` });
+    state.clefFail = true;
+    state.fail = true;
+    try {
+      await setSteps([recorded]);
+      const { page, tabId } = await openList('relabeled');
+      expect(await sendToSw({ type: 'START_WORKFLOW_AUTORUN', tabId, vars: {} })).toMatchObject({ active: true });
+      await expect.poll(async () => (await runOf())?.active, { timeout: 15_000 }).toBe(false);
+      const run = await runOf();
+      expect(run).toMatchObject({ doneStepIds: [], failure: { stepId: recorded.id, phase: 'failed', stage: 'ai' } });
+      expect(run.failure.detail.ai.engine).toBe('clef→jev');
+      expect(run.failure.detail.ai.error).toMatch(/Clef: Clef API error 503.*Jev: Jev API error 500/);
+      await expect(page.locator('#state')).toHaveText('idle');
+      await page.close();
+    } finally {
+      state.clefFail = false;
+      state.fail = false;
+      await setJudge({ ...jev, provider: 'jev' });
     }
   });
 
