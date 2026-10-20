@@ -34,7 +34,7 @@ import {
 } from '../lib/workflow.js';
 import { resolveLocale, normalizeLocale, DEFAULT_LOCALE } from '../sidepanel/i18n.js';
 import { matchAffordanceFastPath, resolveFastPathAction } from '../lib/eg2-client.js';
-import { judgeChain, judgeName, callJudgeChoice, callJudgeVisualCheck } from '../lib/judge-client.js';
+import { judgeChain, judgeName, callJudgeChoice, callJudgeVisualCheck, JUDGE_IMAGE_MAX_EDGE } from '../lib/judge-client.js';
 
 // ---- 設定ブロブのメモリキャッシュ ----
 // 1メッセージ処理で getSettings が複数回(例: handleMessage 冒頭の ensureI18n と
@@ -868,8 +868,9 @@ async function driveWorkflow(tabId) {
       }
     }
 
-    // 3b) 視覚・画面状態確認(スクリーンショットを撮り System 1 (Jev または eg2) で判定)
+    // 3b) 視覚・画面状態確認(スクリーンショットを撮り System 1 (Jev / Clef / eg2) で判定)
     //     不変条件: 対象タブが読込完了かつアクティブなときだけ撮影し、入力欄の値は透明マスクして送らない。
+    //     撮った画像は長辺 JUDGE_IMAGE_MAX_EDGE に縮めてから送る(Retina の画面幅のままだと Jev が拒否する)。
     if (structured && step.check.type === 'visual' && step.check.value) {
       const goal = applyVars(step.check.value, run.vars);
       try {
@@ -887,7 +888,7 @@ async function driveWorkflow(tabId) {
         const vRes = await callJudgeVisualCheck({
           judge: settings.judge,
           eg2: settings.eg2,
-          imageDataUrl: shot,
+          imageDataUrl: await fitImageForJudge(shot),
           goal,
         });
         if (!vRes.passed) {
@@ -1817,7 +1818,7 @@ async function ensureOffscreen() {
       .createDocument({
         url: OFFSCREEN_URL,
         reasons: ['BLOBS'],
-        justification: 'スクリーンショットへの注釈 burn-in（Canvas 2D 合成）',
+        justification: 'スクリーンショットへの注釈 burn-in（Canvas 2D 合成）と、判断AIへ送る画像の縮小',
       })
       .catch((e) => {
         // 競合で既に作成済みなら無視。それ以外は再送出。
@@ -1828,6 +1829,14 @@ async function ensureOffscreen() {
       });
   }
   await creatingOffscreen;
+}
+
+// 判断AIへ送るスクリーンショットを offscreen で縮める(SW には Canvas が無い)。
+async function fitImageForJudge(dataUrl) {
+  await ensureOffscreen();
+  const res = await sendToOffscreen({ target: 'offscreen', type: 'FIT_IMAGE', payload: { dataUrl, maxEdge: JUDGE_IMAGE_MAX_EDGE } });
+  if (!res?.ok) throw new Error(res?.error ? t(res.error) : t('sw.err.screenshotFailed'));
+  return res.result.dataUrl;
 }
 
 // offscreen へ送る。作成直後のリスナ未登録レースに 1 回だけリトライする。

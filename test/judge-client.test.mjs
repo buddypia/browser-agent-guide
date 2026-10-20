@@ -360,7 +360,28 @@ async function run() {
     assert.equal(vJev.passed, true);
     assert.equal(vJev.provider, 'jev');
     assert.equal(jevReq.headers['TypeSafe-Danger-Zone-Images'], 'true');
-    assert.equal(jevReq.body.assets['<image:page>'].url, 'data:image/png;base64,AAAA');
+    // Jev の asset は data URL ではなく {type, format, data_base64}(prefix 無しの base64)。参照は state に置く。
+    assert.deepEqual(jevReq.body.assets['<image:page>'], { type: 'image', format: 'png', data_base64: 'AAAA' });
+    assert.equal(jevReq.body.state.page_screenshot, '<image:page>');
+    await callJudgeVisualCheck({
+      judge: { ...DEFAULT_JUDGE, provider: 'jev', apiKey: 'k' },
+      imageDataUrl: 'data:image/jpeg;base64,/9j/AA==',
+      goal: '正常表示',
+      fetchImpl: jevFetch,
+    });
+    assert.deepEqual(jevReq.body.assets['<image:page>'], { type: 'image', format: 'jpg', data_base64: '/9j/AA==' });
+    // Jev が受け付けない形式(WebP など)は送らずに失敗させる。
+    jevReq = null;
+    await assert.rejects(
+      () => callJudgeVisualCheck({
+        judge: { ...DEFAULT_JUDGE, provider: 'jev', apiKey: 'k' },
+        imageDataUrl: 'data:image/webp;base64,UklG',
+        goal: '正常表示',
+        fetchImpl: jevFetch,
+      }),
+      /PNG or JPEG/
+    );
+    assert.equal(jevReq, null);
 
     let eg2Req;
     const eg2Fetch = async (url, init) => {
