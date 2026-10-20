@@ -10,16 +10,24 @@
 //      and every trigger line points to a skill that exists.
 //   4. Every script, npm script and make target named in AGENTS.md or a SKILL.md exists.
 //   5. .codex/hooks.json has the shape Codex dispatches, and every hook command's script exists.
+//   6. Every subagent (.claude/agents/<name>.md) has `name: <name>` and a `description:`, and is named in AGENTS.md
+//      or a SKILL.md (harness2 tree.py `_check_subagents`; an agent nobody is told to spawn is dead weight).
+//   7. The harness experience library (scripts/harness-library.mjs; harness2 library.py) is well-formed and its
+//      INDEX is fresh. Run as a CLI, it also applies the ledger gate: a branch that changes the harness must add or
+//      update a library entry naming each changed component.
 // Repo additions: CLAUDE.md stays the single `@AGENTS.md` import (so nothing bypasses the cap), and a
 // skill's `allowed-tools` never pre-approves `Bash(bash *)`/`Bash(sh *)`, `Edit` or `Write`.
 // Run by `npm run check:harness` and, after an edit, by .claude/hooks/post-edit-invariants.mjs.
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ENTRIES_DIR, LIBRARY_DIR, checkLedgerGate, validateLibrary } from './harness-library.mjs';
 
 export const ALWAYS_ON = 'AGENTS.md';
 export const ALWAYS_ON_MAX = 8000;
 export const SKILL_DIR = '.agents/skills';
+export const AGENT_DIR = '.claude/agents';
 export const CODEX_HOOKS = '.codex/hooks.json';
 export const HOOK_FILES = ['.claude/settings.json', CODEX_HOOKS, '.agents/hooks.json'];
 
@@ -34,7 +42,14 @@ export const triggerLine = (name) => `- When <situation>, read ${SKILL_DIR}/${na
 
 /** Whether editing this repo-relative path can change the verdict (the post-edit hook's filter). */
 export function isHarnessPath(rel) {
-  return rel === ALWAYS_ON || rel === 'CLAUDE.md' || rel.startsWith(`${SKILL_DIR}/`) || HOOK_FILES.includes(rel);
+  return (
+    rel === ALWAYS_ON ||
+    rel === 'CLAUDE.md' ||
+    rel.startsWith(`${SKILL_DIR}/`) ||
+    rel.startsWith(`${AGENT_DIR}/`) ||
+    rel.startsWith(`${LIBRARY_DIR}/`) ||
+    HOOK_FILES.includes(rel)
+  );
 }
 
 function read(root, rel) {
@@ -141,6 +156,23 @@ function checkSkills(root, body, ctx, errs) {
   return names;
 }
 
+function checkSubagents(root, body, skills, errs) {
+  const dir = join(root, AGENT_DIR);
+  if (!existsSync(dir)) return [];
+  const named = [body, ...skills.map((s) => read(root, `${SKILL_DIR}/${s}/SKILL.md`) || '')].join('\n');
+  const names = readdirSync(dir).filter((n) => n.endsWith('.md')).map((n) => n.slice(0, -3)).sort();
+  for (const name of names) {
+    const rel = `${AGENT_DIR}/${name}.md`;
+    const fm = frontmatter(read(root, rel) || '');
+    if (/^name:\s*(\S+)\s*$/m.exec(fm)?.[1] !== name) errs.push(`${rel} needs frontmatter \`name: ${name}\` matching its file name`);
+    if (!/^description:\s*\S/m.test(fm)) errs.push(`${rel} needs a \`description:\` in its frontmatter`);
+    if (!named.includes(name)) {
+      errs.push(`subagent "${name}" is never named in ${ALWAYS_ON} or a SKILL.md, so no agent will spawn it; name it where its situation is described`);
+    }
+  }
+  return names;
+}
+
 function hookCommands(node, acc = []) {
   if (Array.isArray(node)) node.forEach((n) => hookCommands(n, acc));
   else if (node && typeof node === 'object') {
@@ -221,8 +253,27 @@ export function validateHarness(root) {
   for (const ref of new Set(body.match(/\.agents\/skills\/[\w-]+\/SKILL\.md/g) || [])) {
     if (!existsSync(join(root, ref))) errs.push(`${ALWAYS_ON} points agents to ${ref}, which does not exist; restore the skill or drop the trigger line`);
   }
+  const agents = checkSubagents(root, body, skills, errs);
   checkHookFiles(root, errs);
-  return { errors: errs, alwaysOnChars: chars, skills };
+  errs.push(...validateLibrary(root));
+  return { errors: errs, alwaysOnChars: chars, skills, agents };
+}
+
+/** The ledger gate on this checkout's branch vs origin/main; skipped (null) when there is no origin/main to diff. */
+export function ledgerGate(root) {
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  let base;
+  try {
+    base = git('merge-base', 'origin/main', 'HEAD').trim();
+  } catch {
+    return null;
+  }
+  const lines = (s) => s.split('\n').filter(Boolean);
+  const changed = [...new Set([...lines(git('diff', '--name-only', base)), ...lines(git('ls-files', '--others', '--exclude-standard'))])];
+  const entries = changed
+    .filter((p) => p.startsWith(`${ENTRIES_DIR}/`) && p.endsWith('.md') && existsSync(join(root, p)))
+    .map((p) => ({ name: p.slice(ENTRIES_DIR.length + 1), src: read(root, p) }));
+  return checkLedgerGate({ changed, entries, messages: git('log', '--format=%B', `${base}..HEAD`) });
 }
 
 // realpath: Node resolves symlinks for the main module, so a plain path compare would skip main (and pass) silently.
@@ -230,6 +281,7 @@ const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPat
 if (isMain) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const { errors, alwaysOnChars, skills } = validateHarness(root);
+  errors.push(...(ledgerGate(root) ?? []));
   if (errors.length) {
     for (const e of errors) console.error(`✗ ${e}`);
     process.exit(1);

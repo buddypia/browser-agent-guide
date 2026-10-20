@@ -58,7 +58,8 @@ describe('check-harness', () => {
   });
 
   test('the CLI still fails when run through a symlinked path', () => {
-    const root = makeRepo({ ...BASE, 'AGENTS.md': '', 'scripts/check-harness.mjs': readFileSync(join(ROOT, 'scripts/check-harness.mjs')) });
+    const copy = (rel) => readFileSync(join(ROOT, rel));
+    const root = makeRepo({ ...BASE, 'AGENTS.md': '', 'scripts/check-harness.mjs': copy('scripts/check-harness.mjs'), 'scripts/harness-library.mjs': copy('scripts/harness-library.mjs') });
     const link = join(mkdtempSync(join(tmpdir(), 'harness-link-')), 'repo');
     made.push(dirname(link));
     symlinkSync(root, link);
