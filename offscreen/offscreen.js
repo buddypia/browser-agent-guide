@@ -1,5 +1,6 @@
 // Offscreen document の合成器。service worker から COMPOSITE_PAGE_FEEDBACK を受け取り、
 // captureVisibleTab の PNG（device px）の上にユーザー注釈を Canvas 2D で burn-in して返す。
+// FIT_IMAGE は、ワークフローの視覚確認で判断AIへ送るスクリーンショットを縮めるだけ(注釈は描かない)。
 //
 // 罠対策（handoff §4.1 / §6）:
 //  - OffscreenCanvas + Canvas 2D のみ。SVG/foreignObject を使わない → SecurityError 回避。
@@ -16,8 +17,33 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
     return true; // 非同期応答
   }
+  if (msg.type === 'FIT_IMAGE') {
+    fitImage(msg.payload)
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
   return false;
 });
+
+// 判断AIへ送るスクリーンショットを、長辺が maxEdge 以下になるよう等比で縮める(PNG のまま)。
+// 収まっていれば描き直さずにそのまま返す。
+async function fitImage({ dataUrl, maxEdge }) {
+  if (!dataUrl) throw new Error('errors.offscreen.noScreenshot');
+  const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  const { scale, width, height } = computeOutputSize(bitmap.width, bitmap.height, maxEdge);
+  if (scale === 1) {
+    bitmap.close?.();
+    return { dataUrl, width, height };
+  }
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close?.();
+  return { dataUrl: await blobToDataUrl(await canvas.convertToBlob({ type: 'image/png' })), width, height };
+}
 
 async function composite({ screenshotDataUrl, data }) {
   // エラーは i18n キーで投げる。SW 側が受け取った res.error を t() でユーザー言語へ翻訳する

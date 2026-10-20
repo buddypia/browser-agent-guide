@@ -71,6 +71,26 @@ function fakeJev(body, { prefer = 'Anker', flip = false, visualPass = true } = {
   return { model: 'jev-fake', answers: { pick: { type: 'choice', choice, probabilities } } };
 }
 
+// 実 Jev の画像の受け付け条件(docs.typesafe.ai/images: asset は {type:'image', format, data_base64}、
+// ヘッダー TypeSafe-Danger-Zone-Images: true、縦横 280〜1568px)。外れていれば実 API と同じく 400 / 413。
+function jevImageProblem(req, body) {
+  const assets = Object.entries(body?.assets || {});
+  if (!assets.length) return null;
+  if (req.headers['typesafe-danger-zone-images'] !== 'true') return [400, 'images are not turned on'];
+  for (const [ref, a] of assets) {
+    if (!JSON.stringify(body.state).includes(ref)) return [400, `asset ${ref} is not referenced`];
+    if (a?.type !== 'image' || !['png', 'jpg', 'jpeg'].includes(a.format) || !/^[A-Za-z0-9+/]+=*$/.test(a.data_base64 || '')) {
+      return [400, `asset ${ref} is invalid`];
+    }
+    const png = Buffer.from(a.data_base64, 'base64');
+    const [w, h] = a.format === 'png' ? [png.readUInt32BE(16), png.readUInt32BE(20)] : [0, 0];
+    if (a.format === 'png' && (w > 1568 || h > 1568)) return [413, `image ${w}x${h} is over 1568px`];
+    if (a.format === 'png' && (w < 280 || h < 280)) return [400, `image ${w}x${h} is under 280px`];
+    body.imageSize = [w, h];
+  }
+  return null;
+}
+
 function startServer(state) {
   return new Promise((resolve, reject) => {
     const srv = http.createServer((req, res) => {
@@ -85,6 +105,11 @@ function startServer(state) {
           if (state.fail) {
             res.statusCode = 500;
             return res.end('{"error":"boom"}');
+          }
+          const bad = jevImageProblem(req, body);
+          if (bad) {
+            res.statusCode = bad[0];
+            return res.end(JSON.stringify({ detail: bad[1] }));
           }
           res.end(JSON.stringify(fakeJev(body, state)));
         });
@@ -653,6 +678,8 @@ test.describe('判断AI(Jev / Clef / eg2) E2E (拡張ロード)', () => {
     await setSteps([stepWithVisual]);
     const { page, tabId } = await openList('rec');
     await page.bringToFront();
+    // 長辺 1568px を超える画面。撮ったままでは Jev が 413 で拒否するので、縮めてから送れているかを見る。
+    await page.setViewportSize({ width: 2000, height: 1000 });
 
     // 1) 視覚確認 OK → 完走
     state.visualPass = true;
@@ -662,6 +689,7 @@ test.describe('判断AI(Jev / Clef / eg2) E2E (拡張ロード)', () => {
     const visualCalls = state.jevCalls.filter((c) => c.body?.questions?.visual);
     expect(visualCalls).toHaveLength(1);
     expect(visualCalls[0].headers['typesafe-danger-zone-images']).toBe('true');
+    expect(visualCalls[0].body.imageSize[0]).toBe(1568);
 
     // 2) 視覚確認 NG (画面崩れ/エラー検出) → 停止し failed メッセージを出す
     state.visualPass = false;

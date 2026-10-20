@@ -24,7 +24,7 @@ code_refs:
 api_refs: []
 db_refs: []
 related: ["verb-registry", "affordance"]
-last_verified: 2026-10-19
+last_verified: 2026-10-20
 confidence: medium
 ---
 
@@ -61,7 +61,7 @@ confidence: medium
   同じ。承認までに一覧が並び替わりうるため)。AI が選んだ候補を一意に示せない(テキスト無し/同じ表記が複数)時は
   保留せず止める。外部 AI へ手順の入力値も、入力欄の今の値も送らない(`labelOf` は `value` 属性=ページの初期値だけを使う)。
 - `check.type` は `none | url | text | appears | visual | download`。URL は `urlPattern`(`:id` 汎化。ID 的区間・`=` を含む区間、ID がある URL では長い slug も可変)で照合し、
-  `visual` はステップ実行後にタブの読込完了・アクティブ状態を確認し、`PREPARE_VISUAL_CHECK` で入力欄(`input`/`textarea`/`contenteditable`)のライブ値を透明マスクした上でスクリーンショットを撮り、`callJudgeVisualCheck`(Jev / Clef マルチモーダルまたは eg2 `POST /v1/evaluate`)で画面状態・UI崩れやエラー表示の有無を検証する。
+  `visual` はステップ実行後にタブの読込完了・アクティブ状態を確認し、`PREPARE_VISUAL_CHECK` で入力欄(`input`/`textarea`/`contenteditable`)のライブ値を透明マスクした上でスクリーンショットを撮り、offscreen(`FIT_IMAGE`)で長辺 `JUDGE_IMAGE_MAX_EDGE`(1568px。Jev はこれを超える画像を縮めずに拒否する)に縮めてから、`callJudgeVisualCheck`(Jev / Clef マルチモーダルまたは eg2 `POST /v1/evaluate`)で画面状態・UI崩れやエラー表示の有無を検証する。Jev には画像を `assets` の `{type:'image', format, data_base64}`(PNG / JPEG のみ)で渡す。
 - `download` は操作の前から SW がページのダウンロード(`chrome.downloads.onCreated`。拡張自身の保存は除く)を見張り、
   ファイル名か URL に `value` を含む(空なら何でも)ものが `complete` になるまで待つ(上限60秒)。始まらない・中断・
   時間切れは失敗で止まる。記録中、クリック直後(10秒以内)に始まったダウンロードはそのクリックにこの確認を SW が自動で付ける。
