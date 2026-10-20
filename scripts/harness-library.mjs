@@ -7,7 +7,9 @@
 // validateLibrary() checks entry shape and INDEX freshness (part of check-harness.mjs, so the post-edit hook runs it).
 // checkLedgerGate() is the ship-time rule "every harness edit traces to evidence": a branch that changes the harness
 // surface must add or update an entry naming each changed component; a commit carrying a `Harness-Entry: none — <reason>`
-// trailer exempts only the paths that commit changed.
+// trailer exempts only the paths that commit changed. Like harness2's sequential recursion (each round reads every
+// earlier round), a branch that touches a component with an open (pending/confounded) verdict must edit that entry or
+// cite it from its own, so verdicts get settled by the next change rather than left open forever.
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -164,20 +166,38 @@ export function validateLibrary(root) {
  * changes (a component ending in "/" covers what is under it). `changed` are repo-relative paths; `entries` are
  * {name, src} for entry files the branch touched; `exempt` are paths changed by commits carrying the opt-out trailer.
  */
-export function checkLedgerGate({ changed, entries, exempt = new Set(), hookTargets }) {
+const covers = (c, path) => c === path || (c.endsWith('/') && c.split('/').length >= 3 && path.startsWith(c));
+const OPEN = new Set(['pending', 'confounded']);
+
+export function checkLedgerGate({ changed, entries, exempt = new Set(), hookTargets, library = [] }) {
   const harness = changed.filter((p) => isLedgerPath(p, hookTargets) && !exempt.has(p));
   if (!harness.length) return [];
+  const errs = [];
   const components = entries.flatMap(({ src }) => parseEntry(src).edits.map((ed) => ed.component));
-  const covers = (c, path) => c === path || (c.endsWith('/') && c.split('/').length >= 3 && path.startsWith(c));
   const missing = harness.filter((p) => !components.some((c) => covers(c, p)));
-  if (!missing.length) return [];
-  return [
-    `this branch changes the harness (${missing.join(', ')}) but no entry in ${ENTRIES_DIR}/ it adds or edits names ` +
-      'those components. Record why (the evidence that motivated it) and what each edit changed: spawn the ' +
-      '`harness-reflector` subagent or follow .agents/skills/harness-rules/SKILL.md, then `npm run harness:index`. ' +
-      'For a commit with nothing to learn (typo, rename), add the trailer `Harness-Entry: none — <reason>` to it; ' +
-      'it exempts only the paths that commit changes.',
-  ];
+  if (missing.length) {
+    errs.push(
+      `this branch changes the harness (${missing.join(', ')}) but no entry in ${ENTRIES_DIR}/ it adds or edits names ` +
+        'those components. Record why (the evidence that motivated it) and what each edit changed: spawn the ' +
+        '`harness-reflector` subagent or follow .agents/skills/harness-rules/SKILL.md, then `npm run harness:index`. ' +
+        'For a commit with nothing to learn (typo, rename), add the trailer `Harness-Entry: none — <reason>` to it; ' +
+        'it exempts only the paths that commit changes, and `make ship` then asks a human.'
+    );
+  }
+  const touched = new Set(entries.map((e) => e.name));
+  const cited = entries.map((e) => e.src).join('\n');
+  for (const { name, src } of library) {
+    if (touched.has(name) || cited.includes(name.replace(/\.md$/, ''))) continue;
+    const open = parseEntry(src).edits.filter((ed) => OPEN.has(ed.verdict) && harness.some((p) => covers(ed.component, p)));
+    if (open.length) {
+      errs.push(
+        `${ENTRIES_DIR}/${name} has open verdicts on components this branch changes (${open.map((ed) => `\`${ed.component}\` ${ed.verdict}`).join(', ')}). ` +
+          'Read it: settle a verdict there if this change brings evidence, or cite the entry by name in your own entry ' +
+          '(e.g. in the row\'s observed) so the next reader sees the two together.'
+      );
+    }
+  }
+  return errs;
 }
 
 // `npm run harness:index`: rewrite INDEX.md from the entries (validation lives in check-harness.mjs).

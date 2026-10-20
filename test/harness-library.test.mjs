@@ -119,6 +119,17 @@ describe('ledger gate', () => {
     assert.deepEqual(checkLedgerGate({ changed: ['.claude/scripts/lib/utils.mjs'], entries: [], hookTargets }), []);
   });
 
+  test('an open verdict on a changed component must be settled or cited', () => {
+    const old = { name: '2026-01-01-old.md', src: ENTRY.replace('verdict**: helped', 'verdict**: pending') };
+    const own = entry('AGENTS.md');
+    hasError(checkLedgerGate({ changed: ['AGENTS.md'], entries: own, library: [old, ...own] }), '2026-01-01-old.md has open verdicts');
+    const citing = [{ name: NAME, src: own[0].src.replace('The step ran', 'Follows 2026-01-01-old; the step ran') }];
+    assert.deepEqual(checkLedgerGate({ changed: ['AGENTS.md'], entries: citing, library: [old, ...citing] }), []);
+    assert.deepEqual(checkLedgerGate({ changed: ['AGENTS.md'], entries: [...own, old], library: [old, ...own] }), []);
+    const settled = { ...old, src: ENTRY };
+    assert.deepEqual(checkLedgerGate({ changed: ['AGENTS.md'], entries: own, library: [settled, ...own] }), []);
+  });
+
   test('exempt paths are skipped; the checker and merge gate are on the gate', () => {
     assert.deepEqual(checkLedgerGate({ changed: ['AGENTS.md'], entries: [], exempt: new Set(['AGENTS.md']) }), []);
     hasError(checkLedgerGate({ changed: ['AGENTS.md', 'scripts/check-harness.mjs'], entries: [], exempt: new Set(['AGENTS.md']) }), 'scripts/check-harness.mjs');

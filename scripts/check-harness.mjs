@@ -22,7 +22,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ENTRIES_DIR, LIBRARY_DIR, TRAILER, checkLedgerGate, validateLibrary } from './harness-library.mjs';
+import { ENTRIES_DIR, LIBRARY_DIR, TRAILER, checkLedgerGate, isLedgerPath, readEntries, validateLibrary } from './harness-library.mjs';
 
 export const ALWAYS_ON = 'AGENTS.md';
 export const ALWAYS_ON_MAX = 8000;
@@ -267,7 +267,8 @@ export function validateHarness(root) {
 }
 
 /** The ledger gate on this checkout's branch vs origin/main; skipped (null) when there is no origin/main to diff. */
-export function ledgerGate(root) {
+/** What the ledger gate needs about this branch vs origin/main; null when there is no origin/main to diff. */
+export function ledgerInputs(root) {
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   let base;
   try {
@@ -291,7 +292,18 @@ export function ledgerGate(root) {
     paths.forEach((p) => into.add(p));
   }
   gated.forEach((p) => exempt.delete(p));
-  return checkLedgerGate({ changed, entries, exempt, hookTargets });
+  return { changed, entries, exempt, hookTargets, library: readEntries(root) };
+}
+
+export function ledgerGate(root) {
+  const inputs = ledgerInputs(root);
+  return inputs && checkLedgerGate(inputs);
+}
+
+/** Harness paths this branch exempts from the ledger with the trailer: self-attested, so `make ship` asks a human. */
+export function ledgerOptOuts(root) {
+  const inputs = ledgerInputs(root);
+  return inputs ? [...inputs.exempt].filter((p) => inputs.changed.includes(p) && isLedgerPath(p, inputs.hookTargets)) : [];
 }
 
 // realpath: Node resolves symlinks for the main module, so a plain path compare would skip main (and pass) silently.

@@ -22,7 +22,7 @@
 - **verdict**: pending
 
 ### `scripts/check-harness.mjs`
-- **change**: Validates subagents and the library; as a CLI, applies the ledger gate against `origin/main` to AGENTS.md, skills, subagents, hook files, `.claude/hooks/` and every script a hook file runs plus the checker and `scripts/auto-ship.mjs` themselves (opt-out: a `Harness-Entry: none — <reason>` trailer, which exempts only its own commit's paths). The #155 reviews found `.claude/scripts/merge-guard.mjs` outside the gate and one trailer exempting a whole branch; both were fixed before merge.
+- **change**: Validates subagents and the library; as a CLI, applies the ledger gate against `origin/main` to AGENTS.md, skills, subagents, hook files, `.claude/hooks/` and every script a hook file runs plus the checker and `scripts/auto-ship.mjs` themselves; a branch touching a component with an open verdict must edit or cite that earlier entry (harness2's sequential recursion: each round reads every earlier one) (opt-out: a `Harness-Entry: none — <reason>` trailer, which exempts only its own commit's paths). The #155 reviews found `.claude/scripts/merge-guard.mjs` outside the gate and one trailer exempting a whole branch; both were fixed before merge.
 - **observed**: New; watch how often the trailer is used and for what.
 - **verdict**: pending
 
@@ -37,7 +37,7 @@
 - **verdict**: pending
 
 ### `scripts/auto-ship.mjs`
-- **change**: The headless reviewer checks settled verdicts and lessons in new entries against the evidence they cite, and requests changes for an invented attribution (harness2: merging an edit does not launder it).
+- **change**: The headless reviewer checks settled verdicts and lessons in new entries against the evidence they cite, and requests changes for an invented attribution (harness2: merging an edit does not launder it). It also routes any branch that uses the `Harness-Entry` trailer on a harness path to a human (the trailer is self-attested, per `2026-10-14-remove-self-attested-ship-gates`), and shows the always-on AGENTS.md character delta in the PR body (harness2 `diff_summary`).
 - **observed**: On this PR's first `make ship` (#155) the reviewer flagged the seed row `.agents/skills/bag-memo/SKILL.md` `helped` as unsupported (no run showed the check blocking anything); the row was downgraded to `confounded`. The reviewer also reads harness-rules, so the prompt line is not isolated from the skill.
 - **verdict**: pending
 
