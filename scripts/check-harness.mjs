@@ -281,13 +281,16 @@ export function ledgerGate(root) {
     .filter((p) => p.startsWith(`${ENTRIES_DIR}/`) && p.endsWith('.md') && existsSync(join(root, p)))
     .map((p) => ({ name: p.slice(ENTRIES_DIR.length + 1), src: read(root, p) }));
   const hookTargets = new Set(hookScripts(root).map(([, script]) => script));
-  // A trailer exempts only its own commit's paths; uncommitted changes are never exempt.
+  // A trailer exempts a path only if every change to it is in trailer commits: a later commit without the trailer,
+  // or an uncommitted or untracked change, puts it back on the gate.
   const exempt = new Set();
+  const gated = new Set([...lines(git('diff', '--name-only', 'HEAD')), ...lines(git('ls-files', '--others', '--exclude-standard'))]);
   for (const sha of lines(git('rev-list', `${base}..HEAD`))) {
-    if (TRAILER.test(git('show', '-s', '--format=%B', sha))) {
-      lines(git('show', '--name-only', '--format=', sha)).forEach((p) => exempt.add(p));
-    }
+    const paths = lines(git('show', '--name-only', '--format=', sha));
+    const into = TRAILER.test(git('show', '-s', '--format=%B', sha)) ? exempt : gated;
+    paths.forEach((p) => into.add(p));
   }
+  gated.forEach((p) => exempt.delete(p));
   return checkLedgerGate({ changed, entries, exempt, hookTargets });
 }
 

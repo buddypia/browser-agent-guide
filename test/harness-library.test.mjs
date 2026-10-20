@@ -101,22 +101,22 @@ describe('ledger gate', () => {
   const entry = (component) => [{ name: NAME, src: ENTRY.replace('### `AGENTS.md`', `### \`${component}\``) }];
 
   test('a harness change needs an entry naming each changed component', () => {
-    hasError(checkLedgerGate({ changed: ['AGENTS.md', 'lib/a.js'], entries: [], messages: '' }), 'AGENTS.md');
-    assert.deepEqual(checkLedgerGate({ changed: ['AGENTS.md'], entries: entry('AGENTS.md'), messages: '' }), []);
-    assert.deepEqual(checkLedgerGate({ changed: ['lib/a.js', 'docs/x.md'], entries: [], messages: '' }), []);
+    hasError(checkLedgerGate({ changed: ['AGENTS.md', 'lib/a.js'], entries: [] }), 'AGENTS.md');
+    assert.deepEqual(checkLedgerGate({ changed: ['AGENTS.md'], entries: entry('AGENTS.md') }), []);
+    assert.deepEqual(checkLedgerGate({ changed: ['lib/a.js', 'docs/x.md'], entries: [] }), []);
   });
 
   test('a directory component covers what is under it, but not a whole top-level tree', () => {
     const skill = '.agents/skills/testing/SKILL.md';
-    assert.deepEqual(checkLedgerGate({ changed: [skill], entries: entry('.agents/skills/testing/'), messages: '' }), []);
-    hasError(checkLedgerGate({ changed: [skill], entries: entry('.agents/'), messages: '' }), skill);
-    hasError(checkLedgerGate({ changed: [skill], entries: entry('.agents/skills/test'), messages: '' }), skill);
+    assert.deepEqual(checkLedgerGate({ changed: [skill], entries: entry('.agents/skills/testing/') }), []);
+    hasError(checkLedgerGate({ changed: [skill], entries: entry('.agents/') }), skill);
+    hasError(checkLedgerGate({ changed: [skill], entries: entry('.agents/skills/test') }), skill);
   });
 
   test('scripts that hook files run are on the gate, wherever they live', () => {
     const hookTargets = new Set(['.claude/scripts/merge-guard.mjs']);
-    hasError(checkLedgerGate({ changed: ['.claude/scripts/merge-guard.mjs'], entries: [], messages: '', hookTargets }), 'merge-guard.mjs');
-    assert.deepEqual(checkLedgerGate({ changed: ['.claude/scripts/lib/utils.mjs'], entries: [], messages: '', hookTargets }), []);
+    hasError(checkLedgerGate({ changed: ['.claude/scripts/merge-guard.mjs'], entries: [], hookTargets }), 'merge-guard.mjs');
+    assert.deepEqual(checkLedgerGate({ changed: ['.claude/scripts/lib/utils.mjs'], entries: [], hookTargets }), []);
   });
 
   test('exempt paths are skipped; the checker and merge gate are on the gate', () => {
@@ -168,6 +168,12 @@ describe('ledger gate', () => {
     const errs = ledgerGate(root);
     hasError(errs, 'CLAUDE.md');
     assert.ok(!errs.join('').includes('(AGENTS.md'), errs.join('\n'));
+    writeFileSync(join(root, 'AGENTS.md'), 'uncommitted\n');
+    hasError(ledgerGate(root), 'AGENTS.md');
+    git('checkout', '--', 'AGENTS.md');
+    writeFileSync(join(root, 'AGENTS.md'), 'real change\n');
+    commit('Change AGENTS.md again');
+    hasError(ledgerGate(root), 'AGENTS.md');
   });
 
   test('ledgerGate is skipped without an origin/main to diff against', () => {
