@@ -266,7 +266,6 @@ export function validateHarness(root) {
   return { errors: errs, alwaysOnChars: chars, skills, agents };
 }
 
-/** The ledger gate on this checkout's branch vs origin/main; skipped (null) when there is no origin/main to diff. */
 /** What the ledger gate needs about this branch vs origin/main; null when there is no origin/main to diff. */
 export function ledgerInputs(root) {
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
