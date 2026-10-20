@@ -22,7 +22,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ENTRIES_DIR, LIBRARY_DIR, checkLedgerGate, validateLibrary } from './harness-library.mjs';
+import { ENTRIES_DIR, LIBRARY_DIR, TRAILER, checkLedgerGate, validateLibrary } from './harness-library.mjs';
 
 export const ALWAYS_ON = 'AGENTS.md';
 export const ALWAYS_ON_MAX = 8000;
@@ -281,7 +281,14 @@ export function ledgerGate(root) {
     .filter((p) => p.startsWith(`${ENTRIES_DIR}/`) && p.endsWith('.md') && existsSync(join(root, p)))
     .map((p) => ({ name: p.slice(ENTRIES_DIR.length + 1), src: read(root, p) }));
   const hookTargets = new Set(hookScripts(root).map(([, script]) => script));
-  return checkLedgerGate({ changed, entries, messages: git('log', '--format=%B', `${base}..HEAD`), hookTargets });
+  // A trailer exempts only its own commit's paths; uncommitted changes are never exempt.
+  const exempt = new Set();
+  for (const sha of lines(git('rev-list', `${base}..HEAD`))) {
+    if (TRAILER.test(git('show', '-s', '--format=%B', sha))) {
+      lines(git('show', '--name-only', '--format=', sha)).forEach((p) => exempt.add(p));
+    }
+  }
+  return checkLedgerGate({ changed, entries, exempt, hookTargets });
 }
 
 // realpath: Node resolves symlinks for the main module, so a plain path compare would skip main (and pass) silently.

@@ -22,8 +22,13 @@
 - **verdict**: pending
 
 ### `scripts/check-harness.mjs`
-- **change**: Validates subagents and the library; as a CLI, applies the ledger gate against `origin/main` to AGENTS.md, skills, subagents, hook files, `.claude/hooks/` and every script a hook file runs (opt-out: `Harness-Entry: none — <reason>` trailer). The hook-script coverage came from the #155 review, which found `.claude/scripts/merge-guard.mjs` outside the gate.
+- **change**: Validates subagents and the library; as a CLI, applies the ledger gate against `origin/main` to AGENTS.md, skills, subagents, hook files, `.claude/hooks/` and every script a hook file runs plus the checker and `scripts/auto-ship.mjs` themselves (opt-out: a `Harness-Entry: none — <reason>` trailer, which exempts only its own commit's paths). The #155 reviews found `.claude/scripts/merge-guard.mjs` outside the gate and one trailer exempting a whole branch; both were fixed before merge.
 - **observed**: New; watch how often the trailer is used and for what.
+- **verdict**: pending
+
+### `scripts/harness-library.mjs`
+- **change**: Entry parser and validator (evidence required, verdict enum, a lesson on confounded/pending rows must be low), INDEX renderer (`npm run harness:index`) and the gate predicate.
+- **observed**: While this PR was built, the gate blocked it until this row existed, so it fires on its own author. Watch for false blocks on legitimate harness PRs.
 - **verdict**: pending
 
 ### `.claude/hooks/post-edit-invariants.mjs`

@@ -6,7 +6,8 @@
 //   docs/harness/INDEX.md                         generated from the entries (`npm run harness:index`)
 // validateLibrary() checks entry shape and INDEX freshness (part of check-harness.mjs, so the post-edit hook runs it).
 // checkLedgerGate() is the ship-time rule "every harness edit traces to evidence": a branch that changes the harness
-// surface must add or update an entry naming each changed component, or carry a `Harness-Entry: none — <reason>` trailer.
+// surface must add or update an entry naming each changed component; a commit carrying a `Harness-Entry: none — <reason>`
+// trailer exempts only the paths that commit changed.
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,7 +33,14 @@ export function isLedgerPath(rel, hookTargets = new Set()) {
     rel.startsWith('.agents/skills/') ||
     rel.startsWith('.claude/agents/') ||
     rel.startsWith('.claude/hooks/') ||
-    ['.claude/settings.json', '.codex/hooks.json', '.agents/hooks.json'].includes(rel)
+    [
+      '.claude/settings.json',
+      '.codex/hooks.json',
+      '.agents/hooks.json',
+      'scripts/check-harness.mjs',
+      'scripts/harness-library.mjs',
+      'scripts/auto-ship.mjs',
+    ].includes(rel)
   );
 }
 
@@ -153,12 +161,12 @@ export function validateLibrary(root) {
 
 /**
  * Ship-time rule: changed harness paths must each be named by an edit component of an entry this branch adds or
- * changes (a component ending in "/" covers what is under it), unless a commit carries the opt-out trailer.
- * `changed` are repo-relative paths; `entries` are {name, src} for entry files the branch touched.
+ * changes (a component ending in "/" covers what is under it). `changed` are repo-relative paths; `entries` are
+ * {name, src} for entry files the branch touched; `exempt` are paths changed by commits carrying the opt-out trailer.
  */
-export function checkLedgerGate({ changed, entries, messages, hookTargets }) {
-  const harness = changed.filter((p) => isLedgerPath(p, hookTargets));
-  if (!harness.length || TRAILER.test(messages || '')) return [];
+export function checkLedgerGate({ changed, entries, exempt = new Set(), hookTargets }) {
+  const harness = changed.filter((p) => isLedgerPath(p, hookTargets) && !exempt.has(p));
+  if (!harness.length) return [];
   const components = entries.flatMap(({ src }) => parseEntry(src).edits.map((ed) => ed.component));
   const covers = (c, path) => c === path || (c.endsWith('/') && c.split('/').length >= 3 && path.startsWith(c));
   const missing = harness.filter((p) => !components.some((c) => covers(c, p)));
@@ -167,7 +175,8 @@ export function checkLedgerGate({ changed, entries, messages, hookTargets }) {
     `this branch changes the harness (${missing.join(', ')}) but no entry in ${ENTRIES_DIR}/ it adds or edits names ` +
       'those components. Record why (the evidence that motivated it) and what each edit changed: spawn the ' +
       '`harness-reflector` subagent or follow .agents/skills/harness-rules/SKILL.md, then `npm run harness:index`. ' +
-      'For a change with nothing to learn (typo, rename), add a commit trailer `Harness-Entry: none — <reason>`.',
+      'For a commit with nothing to learn (typo, rename), add the trailer `Harness-Entry: none — <reason>` to it; ' +
+      'it exempts only the paths that commit changes.',
   ];
 }
 

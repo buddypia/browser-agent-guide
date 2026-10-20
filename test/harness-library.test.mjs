@@ -8,7 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { ledgerGate, validateHarness } from '../scripts/check-harness.mjs';
-import { checkLedgerGate, INDEX, readEntries, renderIndex, validateEntry, validateLibrary } from '../scripts/harness-library.mjs';
+import { checkLedgerGate, INDEX, readEntries, renderIndex, TRAILER, validateEntry, validateLibrary } from '../scripts/harness-library.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const made = [];
@@ -119,9 +119,15 @@ describe('ledger gate', () => {
     assert.deepEqual(checkLedgerGate({ changed: ['.claude/scripts/lib/utils.mjs'], entries: [], messages: '', hookTargets }), []);
   });
 
-  test('a commit trailer with a reason opts out; one without a reason does not', () => {
-    assert.deepEqual(checkLedgerGate({ changed: ['AGENTS.md'], entries: [], messages: 'Fix typo\n\nHarness-Entry: none — typo\n' }), []);
-    hasError(checkLedgerGate({ changed: ['AGENTS.md'], entries: [], messages: 'Harness-Entry: none\n' }), 'AGENTS.md');
+  test('exempt paths are skipped; the checker and merge gate are on the gate', () => {
+    assert.deepEqual(checkLedgerGate({ changed: ['AGENTS.md'], entries: [], exempt: new Set(['AGENTS.md']) }), []);
+    hasError(checkLedgerGate({ changed: ['AGENTS.md', 'scripts/check-harness.mjs'], entries: [], exempt: new Set(['AGENTS.md']) }), 'scripts/check-harness.mjs');
+    hasError(checkLedgerGate({ changed: ['scripts/auto-ship.mjs'], entries: [] }), 'scripts/auto-ship.mjs');
+  });
+
+  test('the trailer needs a reason', () => {
+    assert.ok(TRAILER.test('Fix typo\n\nHarness-Entry: none — typo\n'));
+    assert.ok(!TRAILER.test('Harness-Entry: none\n'));
   });
 
   test('ledgerGate diffs the branch against origin/main, including uncommitted and untracked files', () => {
@@ -142,6 +148,26 @@ describe('ledger gate', () => {
     writeFileSync(join(root, '.claude/settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'node .claude/scripts/guard.mjs' }] }] } }));
     writeFileSync(join(root, '.claude/scripts/guard.mjs'), '');
     hasError(ledgerGate(root), '.claude/scripts/guard.mjs');
+    rmSync(join(root, '.claude'), { recursive: true });
+    rmSync(join(root, 'docs'), { recursive: true });
+  });
+
+  test('a trailer exempts only the paths its own commit changed', () => {
+    const root = makeRepo({ 'AGENTS.md': 'base\n', 'CLAUDE.md': '@AGENTS.md\n' }, { git: true });
+    const git = (...args) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
+    const commit = (msg) => git('-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-qam', msg);
+    git('init', '-q');
+    git('add', '.');
+    commit('base');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    writeFileSync(join(root, 'AGENTS.md'), 'typo fixed\n');
+    commit('Fix typo\n\nHarness-Entry: none — typo');
+    assert.deepEqual(ledgerGate(root), []);
+    writeFileSync(join(root, 'CLAUDE.md'), '@AGENTS.md\nmore\n');
+    commit('Change CLAUDE.md');
+    const errs = ledgerGate(root);
+    hasError(errs, 'CLAUDE.md');
+    assert.ok(!errs.join('').includes('(AGENTS.md'), errs.join('\n'));
   });
 
   test('ledgerGate is skipped without an origin/main to diff against', () => {
