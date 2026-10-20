@@ -8,7 +8,7 @@
 
 ### `AGENTS.md`
 - **change**: Tier-5 prevention: one "Conventions & gotchas" line describing the staleness guard's blind spot and prescribing `git fetch origin main && git diff --name-status origin/main...HEAD` before shipping.
-- **observed**: The class recurred ten days later in PR #67: a 2-commit drift let `git add -A` sweep in unrelated `.gitignore`/`guard.py` diffs and `.pyc` files, although the line was present at incident time (`docs/retros/retro-2026-06-30-worktree-base-remote-divergence-recurrence.md`, Why 3). The follow-up moved the check into code (`mark-pre-ship-confirmed.mjs` warning, #68; `make ship` fetches by itself, #93).
+- **observed**: The class recurred ten days later in PR #67: a 2-commit drift let `git add -A` sweep in unrelated `.gitignore`/`guard.py` diffs and `.pyc` files, although the line was present at incident time (`docs/retros/retro-2026-06-30-worktree-base-remote-divergence-recurrence.md`, Why 3). The follow-up moved the check into code (`mark-pre-ship-confirmed.mjs` warning, #68 squash `9f252aa`; `make ship` fetches by itself, #93 squash `cfcd7a0`).
 - **verdict**: no observed effect
 
 ## Lesson

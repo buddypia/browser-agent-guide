@@ -18,7 +18,7 @@
 
 ### `.claude/agents/harness-reflector.md`
 - **change**: Subagent that turns a diff, retros and transcripts into one entry plus verdict updates (large input, small answer).
-- **observed**: New; watch whether its entries pass `check:harness` without rework and avoid invented attributions.
+- **observed**: First trial (on #85, now `2026-07-19-block-gh-pr-merge-delete-branch-from-worktree.md`) passed `check:harness` with only wording trimmed, kept every unproven row `pending`/`confounded` and its lesson `low`. One run; keep watching.
 - **verdict**: pending
 
 ### `scripts/check-harness.mjs`
@@ -33,7 +33,7 @@
 
 ### `scripts/auto-ship.mjs`
 - **change**: The headless reviewer checks settled verdicts and lessons in new entries against the evidence they cite, and requests changes for an invented attribution (harness2: merging an edit does not launder it).
-- **observed**: New; watch for review rounds that reject an entry.
+- **observed**: On this PR's first `make ship` (#155) the reviewer flagged the seed row `.agents/skills/bag-memo/SKILL.md` `helped` as unsupported (no run showed the check blocking anything); the row was downgraded to `confounded`. The reviewer also reads harness-rules, so the prompt line is not isolated from the skill.
 - **verdict**: pending
 
 ## Lesson

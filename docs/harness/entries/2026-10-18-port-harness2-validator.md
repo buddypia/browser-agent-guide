@@ -18,8 +18,8 @@
 
 ### `.agents/skills/bag-memo/SKILL.md`
 - **change**: Stopped pre-approving `Edit`/`Write`; `scripts/check-harness.mjs` now fails any skill that does, and the post-edit hook runs it on every harness edit.
-- **observed**: As prose, the ban was already broken (bag-memo); as a check, the tree has had zero violations through PRs #147–#154 and any new one is blocked at edit time.
-- **verdict**: helped
+- **observed**: As prose, the ban was already broken (bag-memo). As a check, the tree has had zero violations through PRs #147–#154, but none of those PRs touched a skill's `allowed-tools` and no run shows the check blocking a violation, so the absence does not isolate the check.
+- **verdict**: confounded
 
 ### `.claude/hooks/post-edit-invariants.mjs`
 - **change**: New PostToolUse hook (Claude Code + Codex) runs check-harness, check-sync-pairs and check-hook-refs on the edited checkout and blocks with the reason.
@@ -30,5 +30,5 @@
 
 - **cue**: A rule about file contents (frontmatter, allow-lists, sizes, paired files) that agents keep breaking although it is written down.
 - **lesson**: Encode it in `scripts/check-harness.mjs` or `scripts/check-sync-pairs.mjs`, run by the post-edit hook, instead of restating it in AGENTS.md or a skill.
-- **evidence**: `.agents/skills/bag-memo/SKILL.md` row — prose ban broken, check-enforced ban holds.
-- **confidence**: medium — one rule, but a clean prose-vs-check contrast.
+- **evidence**: `.agents/skills/bag-memo/SKILL.md` row — the prose ban was broken; the check-enforced ban has not been tested by a violating edit yet.
+- **confidence**: low — the only contrast is "broken as prose"; settle the row when a post-edit block or check failure on `allowed-tools` is recorded.
