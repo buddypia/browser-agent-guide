@@ -212,7 +212,9 @@ function checkCodexHooks(doc, errs) {
   }
 }
 
-function checkHookFiles(root, errs) {
+// Every script a hook file runs, as [hook file, repo-relative path]; unparseable files are skipped (and reported).
+function hookScripts(root, errs = []) {
+  const out = [];
   for (const rel of HOOK_FILES) {
     const src = read(root, rel);
     if (src === null) continue;
@@ -225,10 +227,15 @@ function checkHookFiles(root, errs) {
     }
     if (rel === CODEX_HOOKS) checkCodexHooks(doc, errs);
     for (const cmd of hookCommands(rel === '.claude/settings.json' ? doc.hooks : doc)) {
-      for (const m of cmd.matchAll(/(?:\.claude|\.agents|\.codex|scripts)\/[\w./-]+\.(?:mjs|js|py|sh)/g)) {
-        if (!existsSync(join(root, m[0]))) errs.push(`${rel} runs \`${m[0]}\` but that file does not exist`);
-      }
+      for (const m of cmd.matchAll(/(?:\.claude|\.agents|\.codex|scripts)\/[\w./-]+\.(?:mjs|js|py|sh)/g)) out.push([rel, m[0]]);
     }
+  }
+  return out;
+}
+
+function checkHookFiles(root, errs) {
+  for (const [rel, script] of hookScripts(root, errs)) {
+    if (!existsSync(join(root, script))) errs.push(`${rel} runs \`${script}\` but that file does not exist`);
   }
 }
 
@@ -273,7 +280,8 @@ export function ledgerGate(root) {
   const entries = changed
     .filter((p) => p.startsWith(`${ENTRIES_DIR}/`) && p.endsWith('.md') && existsSync(join(root, p)))
     .map((p) => ({ name: p.slice(ENTRIES_DIR.length + 1), src: read(root, p) }));
-  return checkLedgerGate({ changed, entries, messages: git('log', '--format=%B', `${base}..HEAD`) });
+  const hookTargets = new Set(hookScripts(root).map(([, script]) => script));
+  return checkLedgerGate({ changed, entries, messages: git('log', '--format=%B', `${base}..HEAD`), hookTargets });
 }
 
 // realpath: Node resolves symlinks for the main module, so a plain path compare would skip main (and pass) silently.

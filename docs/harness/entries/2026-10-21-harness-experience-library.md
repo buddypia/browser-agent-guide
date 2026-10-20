@@ -22,7 +22,7 @@
 - **verdict**: pending
 
 ### `scripts/check-harness.mjs`
-- **change**: Validates subagents and the library; as a CLI, applies the ledger gate against `origin/main` (opt-out: `Harness-Entry: none — <reason>` trailer).
+- **change**: Validates subagents and the library; as a CLI, applies the ledger gate against `origin/main` to AGENTS.md, skills, subagents, hook files, `.claude/hooks/` and every script a hook file runs (opt-out: `Harness-Entry: none — <reason>` trailer). The hook-script coverage came from the #155 review, which found `.claude/scripts/merge-guard.mjs` outside the gate.
 - **observed**: New; watch how often the trailer is used and for what.
 - **verdict**: pending
 

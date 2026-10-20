@@ -20,9 +20,13 @@ const DIMENSIONS = new Set(['INV', 'DOM', 'INV+DOM']);
 const ENTRY_NAME = /^(\d{4}-\d{2}-\d{2})-[a-z0-9][a-z0-9-]*\.md$/;
 export const TRAILER = /^Harness-Entry:\s*none\s*[—–-]+\s*\S/im;
 
-/** Paths whose change alters what agents read or what fires in their tool loop (harness2's editable surface). */
-export function isLedgerPath(rel) {
+/**
+ * Paths whose change alters what agents read or what fires in their tool loop (harness2's editable surface).
+ * `hookTargets` adds the scripts hook files run outside .claude/hooks/ (e.g. .claude/scripts/merge-guard.mjs).
+ */
+export function isLedgerPath(rel, hookTargets = new Set()) {
   return (
+    hookTargets.has(rel) ||
     rel === 'AGENTS.md' ||
     rel === 'CLAUDE.md' ||
     rel.startsWith('.agents/skills/') ||
@@ -152,8 +156,8 @@ export function validateLibrary(root) {
  * changes (a component ending in "/" covers what is under it), unless a commit carries the opt-out trailer.
  * `changed` are repo-relative paths; `entries` are {name, src} for entry files the branch touched.
  */
-export function checkLedgerGate({ changed, entries, messages }) {
-  const harness = changed.filter(isLedgerPath);
+export function checkLedgerGate({ changed, entries, messages, hookTargets }) {
+  const harness = changed.filter((p) => isLedgerPath(p, hookTargets));
   if (!harness.length || TRAILER.test(messages || '')) return [];
   const components = entries.flatMap(({ src }) => parseEntry(src).edits.map((ed) => ed.component));
   const covers = (c, path) => c === path || (c.endsWith('/') && c.split('/').length >= 3 && path.startsWith(c));

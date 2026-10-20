@@ -113,6 +113,12 @@ describe('ledger gate', () => {
     hasError(checkLedgerGate({ changed: [skill], entries: entry('.agents/skills/test'), messages: '' }), skill);
   });
 
+  test('scripts that hook files run are on the gate, wherever they live', () => {
+    const hookTargets = new Set(['.claude/scripts/merge-guard.mjs']);
+    hasError(checkLedgerGate({ changed: ['.claude/scripts/merge-guard.mjs'], entries: [], messages: '', hookTargets }), 'merge-guard.mjs');
+    assert.deepEqual(checkLedgerGate({ changed: ['.claude/scripts/lib/utils.mjs'], entries: [], messages: '', hookTargets }), []);
+  });
+
   test('a commit trailer with a reason opts out; one without a reason does not', () => {
     assert.deepEqual(checkLedgerGate({ changed: ['AGENTS.md'], entries: [], messages: 'Fix typo\n\nHarness-Entry: none — typo\n' }), []);
     hasError(checkLedgerGate({ changed: ['AGENTS.md'], entries: [], messages: 'Harness-Entry: none\n' }), 'AGENTS.md');
@@ -132,6 +138,10 @@ describe('ledger gate', () => {
     mkdirSync(join(root, 'docs/harness/entries'), { recursive: true });
     writeFileSync(join(root, `docs/harness/entries/${NAME}`), ENTRY);
     assert.deepEqual(ledgerGate(root), []);
+    mkdirSync(join(root, '.claude/scripts'), { recursive: true });
+    writeFileSync(join(root, '.claude/settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'node .claude/scripts/guard.mjs' }] }] } }));
+    writeFileSync(join(root, '.claude/scripts/guard.mjs'), '');
+    hasError(ledgerGate(root), '.claude/scripts/guard.mjs');
   });
 
   test('ledgerGate is skipped without an origin/main to diff against', () => {
