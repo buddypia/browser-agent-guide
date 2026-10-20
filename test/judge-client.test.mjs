@@ -13,6 +13,7 @@ import {
   callJudgeVisualCheck,
   clefRoute,
   judgeChain,
+  askJudge,
 } from '../lib/judge-client.js';
 import { DEFAULT_SETTINGS } from '../lib/storage.js';
 import { normalizeRun, normalizeStep } from '../lib/workflow.js';
@@ -459,6 +460,37 @@ async function run() {
     assert.equal(s.suggestion.pending, true);
     assert.equal(normalizeStep({ ...pickStep, suggestion: { kind: 'choice', label: 'x' } }).suggestion.pending, false);
     ok('run heldKind/judgeApprovedStepId and suggestion.pending normalize');
+  }
+
+  // askJudge: 429 / 529 だけ待って再試行する。他のエラーと、上限より長く待てと言われた時はすぐ失敗(予備に回す)。
+  {
+    const judge = { ...DEFAULT_JUDGE, apiKey: 'k' };
+    const reply = (status, retryAfter) => ({
+      ok: status === 200,
+      status,
+      headers: { get: (h) => (h === 'retry-after' && retryAfter != null ? String(retryAfter) : null) },
+      text: async () => `status ${status}`,
+      json: async () => ({ model: 'jev-1', answers: {} }),
+    });
+    const seq = (...replies) => {
+      const calls = [];
+      return { calls, fetchImpl: async (url) => (calls.push(url), replies[Math.min(calls.length - 1, replies.length - 1)]) };
+    };
+
+    let f = seq(reply(429), reply(529, 0), reply(200));
+    assert.equal((await askJudge({ judge, body: {}, fetchImpl: f.fetchImpl, retryDelaysMs: [0, 0] })).model, 'jev-1');
+    assert.equal(f.calls.length, 3);
+
+    f = seq(reply(529));
+    await assert.rejects(() => askJudge({ judge, body: {}, fetchImpl: f.fetchImpl, retryDelaysMs: [0, 0] }), /Jev API error 529/);
+    assert.equal(f.calls.length, 3);
+
+    for (const r of [reply(500), reply(401), reply(429, 60)]) {
+      f = seq(r);
+      await assert.rejects(() => askJudge({ judge, body: {}, fetchImpl: f.fetchImpl, retryDelaysMs: [0, 0] }), /Jev API error/);
+      assert.equal(f.calls.length, 1);
+    }
+    ok('askJudge retries only 429/529, honoring a short retry-after');
   }
 
   console.log(`\n${passed} passed`);
