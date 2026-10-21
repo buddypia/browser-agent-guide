@@ -133,6 +133,7 @@ function main(dryRun) {
       sh('gh', ['pr', 'create', '--base', 'main', '--head', branch, '--title', prTitle(commits, branch), '--body', 'AI review (auto-ship) in progress.'], wt);
       pr = openPr();
     }
+    if (!pr) stop('FAILED', `pushed ${branch}, but no open PR was found for it`);
   }
 
   // AI review in a hook-free, read-only headless Claude session (--restricted ignores project settings/hooks).
@@ -178,7 +179,8 @@ ${diff}
       log(`CI status read failed, retrying: ${e.message.split('\n')[0]}`);
     }
   }
-  if (ci !== 'pass') stop('FAILED', `CI ${ci === 'fail' ? 'failed' : 'did not finish in time'}: ${pr.url}/checks — fix, commit and re-run make ship`);
+  // check-runs returns the latest run per job, so after `gh run rerun --failed` a re-run of make ship sees the new result.
+  if (ci !== 'pass') stop('FAILED', `CI ${ci === 'fail' ? 'failed' : 'did not finish in time'}: ${pr.url}/checks — read \`gh run view --log-failed\`; fix, commit and re-run make ship (flake on the same HEAD: \`gh run rerun --failed\` first)`);
 
   // No --delete-branch: cleanup deletes the remote branch.
   // --match-head-commit: refuse if the branch moved after the tested/reviewed HEAD.

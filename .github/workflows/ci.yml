@@ -46,7 +46,9 @@ jobs:
         working-directory: daemon
 
   e2e:
-    runs-on: ubuntu-latest
+    # 視覚ゲート(ui-quality の「道具は1列」など)は macOS のフォントで調整されている。ubuntu では system-ui が
+    # 字幅の広い DejaVu Sans になり、360px で道具が折り返して決定的に落ちた(#157 の初回 CI)。開発機と同じ OS で回す。
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,7 +68,7 @@ jobs:
       - if: steps.scope.outputs.run == 'true'
         run: npm ci --ignore-scripts && npm ci --prefix daemon # UI spec は daemon のモジュールを import する
       - if: steps.scope.outputs.run == 'true'
-        run: npx playwright install --with-deps chromium && npm install -g @playwright/cli@0.1.21 # npm test は playwright-cli 経由
+        run: npx playwright install chromium && npm install -g @playwright/cli@0.1.21 # npm test は playwright-cli 経由
       - if: steps.scope.outputs.run == 'true'
         run: npm run test:e2e
       - if: failure()
