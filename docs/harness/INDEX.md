@@ -7,6 +7,7 @@ How to write and settle entries: `.agents/skills/harness-rules/SKILL.md`.
 
 | entry | date | dim | component → verdict | cue (when the lesson applies) |
 |---|---|---|---|---|
+| [Cut the Stop guard's per-worktree git calls and give each session its own checklist](entries/2026-10-21-stop-guard-fewer-git-calls-per-session-checklist.md) | 2026-10-21 | INV | `.claude/hooks/worktree-shipping-guard.mjs` pending; `scripts/agent-worktree-guard/` pending | A hook or guard that runs on every turn or Stop and loops over shared state owned by many concurrent sessions, such as all worktrees or all ledgers. |
 | [Make the ledger gate say when it did not run, and cite entries by whole name](entries/2026-10-21-ledger-gate-edge-cases.md) | 2026-10-21 | INV | `scripts/check-harness.mjs` pending; `scripts/harness-library.mjs` pending; `scripts/auto-ship.mjs` pending | — |
 | [Add the harness experience library, its ledger gate and the reflector subagent](entries/2026-10-21-harness-experience-library.md) | 2026-10-21 | INV | `.agents/skills/harness-rules/` pending; `.agents/skills/ship-flow/` pending; `.claude/agents/harness-reflector.md` pending; `scripts/check-harness.mjs` pending; `scripts/harness-library.mjs` pending; `.claude/hooks/post-edit-invariants.mjs` pending; `scripts/auto-ship.mjs` pending | — |
 | [Move the full gate to CI and keep only fast node checks local](entries/2026-10-21-ci-gate-fast-local-loop.md) | 2026-10-21 | INV | `scripts/auto-ship.mjs` pending; `.agents/skills/testing/` pending; `.agents/skills/ship-flow/` pending; `AGENTS.md` pending; `scripts/agent-worktree-guard/` pending | A gate that runs heavy or timing-sensitive checks on a machine that many agent sessions share. |
@@ -20,6 +21,7 @@ How to write and settle entries: `.agents/skills/harness-rules/SKILL.md`.
 
 Settle these when later evidence (a recurrence, a retro, a PR) isolates the edit.
 
+- [2026-10-21-stop-guard-fewer-git-calls-per-session-checklist.md](entries/2026-10-21-stop-guard-fewer-git-calls-per-session-checklist.md): `.claude/hooks/worktree-shipping-guard.mjs` pending, `scripts/agent-worktree-guard/` pending
 - [2026-10-21-ledger-gate-edge-cases.md](entries/2026-10-21-ledger-gate-edge-cases.md): `scripts/check-harness.mjs` pending, `scripts/harness-library.mjs` pending, `scripts/auto-ship.mjs` pending
 - [2026-10-21-harness-experience-library.md](entries/2026-10-21-harness-experience-library.md): `.agents/skills/harness-rules/` pending, `.agents/skills/ship-flow/` pending, `.claude/agents/harness-reflector.md` pending, `scripts/check-harness.mjs` pending, `scripts/harness-library.mjs` pending, `.claude/hooks/post-edit-invariants.mjs` pending, `scripts/auto-ship.mjs` pending
 - [2026-10-21-ci-gate-fast-local-loop.md](entries/2026-10-21-ci-gate-fast-local-loop.md): `scripts/auto-ship.mjs` pending, `.agents/skills/testing/` pending, `.agents/skills/ship-flow/` pending, `AGENTS.md` pending, `scripts/agent-worktree-guard/` pending

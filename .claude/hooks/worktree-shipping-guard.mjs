@@ -96,6 +96,30 @@ export function countUnmergedCommits(worktreePath) {
 }
 
 /**
+ * 모든 로컬 branch 의 unmerged commit 수를 git 1회로 구한다 (Map<branch, count>).
+ *   worktree 마다 rev-list 를 돌리면 Stop 마다 worktree 수만큼 프로세스가 뜬다.
+ *   origin/main 우선, 부재 시 main fallback. 둘 다 실패 (ahead-behind 는 git 2.41+) → 빈 Map
+ *   → 호출 측이 worktree 별 countUnmergedCommits 로 fallback.
+ */
+export function unmergedCommitsByBranch(projectDir, _safeGit = safeGit) {
+  for (const base of ['origin/main', 'main']) {
+    const out = _safeGit(
+      `for-each-ref '--format=%(refname:short)%09%(ahead-behind:${base})' refs/heads`,
+      projectDir,
+      { timeout: 3000 },
+    );
+    if (out === null) continue;
+    const counts = new Map();
+    for (const line of out.split('\n')) {
+      const m = /^(.+)\t(\d+) \d+$/.exec(line.trim());
+      if (m) counts.set(m[1], parseInt(m[2], 10));
+    }
+    if (counts.size > 0) return counts;
+  }
+  return new Map();
+}
+
+/**
  * worktree 의 uncommitted 변경 수.
  *   - tracked 수정 + untracked 파일 포함
  *   - git status 실패 → 0 (fail-open)
@@ -250,6 +274,7 @@ export function evaluate(projectDir, opts = {}) {
   }
 
   const worktrees = parseWorktreeList(wtOut);
+  const unmergedByBranch = (opts._unmergedByBranch || unmergedCommitsByBranch)(projectDir, _safeGit);
   const candidates = [];
   const skipped_attempt = []; // M3 — 마커 신선으로 인해 skip된 worktree (사용자 인지용)
   const not_owned = []; // R-CM-036 — 타 세션/orphan 소유라 차단하지 않은 worktree (사용자 인지용)
@@ -260,17 +285,20 @@ export function evaluate(projectDir, opts = {}) {
     if (isEscapeHatchBranch(wt.branch)) continue; // escape hatch
     if (wt.path === projectDir) continue; // main repo 자체
 
-    const uncommitted = _countUncommitted(wt.path);
-    const commits = _countUnmerged(wt.path);
-    if (commits === 0 && uncommitted === 0) continue;
+    const commits = unmergedByBranch.get(wt.branch) ?? _countUnmerged(wt.path);
 
     // R-CM-036 세션 소유권 — 본 세션이 소유하지 않는 worktree(타 세션/orphan)는 차단하지 않는다.
     // (멀티세션 cross-session 오차단 회피. owned 만 candidate 진입.)
+    // 소유권(파일 읽기)을 git status 보다 먼저 본다 — 타 세션 worktree 마다 status 를 돌리지 않기 위해.
+    // 그래서 알림은 unmerged commit 이 있는 것만 낸다 (미 commit 만 있는 타 세션 worktree 는 그 세션의 Stop 이 막는다).
     const ownership = _classifyOwnership(wt.path, wt.branch);
     if (ownership !== 'owned') {
-      not_owned.push({ path: wt.path, branch: wt.branch, commits, uncommitted, ownership });
+      if (commits > 0) not_owned.push({ path: wt.path, branch: wt.branch, commits, uncommitted: 0, ownership });
       continue;
     }
+
+    const uncommitted = _countUncommitted(wt.path);
+    if (commits === 0 && uncommitted === 0) continue;
 
     const staleness = _measureStaleness(wt.path);
     const stale_reasons = evaluateStaleness(staleness);

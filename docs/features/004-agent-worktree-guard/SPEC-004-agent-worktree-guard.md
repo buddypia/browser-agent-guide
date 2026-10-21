@@ -37,7 +37,7 @@ Runtime state is local and ignored:
 
 | Path | Purpose |
 | --- | --- |
-| `.tmp/.worktree_status.md` | Current session checklist. |
+| `.tmp/worktree-guard-ledger/<session>.md` | Checklist for that session (one file per session, next to its ledger). |
 | `.tmp/worktree-guard-ledger/<session_id>.json` | Current session ledger. |
 | `.tmp/.agent_worktree_owner.json` | Owner marker inside a registered worktree. |
 

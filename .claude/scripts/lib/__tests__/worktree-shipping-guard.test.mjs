@@ -10,7 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 globalThis.__HOOK_ORCHESTRATOR__ = true;
-const { buildBlockMessage, evaluate } = await import('../../../hooks/worktree-shipping-guard.mjs');
+const { buildBlockMessage, evaluate, unmergedCommitsByBranch } = await import('../../../hooks/worktree-shipping-guard.mjs');
+const { safeGit } = await import('../utils.mjs');
 
 test('Stop メッセージ: commit 済みは make ship、未 commit は git -C で commit を案内し、PLAN.md に触れない', () => {
   const root = '/repo';
@@ -41,6 +42,46 @@ test('evaluate: 依存注入なしの本番経路で例外を出さず、未マ�
     assert.equal(typeof r.block, 'boolean');
     const all = [...r.candidates, ...(r.not_owned || []), ...(r.skipped_attempt || [])];
     assert.ok(all.some((c) => c.branch === 'fix/x'), JSON.stringify(r));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('evaluate: 未マージ数は git 1 回でまとめて取り、他セッションの worktree には git status を走らせない', () => {
+  // Why: Stop のたびに worktree 数 × (rev-parse + status + rev-list) の git が走り、多セッション時の負荷になっていた。
+  const porcelain = [
+    'worktree /repo', 'branch refs/heads/main', '',
+    'worktree /repo/.worktrees/fix/mine', 'branch refs/heads/fix/mine', '',
+    'worktree /repo/.worktrees/fix/other', 'branch refs/heads/fix/other', '',
+  ].join('\n');
+  const statusCalls = [];
+  const r = evaluate('/repo', {
+    _safeGit: (args) => (args.startsWith('worktree list') ? porcelain : null),
+    _unmergedByBranch: () => new Map([['fix/mine', 1], ['fix/other', 2]]),
+    _countUnmerged: () => assert.fail('bulk の結果があるのに worktree ごとの rev-list が走った'),
+    _countUncommitted: (p) => (statusCalls.push(p), 0),
+    _classifyOwnership: (p) => (p.endsWith('/mine') ? 'owned' : 'other'),
+    _measureStaleness: () => null,
+    _isFresh: () => false,
+  });
+  assert.deepEqual(statusCalls, ['/repo/.worktrees/fix/mine']);
+  assert.deepEqual(r.candidates.map((c) => c.branch), ['fix/mine']);
+  assert.deepEqual(r.not_owned.map((c) => [c.branch, c.commits]), [['fix/other', 2]]);
+});
+
+test('unmergedCommitsByBranch: 実 git で branch ごとの origin/main 不在時 main 基準の ahead 数を返す', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'shipping-guard-'));
+  try {
+    const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { stdio: 'pipe' });
+    git('init', '-q', '-b', 'main');
+    git('commit', '-q', '--allow-empty', '-m', 'base');
+    git('switch', '-q', '-c', 'fix/y');
+    git('commit', '-q', '--allow-empty', '-m', 'a');
+    git('commit', '-q', '--allow-empty', '-m', 'b');
+    // hook 既定の 3 秒は過負荷のマシンで切れる(本番はその時 worktree ごとの rev-list に戻る)。テストは結果を見たいので延ばす。
+    const m = unmergedCommitsByBranch(repo, (args, cwd) => safeGit(args, cwd, { timeout: 30000 }));
+    assert.equal(m.get('fix/y'), 2);
+    assert.equal(m.get('main'), 0);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
