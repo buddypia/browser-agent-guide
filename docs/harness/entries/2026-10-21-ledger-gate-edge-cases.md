@@ -18,7 +18,7 @@
 
 ### `scripts/auto-ship.mjs`
 - **change**: `decide` sends the branch to a human when `optOuts` is null (the ledger gate could not run), instead of reading it as a pass.
-- **observed**: New; `make ship` worktrees start from `origin/main`, so this path is expected to be rare.
+- **observed**: New; `make ship` worktrees start from `origin/main`, so this path is expected to be rare. Landed on top of `2026-10-21-ci-gate-fast-local-loop` (CI-gated merge), whose row for this file stays pending; this edit only adds a reason before that CI wait.
 - **verdict**: pending
 
 ## Lesson

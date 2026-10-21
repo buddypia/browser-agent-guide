@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url';
 import { ALWAYS_ON_MAX, validateHarness } from '../scripts/check-harness.mjs';
 import { checkSyncPairs } from '../scripts/check-sync-pairs.mjs';
 
+// 呼び出し側の GIT_DIR / GIT_WORK_TREE が残ると、一時リポジトリ向けの git が本物の worktree に作用する。
+// 子プロセスへ継がせない(test/harness-library.test.mjs と同じ)。
+for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete process.env[k];
+
 globalThis.__HOOK_ORCHESTRATOR__ = true;
 const { run } = await import('../.claude/hooks/post-edit-invariants.mjs');
 
