@@ -186,6 +186,17 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         self.assertNotIn("feature/b", mine)
         self.assertIn("feature/b", other)
 
+    def test_cross_session_cleanup_keeps_other_sessions_checklist(self) -> None:
+        # Why: 横断 cleanup が他セッションの checklist を丸ごと消し、未完了の worktree の行まで失われていた。
+        done = self.repo / ".worktrees" / "feature" / "done"
+        open_wt = self.repo / ".worktrees" / "feature" / "open"
+        run(["add", str(done)], self.repo, session="other-session")
+        run(["add", str(open_wt)], self.repo, session="other-session")
+        run(["mark-merged", str(done)], self.repo, session="other-session")
+        run(["cleanup", "--confirmed"], self.repo, session="third-session")
+        other = (self.repo / ".tmp/worktree-guard-ledger/other-session.md").read_text(encoding="utf-8")
+        self.assertIn("feature/open", other)
+
     def test_post_tool_registers_standard_worktree_create(self) -> None:
         wt = self.repo / ".worktrees" / "feature" / "hooked"
         outside = self.repo / ".worktrees" / "feature" / "outside"

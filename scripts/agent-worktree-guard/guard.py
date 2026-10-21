@@ -794,12 +794,6 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def _clear_status(root: Path, session_id: str) -> None:
-    status = status_path(root, session_id)
-    if status.exists():
-        status.unlink()
-
-
 def delete_local_branch(root: Path, branch: str | None) -> bool:
     """merge 済みローカル branch を強制削除する。cleanup は pr_merged_at 記録後にのみ到達するため、
     squash-merge でローカル main に ff されていなくても安全に削除できる(-D)。
@@ -1141,7 +1135,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
             save_ledger(root, ledger)
             removed.append(item["path"])
             cleaned_items.append(item)
-        _clear_status(root, sid)
+        render_status(root, ledger)
         print(cleanup_summary_line(len(removed), cleaned_items))
         if cleaned_items:
             print()
@@ -1194,8 +1188,11 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                 f"{details}. Run `gh pr merge` (or `agent-worktree-guard mark-merged <path>`) first, then cleanup."
             )
 
-    for sid in touched | {session_id}:
-        _clear_status(root, sid)
+    # 消さずに作り直す: 横断 cleanup で触った他セッションにも未完了の worktree が残りうる。
+    if removed and not touched:
+        render_status(root, ledger)
+    for sid in touched:
+        render_status(root, ledgers[sid])
     print(cleanup_summary_line(len(removed), cleaned_items))
     if cleaned_items:
         print()
