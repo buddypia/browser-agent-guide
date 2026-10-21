@@ -7,6 +7,9 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// 呼び出し側の GIT_DIR / GIT_WORK_TREE(worktree-init が CLI 設定へ注入する)が残ると、一時リポジトリ向けの
+// git add -A / commit が本物の worktree に作用する。子プロセスへ継がせない。
+for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete process.env[k];
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(HERE, '..', '..', 'scripts', 'glossary', 'check-staleness.mjs');

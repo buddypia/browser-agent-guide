@@ -23,7 +23,7 @@
    ▼                                                          ▼
 validate.mjs(参照存在/enum/鮮度/孤立)        check-staleness.mjs(ガード範囲が変わったら
                                               last_verified の前進を要求 = ドキュメント更新の強制)
-   └──────────── npm run check / pre-commit hook / CI(.github/workflows/glossary.yml) ───────────┘
+   └──────────── npm run check / pre-commit hook / CI(.github/workflows/ci.yml) ───────────┘
 ```
 
 ## 構成要素
@@ -38,7 +38,7 @@ validate.mjs(参照存在/enum/鮮度/孤立)        check-staleness.mjs(ガー�
 | `scripts/glossary/build-traceability.mjs` | 用語⇄コードの RTM を生成(`npm run glossary:trace`)。|
 | `scripts/glossary/touch.mjs` | `last_verified` を今日に更新(`npm run glossary:touch <id>`)。|
 | `scripts/glossary/install-git-hook.sh` | pre-commit hook を導入(ローカル早期ゲート)。|
-| `.github/workflows/glossary.yml` | サーバ側の最終ゲート(hook を回避しても必ず捕捉)。|
+| `.github/workflows/ci.yml`(fast ジョブ) | サーバ側の最終ゲート(hook を回避しても必ず捕捉)。|
 
 ## なぜ「コードを直したら用語を更新」が機械的に効くのか
 
@@ -88,11 +88,11 @@ AI は着手前に、関連する用語エントリだけを読み、次を復�
 
 1. **ローカル pre-commit hook**(`bash scripts/glossary/install-git-hook.sh`) … 最速のフィードバック。
    緊急回避は `git commit --no-verify`(CI が後段で必ず捕捉)。
-2. **`npm run check`** … `check:glossary` + `glossary:staleness`(base は origin/main)+ `test:glossary` を含む
-   (手元の総合ゲート)。`make ship` はこれを通すので、CI を待たずに自動マージする経路でも staleness が効く。
+2. **`npm run check:fast`** … `check:glossary` + `glossary:staleness`(base は origin/main)+ `test:glossary` を含む
+   (手元の速いゲート。`npm run check` も含む)。`make ship` は push 前にこれを通し、マージ前に CI も待つ。
    以前は staleness が入っておらず、CI で初めて落ちた(2026-10-14, #108)。
-3. **CI**(`.github/workflows/glossary.yml`) … hook を回避しても止まる最終ゲート。
-   PR で `check-staleness --base origin/<base>` を回す。
+3. **CI**(`.github/workflows/ci.yml`(fast ジョブ)) … hook を回避しても止まる最終ゲート。
+   PR では HEAD が main へのマージコミットなので、`check:fast` の staleness(base origin/main)がそのまま PR の差分を見る。
 
 `last_verified` は日付単位なので、base が既に今日の日付だと2度目の変更では前進できない。その場合に限り、
 同じ変更で本文(frontmatter 以外)を実装に合わせて直していれば再検証とみなす。古い日付のままの本文修正と

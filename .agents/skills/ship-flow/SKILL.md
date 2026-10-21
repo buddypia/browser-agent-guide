@@ -12,7 +12,7 @@ GitHub Flow: never commit straight to `main`. Branch from `main` (`feat/…`, `f
 make wt.new BR=feature/<task>     # create a fresh worktree from origin/main
 make wt.run CMD="npm run check"   # run a command in the active worktree
 make q.check                      # root npm run check + daemon npm test
-make -C <worktree> ship           # finished work: test → AI review → PR → auto-merge if small → cleanup (DRY=1 = decide only)
+make -C <worktree> ship           # finished work: check:fast → PR → AI review + CI → auto-merge if small → cleanup (DRY=1 = decide only, no CI)
 make clean.branches               # clean up all local branches already merged into origin/main (DRY=1 = decide only)
 make setup.skills                 # interactive setup of skills across agent CLI environments (with overwrite prompt)
 make setup.mcp                    # interactive setup of MCP daemon & registration to Claude Code
@@ -21,7 +21,7 @@ Tracked source changes are made in an owned worktree, normally `.worktrees/<bran
 
 ## Default: `make -C <worktree> ship` (all CLIs: Claude Code / Codex / Antigravity)
 
-When the task's work is committed in its worktree, run it instead of asking the PR question. `scripts/auto-ship.mjs` runs `npm run check` (+ daemon tests if `daemon/` changed), a read-only headless `claude -p` review, pushes and opens the PR, and — only if every gate passes — squash-merges and runs `agent-worktree-guard` `mark-merged` + `cleanup --confirmed`. The repo owner authorized auto-merge for changes that pass these gates (2026-10-08); the hooks only see `make ship`, so the script itself is the merge gate for this path.
+When the task's work is committed in its worktree, run it instead of asking the PR question. `scripts/auto-ship.mjs` runs `npm run check:fast` locally (a failure pushes nothing), pushes and opens the PR so CI starts, runs a read-only headless `claude -p` review meanwhile and writes it into the PR body, then waits for the CI jobs in `CI_JOBS` (`fast`, `daemon`, `e2e`) to pass on that exact HEAD (check runs by SHA, 30 min timeout, a missing job fails closed), and — only if every gate passes — squash-merges and runs `agent-worktree-guard` `mark-merged` + `cleanup --confirmed`. Browser E2E and daemon tests run only in CI here; a CI failure is `AUTO_SHIP FAILED: CI failed: <pr>/checks` — read the failing job's log (`gh run view --log-failed`), fix, commit, re-run. If the log shows a flake unrelated to the change (a timeout in a spec you did not touch), `gh run rerun --failed <run-id>` and re-run `make ship` on the same HEAD; it reads the newest runs for that SHA. The repo owner authorized auto-merge for changes that pass these gates (2026-10-08); the hooks only see `make ship`, so the script itself is the merge gate for this path.
 
 Gates that stop at an open PR (`AUTO_SHIP NEEDS_HUMAN`): size or protected paths (`MAX_FILES`/`MAX_LINES`/`PROTECTED` in `scripts/auto-ship.mjs` are the source of truth), review verdict `request_changes`, or review scope `large` (big refactor / large feature / architecture or data-format change); review failure fails closed. On `NEEDS_HUMAN` report the PR URL + reasons and fall back to the manual flow below (which then still requires the Pre-Ship panel + human confirmation before merge). On `FAILED` fix and re-run (a harness change without a `docs/harness/` entry fails `npm run check:harness`: see the harness-rules skill). Do not loosen the thresholds or the protected list to get a merge through.
 
@@ -30,7 +30,7 @@ Gates that stop at an open PR (`AUTO_SHIP NEEDS_HUMAN`): size or protected paths
 Goes through `gh` directly:
 1. Commit in the worktree (`git -C <wt>`).
 2. After the human agrees to a PR, run `agent-worktree-guard confirm-pr --confirmed`, then `gh pr create`.
-3. Before `gh pr merge` (irreversible), present the 7-section Pre-Ship Human Review Panel, get explicit user confirmation, and run `node .claude/scripts/mark-pre-ship-confirmed.mjs <branch> --quality <agent_go|self_review_pass|trivial_skip>` as a separate command; `pre-ship-review-guard` blocks the merge until that marker is fresh (10 min) and its deny message lists the panel sections.
+3. Before `gh pr merge` (irreversible), check CI is green (`gh pr checks <n>`), present the 7-section Pre-Ship Human Review Panel, get explicit user confirmation, and run `node .claude/scripts/mark-pre-ship-confirmed.mjs <branch> --quality <agent_go|self_review_pass|trivial_skip>` as a separate command; `pre-ship-review-guard` blocks the merge until that marker is fresh (10 min) and its deny message lists the panel sections.
 4. Run `gh pr merge` from the worktree **without `--delete-branch`/`-d`** (gh would fail its local `main` checkout yet exit 0 — verify with `gh pr view <n> --json state`; `merge-guard.mjs` denies the flag).
 5. Right after the merge, run `make -C <wt> ship` again. It finds the merged PR for this HEAD, skips tests and review, and only cleans up (below). The merge is not finished until it prints `AUTO_SHIP MERGED: … (worktree cleaned up)`.
 

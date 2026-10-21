@@ -1,10 +1,13 @@
 #!/usr/bin/env node
-// auto-ship: test → AI review → PR → (small changes only) squash merge → worktree cleanup.
+// auto-ship: fast local checks → push + PR → AI review while CI runs → (small changes, CI green) squash merge → cleanup.
 //
 // Run from inside a finished, fully committed worktree: `make ship` (or `node scripts/auto-ship.mjs`).
+// Locally it runs only `npm run check:fast` (node-only, seconds). Browser E2E and daemon tests run in CI
+// (.github/workflows/ci.yml) and the merge waits for every CI_JOBS run on this exact HEAD: on a machine shared by
+// parallel AI sessions the local E2E took minutes and failed under load on a clean main (2026-10-21).
 // Large or guardrail-touching changes, a failed review, or any error stop at an open PR for a human.
 // Re-run it after any other merge (`gh pr merge`, GitHub Web): it finds the merged PR for HEAD and only cleans up.
-// --dry-run runs checks + review and prints the decision without pushing.
+// --dry-run runs the fast checks + review and prints the decision without pushing (CI does not run).
 //
 // The guard hooks only see `make ship`, not the gh calls inside it, so this script IS the merge gate
 // for the auto path. Residual risk: the reviewer reads AI-authored diff text that could try to steer it;
@@ -21,6 +24,11 @@ export const MAX_LINES = 400;
 // Changes here alter the agents' own guardrails, permissions, or this script — always a human call.
 export const PROTECTED = [/^\.claude\//, /^\.codex\//, /^\.agents\/hooks\.json$/, /^\.github\//, /^scripts\/agent-worktree-guard\//, /^scripts\/auto-ship\.mjs$/, /^test\/auto-ship\.test\.mjs$/, /^manifest\.json$/, /^Makefile$/];
 const MAX_DIFF_CHARS = 150_000;
+// Job names in .github/workflows/ci.yml. All must pass on HEAD; a missing one stays pending, so a renamed or
+// deleted job fails closed at CI_TIMEOUT_MS instead of merging untested.
+export const CI_JOBS = ['fast', 'daemon', 'e2e'];
+const CI_TIMEOUT_MS = 30 * 60_000;
+const CI_POLL_SECS = 15;
 
 /** Pure merge decision. Returns the reasons a human must decide; empty = auto-merge. */
 export function decide({ files, lines, review, optOuts = [] }) {
@@ -48,6 +56,14 @@ export function prTitle(commits, branch) {
 /** The merged PR whose head is exactly this HEAD. Commits added after the merge are new work: no match. */
 export function mergedPr(prs, head) {
   return (Array.isArray(prs) ? prs : []).find((p) => p?.headRefOid === head) || null;
+}
+
+/** Reduce GitHub check runs for one commit to pass | fail | pending over the required job names. */
+export function ciState(runs, jobs = CI_JOBS) {
+  const byName = new Map((Array.isArray(runs) ? runs : []).map((r) => [r?.name, r]));
+  const required = jobs.map((j) => byName.get(j));
+  if (required.some((r) => r?.status === 'completed' && !['success', 'skipped', 'neutral'].includes(r.conclusion))) return 'fail';
+  return required.every((r) => r?.status === 'completed') ? 'pass' : 'pending';
 }
 
 export function parseReview(stdout) {
@@ -100,15 +116,28 @@ function main(dryRun) {
   const lines = numstat.reduce((n, c) => n + (Number(c[0]) || 0) + (Number(c[1]) || 0), 0);
   log(`${files.length} files, ${lines} lines changed`);
 
-  // Tests: a failure pushes nothing.
+  // Fast local gate: a failure pushes nothing. check:fast imports daemon modules, so the daemon needs deps too.
   const ensureDeps = (dir) => existsSync(join(dir, 'node_modules')) || run('npm', ['install', '--no-audit', '--no-fund'], dir);
-  const daemon = join(wt, 'daemon'); // UI specs import daemon modules, so it needs deps either way
+  const daemon = join(wt, 'daemon');
   if (!ensureDeps(wt) || !ensureDeps(daemon)) stop('FAILED', 'npm install failed');
-  if (!run('npm', ['run', 'check'], wt)) stop('FAILED', 'npm run check failed');
-  if (files.some((f) => f.startsWith('daemon/')) && !run('npm', ['test'], daemon)) stop('FAILED', 'daemon tests failed');
+  if (!run('npm', ['run', 'check:fast'], wt)) stop('FAILED', 'npm run check:fast failed');
+
+  // Push + PR before the review, so CI runs on GitHub while the review runs here (reuse only an OPEN PR).
+  const commits = sh('git', ['log', '--format=- %s', 'origin/main..HEAD'], wt);
+  const openPr = () => JSON.parse(sh('gh', ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number,url'], wt))[0];
+  let pr;
+  if (!dryRun) {
+    spawnSync(guard, ['mark-done', wt, '--reason', 'push'], { cwd: wt, stdio: 'ignore' });
+    if (!run('git', ['push', '-u', 'origin', 'HEAD'], wt)) stop('FAILED', 'git push failed');
+    pr = openPr();
+    if (!pr) {
+      sh('gh', ['pr', 'create', '--base', 'main', '--head', branch, '--title', prTitle(commits, branch), '--body', 'AI review (auto-ship) in progress.'], wt);
+      pr = openPr();
+    }
+    if (!pr) stop('FAILED', `pushed ${branch}, but no open PR was found for it`);
+  }
 
   // AI review in a hook-free, read-only headless Claude session (--restricted ignores project settings/hooks).
-  const commits = sh('git', ['log', '--format=- %s', 'origin/main..HEAD'], wt);
   let diff = sh('git', ['diff', range], wt);
   if (diff.length > MAX_DIFF_CHARS) diff = `${diff.slice(0, MAX_DIFF_CHARS)}\n[diff truncated]`;
   const prompt = `You are reviewing an AI-authored change to this repository before it is auto-merged to main.
@@ -134,18 +163,25 @@ ${diff}
   const alwaysOn = after === before ? 'unchanged' : `${before} → ${after} chars (${after > before ? '+' : ''}${after - before})`;
   const body = `## AI review (auto-ship)\n\n- verdict: ${review.verdict} / scope: ${review.scope}\n- size: ${files.length} files, ${lines} lines\n- always-on AGENTS.md: ${alwaysOn}\n- decision: ${reasons.length ? `human review — ${reasons.join('; ')}` : 'auto-merge'}\n\n${review.summary}\n${review.issues.map((i) => `- ${i}`).join('\n')}\n`;
   console.error(body);
-  if (dryRun) stop(reasons.length ? 'NEEDS_HUMAN' : 'WOULD_MERGE', reasons.join('; ') || 'all gates passed');
-
-  // Push + PR (reuse only an OPEN PR for this branch).
-  spawnSync(guard, ['mark-done', wt, '--reason', 'push'], { cwd: wt, stdio: 'ignore' });
-  if (!run('git', ['push', '-u', 'origin', 'HEAD'], wt)) stop('FAILED', 'git push failed');
-  const openPr = () => JSON.parse(sh('gh', ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number,url'], wt))[0];
-  let pr = openPr();
-  if (!pr) {
-    sh('gh', ['pr', 'create', '--base', 'main', '--head', branch, '--title', prTitle(commits, branch), '--body', body], wt);
-    pr = openPr();
-  }
+  if (dryRun) stop(reasons.length ? 'NEEDS_HUMAN' : 'WOULD_MERGE', `${reasons.join('; ') || 'all local gates passed'} (CI not run)`);
+  // The body is the human's record of the review; a failed edit must not block the gates below.
+  if (!run('gh', ['pr', 'edit', String(pr.number), '--body', body], wt)) log(`warning: could not write the review into ${pr.url}`);
   if (reasons.length) stop('NEEDS_HUMAN', `${pr.url} — ${reasons.join('; ')}`);
+
+  // CI on this exact commit (check runs by SHA, so a previous push's green checks can never count).
+  const deadline = Date.now() + CI_TIMEOUT_MS;
+  let ci = 'pending';
+  log(`waiting for CI (${CI_JOBS.join(', ')}) on ${head.slice(0, 8)}…`);
+  while (ci === 'pending' && Date.now() < deadline) {
+    spawnSync('sleep', [String(CI_POLL_SECS)]);
+    try {
+      ci = ciState(JSON.parse(sh('gh', ['api', `repos/{owner}/{repo}/commits/${head}/check-runs?per_page=100`, '--jq', '.check_runs'], wt)));
+    } catch (e) {
+      log(`CI status read failed, retrying: ${e.message.split('\n')[0]}`);
+    }
+  }
+  // check-runs returns the latest run per job, so after `gh run rerun --failed` a re-run of make ship sees the new result.
+  if (ci !== 'pass') stop('FAILED', `CI ${ci === 'fail' ? 'failed' : 'did not finish in time'}: ${pr.url}/checks — read \`gh run view --log-failed\`; fix, commit and re-run make ship (flake on the same HEAD: \`gh run rerun --failed\` first)`);
 
   // No --delete-branch: cleanup deletes the remote branch.
   // --match-head-commit: refuse if the branch moved after the tested/reviewed HEAD.
