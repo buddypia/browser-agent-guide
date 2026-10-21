@@ -40,7 +40,8 @@ export function decide({ files, lines, review, optOuts = [] }) {
   if (review?.verdict !== 'approve') reasons.push('AI review did not approve');
   if (review?.scope !== 'small') reasons.push('AI review did not judge the change small');
   // The Harness-Entry trailer is evidence the shipping agent writes about itself, so a person confirms it.
-  if (optOuts.length) reasons.push(`harness changes skip the experience library (Harness-Entry trailer): ${optOuts.join(', ')}`);
+  if (optOuts === null) reasons.push('the harness ledger gate could not run (no origin/main to diff against)');
+  else if (optOuts.length) reasons.push(`harness changes skip the experience library (Harness-Entry trailer): ${optOuts.join(', ')}`);
   return reasons;
 }
 

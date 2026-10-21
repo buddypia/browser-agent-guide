@@ -22,6 +22,8 @@ test('protected paths send to human', () => {
   assert.deepEqual(decide({ files: ['.agents/skills/bag-memo/SKILL.md'], lines: 1, review: ok }), []);
   // A Harness-Entry trailer skips the experience library on the agent's own word, so a person confirms it.
   assert.match(decide({ files: ['.agents/skills/bag-memo/SKILL.md'], lines: 1, review: ok, optOuts: ['.agents/skills/bag-memo/SKILL.md'] }).join(), /Harness-Entry trailer/);
+  // No origin/main means the ledger gate never ran; that must not read as a pass.
+  assert.match(decide({ files: ['a.js'], lines: 1, review: ok, optOuts: null }).join(), /ledger gate could not run/);
 });
 
 test('review verdict and scope gate the merge', () => {

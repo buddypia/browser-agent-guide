@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url';
 import { ALWAYS_ON_MAX, validateHarness } from '../scripts/check-harness.mjs';
 import { checkSyncPairs } from '../scripts/check-sync-pairs.mjs';
 
+// 呼び出し側の GIT_DIR / GIT_WORK_TREE が残ると、一時リポジトリ向けの git が本物の worktree に作用する。
+// 子プロセスへ継がせない(test/harness-library.test.mjs と同じ)。
+for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete process.env[k];
+
 globalThis.__HOOK_ORCHESTRATOR__ = true;
 const { run } = await import('../.claude/hooks/post-edit-invariants.mjs');
 
@@ -66,6 +70,15 @@ describe('check-harness', () => {
     const r = spawnSync(process.execPath, [join(link, 'scripts/check-harness.mjs')], { encoding: 'utf8' });
     assert.equal(r.status, 1, r.stdout + r.stderr);
     assert.match(r.stderr, /missing or empty/);
+  });
+
+  test('the CLI says so when the ledger gate cannot run (no origin/main)', () => {
+    const copy = (rel) => readFileSync(join(ROOT, rel));
+    const root = makeRepo({ ...BASE, 'scripts/check-harness.mjs': copy('scripts/check-harness.mjs'), 'scripts/harness-library.mjs': copy('scripts/harness-library.mjs') });
+    spawnSync('git', ['init', '-q'], { cwd: root });
+    const r = spawnSync(process.execPath, [join(root, 'scripts/check-harness.mjs')], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stderr, /ledger gate skipped: no origin\/main/);
   });
 
   test('AGENTS.md: cap, empty, Jinja, CLAUDE.md import', () => {
