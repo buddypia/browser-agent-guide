@@ -29,7 +29,7 @@ agent-worktree-guard status
 
 `add` wraps `git worktree add`, records only the current session ledger, writes
 `.tmp/.agent_worktree_owner.json` inside the new worktree, and adds a pending
-line to `.tmp/.worktree_status.md`.
+line to the session's checklist `.tmp/worktree-guard-ledger/<session>.md`.
 
 Successful standard worktree creation commands such as `make wt.new
 BR=feature/x` and `worktree-new.mjs --branch feature/x` are also registered from
@@ -68,8 +68,8 @@ reported on stderr plus the `cleaned N worktree(s)` summary line
 The guard creates local runtime state and keeps it ignored:
 
 ```text
-.tmp/.worktree_status.md
 .tmp/worktree-guard-ledger/<session_id>.json
+.tmp/worktree-guard-ledger/<session_id>.md
 .tmp/.agent_worktree_owner.json
 ```
 
@@ -118,8 +118,8 @@ per-machine `GIT_WORK_TREE` / `GIT_DIR` values there.
 
 `.githooks/pre-push` checks ledger-owned worktrees before push:
 
-- if a registered worktree is being pushed but `.tmp/.worktree_status.md` is
-  missing, the push is rejected;
+- if a registered worktree is being pushed but the session's checklist
+  `.tmp/worktree-guard-ledger/<session_id>.md` is missing, the push is rejected;
 - if the pushed branch corresponds to an incomplete ledger entry, the push is
   rejected and the user is asked to update the checklist.
 

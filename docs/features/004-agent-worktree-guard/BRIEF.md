@@ -19,7 +19,7 @@ layers: wrapper CLI, Claude/Codex hooks, and a Git pre-push template.
 
 - `agent-worktree-guard` / `awtg` CLI wrappers.
 - Per-session ledger under `.tmp/worktree-guard-ledger/`.
-- Checklist under `.tmp/.worktree_status.md`.
+- Per-session checklist under `.tmp/worktree-guard-ledger/<session>.md`.
 - Per-worktree owner marker under `.tmp/.agent_worktree_owner.json`.
 - Claude Code, Codex, Antigravity, and Git hook integration.
 - Safety documentation and focused lifecycle tests.

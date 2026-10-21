@@ -20,10 +20,10 @@ jobs:
   fast:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # glossary:staleness と check:harness の台帳ゲートが origin/main との merge-base を見る
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22 # node --test のグロブ展開(test:glossary)は Node 21+ が必要
       # --ignore-scripts: postinstall(setup-skills)は CLI ごとの skill 配置で、CI には不要
@@ -36,8 +36,8 @@ jobs:
   daemon:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: npm ci
@@ -50,7 +50,7 @@ jobs:
     # 字幅の広い DejaVu Sans になり、360px で道具が折り返して決定的に落ちた(#157 の初回 CI)。開発機と同じ OS で回す。
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2 # PR のマージコミットと base(HEAD^1)の差分で対象を決める
       # 文書だけの PR はブラウザを起動しない(.md / docs/ / glossary/ はどの spec も読まない)。main への push は常に全部。
@@ -62,7 +62,7 @@ jobs:
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.scope.outputs.run == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
       - if: steps.scope.outputs.run == 'true'
@@ -72,7 +72,7 @@ jobs:
       - if: steps.scope.outputs.run == 'true'
         run: npm run test:e2e
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-test-results
           path: test-results/
