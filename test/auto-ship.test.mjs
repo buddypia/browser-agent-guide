@@ -19,6 +19,8 @@ test('protected paths send to human', () => {
     assert.match(decide({ files: [f], lines: 1, review: ok }).join(), /protected paths/, f);
   }
   assert.deepEqual(decide({ files: ['.agents/skills/bag-memo/SKILL.md'], lines: 1, review: ok }), []);
+  // A Harness-Entry trailer skips the experience library on the agent's own word, so a person confirms it.
+  assert.match(decide({ files: ['.agents/skills/bag-memo/SKILL.md'], lines: 1, review: ok, optOuts: ['.agents/skills/bag-memo/SKILL.md'] }).join(), /Harness-Entry trailer/);
 });
 
 test('review verdict and scope gate the merge', () => {

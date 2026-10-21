@@ -6,7 +6,8 @@
  * harness2 (Google Research) 의 원칙: 에이전트가 계속 건너뛰는 규칙은 always-on 산문을 늘리지 말고
  * tool loop 안에서 기계적으로 막는다. 편집 직후, 편집된 경로가 영향을 줄 수 있는 검사만 돌려서
  * 위반이 있으면 {decision:'block', reason} 으로 이유를 모델에게 즉시 돌려준다 (편집 자체는 이미 끝남).
- *   - AGENTS.md / CLAUDE.md / .agents/skills/** / hook 파일 → scripts/check-harness.mjs
+ *   - AGENTS.md / CLAUDE.md / .agents/skills/** / .claude/agents/** / docs/harness/** / hook 파일 → scripts/check-harness.mjs
+ *     (경험 라이브러리 형식·INDEX 최신 여부 포함. origin/main 대비 ledger gate 는 CLI 에서만 — 편집 도중엔 항목이 아직 없다)
  *   - sync pair 의 한쪽 (slug 사본, recipe/agent 동사 allow-list) → scripts/check-sync-pairs.mjs
  *   - .claude/hooks/** · .claude/scripts/** → .claude/scripts/check-hook-refs.mjs (hook 은 import 실패 시 fail-OPEN)
  * 검사는 편집된 파일을 담은 checkout 기준 (worktree 는 그 자체가 root). 이 프로젝트가 아닌 checkout 은 건너뛴다.
