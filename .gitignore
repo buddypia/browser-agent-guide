@@ -49,7 +49,6 @@ venv/
 .tmp/
 tmp/
 *.tmp
-.tmp/.worktree_status.md
 .tmp/worktree-guard-ledger/
 .tmp/.agent_worktree_owner.json
 

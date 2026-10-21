@@ -17,6 +17,7 @@ CLI = Path(__file__).with_name("agent-worktree-guard")
 for _k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
     os.environ.pop(_k, None)
 SESSION = "test-session"
+STATUS = Path(".tmp/worktree-guard-ledger") / f"{SESSION}.md"
 def run(args: list[str], cwd: Path, *, stdin: str | None = None, check: bool = True, session: str = SESSION):
     result = subprocess.run(
         [str(CLI), "--session-id", session, *args],
@@ -59,9 +60,8 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         wt = self.repo / ".worktrees" / "feature" / "sample"
 
         run(["init"], self.repo)
-        self.assertTrue((self.repo / ".tmp/.worktree_status.md").exists())
+        self.assertTrue((self.repo / STATUS).exists())
         gitignore = (self.repo / ".gitignore").read_text(encoding="utf-8")
-        self.assertIn(".tmp/.worktree_status.md", gitignore)
         self.assertIn(".tmp/worktree-guard-ledger/", gitignore)
         self.assertIn(".tmp/.agent_worktree_owner.json", gitignore)
 
@@ -69,7 +69,7 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         ledger = json.loads((self.repo / ".tmp/worktree-guard-ledger/test-session.json").read_text())
         self.assertEqual(len(ledger["worktrees"]), 1)
         self.assertTrue((wt / ".tmp/.agent_worktree_owner.json").exists())
-        self.assertIn("- [ ]", (self.repo / ".tmp/.worktree_status.md").read_text(encoding="utf-8"))
+        self.assertIn("- [ ]", (self.repo / STATUS).read_text(encoding="utf-8"))
 
         (wt / "feature.txt").write_text("work\n", encoding="utf-8")
         subprocess.run(["git", "add", "feature.txt"], cwd=wt, check=True)
@@ -98,7 +98,7 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         self.assertIn("deny", denied.stdout)
 
         run(["mark-done", str(wt), "--reason", "manual"], self.repo)
-        status = (self.repo / ".tmp/.worktree_status.md").read_text(encoding="utf-8")
+        status = (self.repo / STATUS).read_text(encoding="utf-8")
         self.assertIn("- [x]", status)
 
         audit = run(["audit"], self.repo)
@@ -175,6 +175,16 @@ class AgentWorktreeGuardTest(unittest.TestCase):
         self.assertFalse(wt.exists())
         self.assertTrue(outside.exists())
         subprocess.run(["git", "worktree", "remove", str(outside), "--force"], cwd=self.repo, check=True)
+
+    def test_status_checklist_is_per_session(self) -> None:
+        # Why: 1 ファイルを全セッションで共有していて、最後に書いたセッションの内容しか残らなかった。
+        run(["add", str(self.repo / ".worktrees" / "feature" / "a")], self.repo)
+        run(["add", str(self.repo / ".worktrees" / "feature" / "b")], self.repo, session="other-session")
+        mine = (self.repo / STATUS).read_text(encoding="utf-8")
+        other = (self.repo / ".tmp/worktree-guard-ledger/other-session.md").read_text(encoding="utf-8")
+        self.assertIn("feature/a", mine)
+        self.assertNotIn("feature/b", mine)
+        self.assertIn("feature/b", other)
 
     def test_post_tool_registers_standard_worktree_create(self) -> None:
         wt = self.repo / ".worktrees" / "feature" / "hooked"

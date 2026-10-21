@@ -24,11 +24,9 @@ PROMPT_QUESTION = (
 
 TOOL_NAME = "Agent Worktree Guard"
 SCHEMA_VERSION = "1.0"
-STATUS_REL = Path(".tmp/.worktree_status.md")
 OWNER_REL = Path(".tmp/.agent_worktree_owner.json")
 LEDGER_DIR_REL = Path(".tmp/worktree-guard-ledger")
 GITIGNORE_ENTRIES = [
-    ".tmp/.worktree_status.md",
     ".tmp/worktree-guard-ledger/",
     ".tmp/.agent_worktree_owner.json",
 ]
@@ -175,8 +173,9 @@ def ledger_path(root: Path, session_id: str) -> Path:
     return root / LEDGER_DIR_REL / f"{safe_session_id(session_id)}.json"
 
 
-def status_path(root: Path) -> Path:
-    return root / STATUS_REL
+def status_path(root: Path, session_id: str) -> Path:
+    # セッションごとの checklist。1 ファイル共有だと最後に書いたセッションの内容しか残らない。
+    return root / LEDGER_DIR_REL / f"{safe_session_id(session_id)}.md"
 
 
 def owner_path(worktree_path: Path) -> Path:
@@ -253,7 +252,7 @@ def ensure_gitignore(root: Path) -> None:
 
 
 def render_status(root: Path, ledger: dict[str, Any]) -> None:
-    path = status_path(root)
+    path = status_path(root, ledger["session_id"])
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = [
         "# Agent Worktree Guard Status",
@@ -449,7 +448,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     session_id = current_session_id(explicit=args.session_id)
     ledger = ensure_runtime(root, session_id)
     print(f"Initialized {TOOL_NAME}")
-    print(f"status={status_path(root)}")
+    print(f"status={status_path(root, ledger['session_id'])}")
     print(f"ledger={ledger_path(root, ledger['session_id'])}")
     return 0
 
@@ -791,12 +790,12 @@ def cmd_status(args: argparse.Namespace) -> int:
     session_id = current_session_id(explicit=args.session_id)
     ledger = load_ledger(root, session_id, create=args.create)
     render_status(root, ledger)
-    print(status_path(root).read_text(encoding="utf-8"), end="")
+    print(status_path(root, session_id).read_text(encoding="utf-8"), end="")
     return 0
 
 
-def _clear_status(root: Path) -> None:
-    status = status_path(root)
+def _clear_status(root: Path, session_id: str) -> None:
+    status = status_path(root, session_id)
     if status.exists():
         status.unlink()
 
@@ -1142,7 +1141,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
             save_ledger(root, ledger)
             removed.append(item["path"])
             cleaned_items.append(item)
-        _clear_status(root)
+        _clear_status(root, sid)
         print(cleanup_summary_line(len(removed), cleaned_items))
         if cleaned_items:
             print()
@@ -1175,9 +1174,9 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     # 現 session で何も片付かなかった場合のみ、git worktree を owner marker 経由で横断解決し、
     # 別 session 所有の merged worktree も片付ける。session_id を解決できず(メイン repo からの手動
     # 実行など)空 ledger を見て黙って `cleaned 0` を返し、merged worktree を取りこぼすのを防ぐ。
+    touched: set[str] = set()
     if not removed:
         matches, ledgers, leftover_unmerged = discover_merged_across_sessions(root)
-        touched: set[str] = set()
         for sid, item in matches:
             _remove_worktree_item(item, root, sid, force=args.force)
             append_event(ledgers[sid], "cleanup", _cleanup_event_payload(item, force=args.force, cross_session=True))
@@ -1195,7 +1194,8 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                 f"{details}. Run `gh pr merge` (or `agent-worktree-guard mark-merged <path>`) first, then cleanup."
             )
 
-    _clear_status(root)
+    for sid in touched | {session_id}:
+        _clear_status(root, sid)
     print(cleanup_summary_line(len(removed), cleaned_items))
     if cleaned_items:
         print()
@@ -1715,7 +1715,7 @@ def git_hook_pre_push(args: argparse.Namespace) -> int:
         for item in ledger.get("worktrees", [])
         if item.get("status") != "cleaned"
     )
-    if in_registered_worktree and not status_path(root).exists():
+    if in_registered_worktree and not status_path(root, session_id).exists():
         eprint("[pre-push] Agent Worktree Guard status file is missing. Run `agent-worktree-guard init`.")
         return 1
 
