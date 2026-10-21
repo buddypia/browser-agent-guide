@@ -186,8 +186,10 @@ export function checkLedgerGate({ changed, entries, exempt = new Set(), hookTarg
   }
   const touched = new Set(entries.map((e) => e.name));
   const cited = entries.map((e) => e.src).join('\n');
+  // Whole names only: citing 2026-01-01-old-two must not count as citing 2026-01-01-old.
+  const cites = (name) => new RegExp(`(?<![a-z0-9-])${name.replace(/\.md$/, '')}(?![a-z0-9-])`).test(cited);
   for (const { name, src } of library) {
-    if (touched.has(name) || cited.includes(name.replace(/\.md$/, ''))) continue;
+    if (touched.has(name) || cites(name)) continue;
     const open = parseEntry(src).edits.filter((ed) => OPEN.has(ed.verdict) && harness.some((p) => covers(ed.component, p)));
     if (open.length) {
       errs.push(

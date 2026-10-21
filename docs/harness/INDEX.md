@@ -7,6 +7,7 @@ How to write and settle entries: `.agents/skills/harness-rules/SKILL.md`.
 
 | entry | date | dim | component → verdict | cue (when the lesson applies) |
 |---|---|---|---|---|
+| [Make the ledger gate say when it did not run, and cite entries by whole name](entries/2026-10-21-ledger-gate-edge-cases.md) | 2026-10-21 | INV | `scripts/check-harness.mjs` pending; `scripts/harness-library.mjs` pending; `scripts/auto-ship.mjs` pending | — |
 | [Add the harness experience library, its ledger gate and the reflector subagent](entries/2026-10-21-harness-experience-library.md) | 2026-10-21 | INV | `.agents/skills/harness-rules/` pending; `.agents/skills/ship-flow/` pending; `.claude/agents/harness-reflector.md` pending; `scripts/check-harness.mjs` pending; `scripts/harness-library.mjs` pending; `.claude/hooks/post-edit-invariants.mjs` pending; `scripts/auto-ship.mjs` pending | — |
 | [Cap AGENTS.md, move knowledge into skills, and port harness2's validator](entries/2026-10-18-port-harness2-validator.md) | 2026-10-18 | INV+DOM | `AGENTS.md` confounded; `.agents/skills/` confounded; `.agents/skills/bag-memo/SKILL.md` confounded; `.claude/hooks/post-edit-invariants.mjs` pending | A rule about file contents (frontmatter, allow-lists, sizes, paired files) that agents keep breaking although it is written down. |
 | [Remove the PLAN.md checkbox gate and the REVIEW.md Stop gate](entries/2026-10-14-remove-self-attested-ship-gates.md) | 2026-10-14 | INV | `.claude/scripts/mark-pre-ship-confirmed.mjs` confounded; `.claude/hooks/worktree-review-report-guard.mjs` confounded; `.claude/hooks/worktree-shipping-guard.mjs` hurt | A gate whose evidence is produced by the same agent it gates (a checkbox, a self-written report, a self-stamped marker). |
@@ -18,6 +19,7 @@ How to write and settle entries: `.agents/skills/harness-rules/SKILL.md`.
 
 Settle these when later evidence (a recurrence, a retro, a PR) isolates the edit.
 
+- [2026-10-21-ledger-gate-edge-cases.md](entries/2026-10-21-ledger-gate-edge-cases.md): `scripts/check-harness.mjs` pending, `scripts/harness-library.mjs` pending, `scripts/auto-ship.mjs` pending
 - [2026-10-21-harness-experience-library.md](entries/2026-10-21-harness-experience-library.md): `.agents/skills/harness-rules/` pending, `.agents/skills/ship-flow/` pending, `.claude/agents/harness-reflector.md` pending, `scripts/check-harness.mjs` pending, `scripts/harness-library.mjs` pending, `.claude/hooks/post-edit-invariants.mjs` pending, `scripts/auto-ship.mjs` pending
 - [2026-10-18-port-harness2-validator.md](entries/2026-10-18-port-harness2-validator.md): `AGENTS.md` confounded, `.agents/skills/` confounded, `.agents/skills/bag-memo/SKILL.md` confounded, `.claude/hooks/post-edit-invariants.mjs` pending
 - [2026-10-14-remove-self-attested-ship-gates.md](entries/2026-10-14-remove-self-attested-ship-gates.md): `.claude/scripts/mark-pre-ship-confirmed.mjs` confounded, `.claude/hooks/worktree-review-report-guard.mjs` confounded

@@ -68,6 +68,15 @@ describe('check-harness', () => {
     assert.match(r.stderr, /missing or empty/);
   });
 
+  test('the CLI says so when the ledger gate cannot run (no origin/main)', () => {
+    const copy = (rel) => readFileSync(join(ROOT, rel));
+    const root = makeRepo({ ...BASE, 'scripts/check-harness.mjs': copy('scripts/check-harness.mjs'), 'scripts/harness-library.mjs': copy('scripts/harness-library.mjs') });
+    spawnSync('git', ['init', '-q'], { cwd: root });
+    const r = spawnSync(process.execPath, [join(root, 'scripts/check-harness.mjs')], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stderr, /ledger gate skipped: no origin\/main/);
+  });
+
   test('AGENTS.md: cap, empty, Jinja, CLAUDE.md import', () => {
     hasError(errorsFor({ 'AGENTS.md': TRIGGER + 'x'.repeat(ALWAYS_ON_MAX) }), 'over the 8000 cap');
     hasError(errorsFor({ 'AGENTS.md': '' }), 'missing or empty');

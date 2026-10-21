@@ -125,6 +125,8 @@ describe('ledger gate', () => {
     hasError(checkLedgerGate({ changed: ['AGENTS.md'], entries: own, library: [old, ...own] }), '2026-01-01-old.md has open verdicts');
     const citing = [{ name: NAME, src: own[0].src.replace('The step ran', 'Follows 2026-01-01-old; the step ran') }];
     assert.deepEqual(checkLedgerGate({ changed: ['AGENTS.md'], entries: citing, library: [old, ...citing] }), []);
+    const near = [{ name: NAME, src: own[0].src.replace('The step ran', 'Follows 2026-01-01-old-two; the step ran') }];
+    hasError(checkLedgerGate({ changed: ['AGENTS.md'], entries: near, library: [old, ...near] }), '2026-01-01-old.md has open verdicts');
     assert.deepEqual(checkLedgerGate({ changed: ['AGENTS.md'], entries: [...own, old], library: [old, ...own] }), []);
     const settled = { ...old, src: ENTRY };
     assert.deepEqual(checkLedgerGate({ changed: ['AGENTS.md'], entries: own, library: [settled, ...own] }), []);

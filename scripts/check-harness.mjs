@@ -299,10 +299,13 @@ export function ledgerGate(root) {
   return inputs && checkLedgerGate(inputs);
 }
 
-/** Harness paths this branch exempts from the ledger with the trailer: self-attested, so `make ship` asks a human. */
+/**
+ * Harness paths this branch exempts from the ledger with the trailer: self-attested, so `make ship` asks a human.
+ * null when the gate cannot run (no origin/main), which `make ship` also hands to a human rather than passing.
+ */
 export function ledgerOptOuts(root) {
   const inputs = ledgerInputs(root);
-  return inputs ? [...inputs.exempt].filter((p) => inputs.changed.includes(p) && isLedgerPath(p, inputs.hookTargets)) : [];
+  return inputs ? [...inputs.exempt].filter((p) => inputs.changed.includes(p) && isLedgerPath(p, inputs.hookTargets)) : null;
 }
 
 // realpath: Node resolves symlinks for the main module, so a plain path compare would skip main (and pass) silently.
@@ -310,7 +313,9 @@ const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPat
 if (isMain) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const { errors, alwaysOnChars, skills } = validateHarness(root);
-  errors.push(...(ledgerGate(root) ?? []));
+  const gate = ledgerGate(root);
+  if (gate) errors.push(...gate);
+  else console.error('⚠ ledger gate skipped: no origin/main to diff against (git fetch origin); `make ship` will ask a human');
   if (errors.length) {
     for (const e of errors) console.error(`✗ ${e}`);
     process.exit(1);
