@@ -1511,6 +1511,9 @@ def detect_pretool_violation(command: str, root: Path, session_id: str, cwd: Pat
     return None
 
 
+PRETOOL_WORDS = re.compile(r"\b(git|gh|rm)\b")
+
+
 def hook_pre_tool(args: argparse.Namespace) -> int:
     data = read_stdin_json()
     if normalize_tool_name(data) != "Bash":
@@ -1518,6 +1521,10 @@ def hook_pre_tool(args: argparse.Namespace) -> int:
     tool_input = normalize_tool_input(data)
     command = tool_input.get("command")
     if not isinstance(command, str):
+        return hook_json({})
+    # Every rule below needs a git, gh or rm token. Skip the root lookup, ledger load and
+    # `git worktree list` (about 3 git calls) for the rest, since this runs on every Bash call.
+    if not PRETOOL_WORDS.search(command):
         return hook_json({})
     cwd = Path(str(data.get("cwd") or os.getcwd())).resolve(strict=False)
     try:

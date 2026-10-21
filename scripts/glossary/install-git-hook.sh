@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 用語集ゲートを git の pre-commit hook として導入する(ローカル早期フィードバック)。
-# CI(.github/workflows/glossary.yml)がサーバ側の最終ゲート。hook はあくまで補助。
+# CI(.github/workflows/ci.yml の fast ジョブ)がサーバ側の最終ゲート。hook はあくまで補助。
 #
 # 使い方:  bash scripts/glossary/install-git-hook.sh
 # 解除:    rm "$(git rev-parse --git-common-dir)/hooks/pre-commit"

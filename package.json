@@ -29,7 +29,10 @@
   ],
   "scripts": {
     "postinstall": "node .claude/scripts/setup-skills.mjs",
-    "check": "npm run check:js && npm run check:harness && npm run check:sync && npm run check:markers && npm run check:glossary && npm run glossary:staleness && npm run test:glossary && npm test && npm run test:slug && npm run test:recipe && npm run test:prompt && npm run test:workflow-lib && npm run test:eg2 && npm run test:judge && npm run test:ai-client && npm run test:agent-verbs && npm run test:ship && npm run test:agy-hooks && npm run test:harness && npm run test:pf && npm run test:ui",
+    "check": "npm run check:fast && npm run test:guard && npm run test:e2e",
+    "check:fast": "node scripts/run-checks.mjs check:js check:harness check:sync check:markers check:glossary glossary:staleness test:glossary test:slug test:recipe test:prompt test:workflow-lib test:eg2 test:judge test:ai-client test:agent-verbs test:ship test:agy-hooks test:harness test:pf",
+    "test:e2e": "npm test && npm run test:ui",
+    "test:guard": "python3 scripts/agent-worktree-guard/test_guard.py",
     "check:js": "node scripts/check-js.mjs",
     "check:harness": "node scripts/check-harness.mjs",
     "harness:index": "node scripts/harness-library.mjs",

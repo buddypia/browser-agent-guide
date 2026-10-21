@@ -13,6 +13,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// 호출 측의 GIT_DIR / GIT_WORK_TREE(worktree-init 이 CLI 설정에 주입)가 남으면 임시 리포지토리용 git 이
+// 실제 worktree 에 작용한다. 자식 프로세스에 물려주지 않는다.
+for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete process.env[k];
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const AGENTS_DIR = join(ROOT, '.agents');
