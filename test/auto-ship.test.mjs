@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { decide, mergedPr, parseReview, prTitle } from '../scripts/auto-ship.mjs';
+import { CI_JOBS, ciState, decide, mergedPr, parseReview, prTitle } from '../scripts/auto-ship.mjs';
 
 const ok = { verdict: 'approve', scope: 'small', summary: '', issues: [] };
 
@@ -48,4 +49,27 @@ test('a merged PR counts only when its head is exactly this HEAD', () => {
   assert.equal(mergedPr(prs, 'ccc'), null);
   assert.equal(mergedPr([], 'aaa'), null);
   assert.equal(mergedPr(undefined, 'aaa'), null);
+});
+
+test('CI gate passes only when every required job finished green on the commit', () => {
+  const done = (name, conclusion = 'success') => ({ name, status: 'completed', conclusion });
+  assert.equal(ciState([done('fast'), done('daemon'), done('e2e')]), 'pass');
+  // A docs-only PR skips the e2e steps; the job itself still succeeds.
+  assert.equal(ciState([done('fast'), done('daemon'), done('e2e', 'skipped')]), 'pass');
+  // Right after a push no runs are registered yet, and a job can lag behind the others.
+  assert.equal(ciState([]), 'pending');
+  assert.equal(ciState([done('fast'), done('daemon')]), 'pending');
+  assert.equal(ciState([done('fast'), done('daemon'), { name: 'e2e', status: 'in_progress', conclusion: null }]), 'pending');
+  // One red job fails at once, without waiting for the rest.
+  assert.equal(ciState([done('fast', 'failure'), { name: 'e2e', status: 'queued', conclusion: null }]), 'fail');
+  assert.equal(ciState([done('fast'), done('daemon'), done('e2e', 'cancelled')]), 'fail');
+  // Unrelated check runs neither satisfy nor block the gate.
+  assert.equal(ciState([done('fast'), done('daemon'), done('e2e'), done('other', 'failure')]), 'pass');
+  assert.equal(ciState(null), 'pending');
+});
+
+test('every job make ship waits for exists in the CI workflow', () => {
+  // A renamed job would never report, and make ship would wait out its timeout before failing.
+  const yml = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  for (const job of CI_JOBS) assert.match(yml, new RegExp(`^  ${job}:$`, 'm'), job);
 });

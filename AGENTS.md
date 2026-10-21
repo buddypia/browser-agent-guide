@@ -3,7 +3,7 @@
 Browser Agent Guide is a **working Chrome Manifest V3 side-panel extension** (not a guide doc), plus a separate local Node daemon. The extension lets an LLM operate *any* web page through a **closed, deterministic verb registry** instead of free-form DOM access: the user chats in the side panel, the service worker collects page context and calls an LLM with Structured Outputs to get a fixed list of verbs + args, and the content script executes them deterministically.
 
 The repo is **two independent npm projects**, installed and tested separately:
-- **Repo root** — the extension. Vanilla JS, ES modules, **no build step, no bundler, no linter**. CI only checks the glossary; everything else is gated locally by `npm run check` / `make ship`.
+- **Repo root** — the extension. Vanilla JS, ES modules, **no build step, no bundler, no linter**. CI (`.github/workflows/ci.yml`) runs the full gate; `make ship` runs only the fast node checks locally and merges after CI passes.
 - **`daemon/`** — an ESM Node service (`bag-page-feedback-daemon`) that bridges drawn-annotation screenshots from the browser to AI coding CLIs over MCP. Own `package.json` / `node_modules`.
 
 UI strings are bilingual JP/EN by design (e.g. `お描き/Draw`); keep new ones bilingual. `README.md` is the authoritative English source; `README.ja/ko/zh.md` are translations.
@@ -13,8 +13,9 @@ UI strings are bilingual JP/EN by design (e.g. `お描き/Draw`); keep new ones 
 ```bash
 make wt.new BR=feature/<task>     # fresh worktree from origin/main — edit tracked files only there
 make q.check                      # root npm run check + daemon npm test
-make -C <worktree> ship           # finished work: test → AI review → PR → auto-merge if small → cleanup
-npm run check                     # full root gate (list = package.json "check"); does NOT run daemon tests
+make -C <worktree> ship           # finished work: fast checks → PR → AI review + CI → auto-merge if small → cleanup
+npm run check:fast                # node-only checks in parallel (seconds) — the local dev loop
+npm run check                     # full root gate incl. browser E2E (CI runs it); does NOT run daemon tests
 npx playwright install chromium   # one-time, before any browser-driven test
 ```
 Daemon: `cd daemon && npm test`. Runners, single tests and live checks: the testing skill below.

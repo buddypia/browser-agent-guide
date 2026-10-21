@@ -12,6 +12,10 @@ from pathlib import Path
 
 
 CLI = Path(__file__).with_name("agent-worktree-guard")
+# A caller's GIT_DIR / GIT_WORK_TREE (worktree-init writes them into CLI settings) would point the temp repos
+# at the real worktree. Children must not inherit them.
+for _k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+    os.environ.pop(_k, None)
 SESSION = "test-session"
 def run(args: list[str], cwd: Path, *, stdin: str | None = None, check: bool = True, session: str = SESSION):
     result = subprocess.run(

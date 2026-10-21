@@ -68,6 +68,7 @@ test.describe('Milestone 2 Integration', () => {
   let staticOrigin;
   let pageUrl;
   let userDataDir;
+  let cdpPort;
   let context;
   let daemonServer;
   let daemonPort;
@@ -89,7 +90,8 @@ test.describe('Milestone 2 Integration', () => {
     await new Promise((r) => daemonServer.listen(0, '127.0.0.1', r));
     daemonPort = daemonServer.address().port;
 
-    // 3) Launch persistent Chrome context with remote debugging port 9888
+    // 3) Launch persistent Chrome context with a free remote debugging port. A fixed port (it was 9888) let a
+    //    second concurrent run's cdp-bridge attach to the other run's Chrome, which also shows playground.html.
     userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bag-m2-integration-'));
     context = await chromium.launchPersistentContext(userDataDir, {
       headless: false,
@@ -97,9 +99,12 @@ test.describe('Milestone 2 Integration', () => {
         '--headless=new',
         `--disable-extensions-except=${projectRoot}`,
         `--load-extension=${projectRoot}`,
-        '--remote-debugging-port=9888',
+        '--remote-debugging-port=0',
       ],
     });
+    // Chrome writes the port it picked to the first line of DevToolsActivePort in the profile dir.
+    await expect.poll(() => fs.existsSync(path.join(userDataDir, 'DevToolsActivePort'))).toBe(true);
+    cdpPort = fs.readFileSync(path.join(userDataDir, 'DevToolsActivePort'), 'utf8').split('\n')[0].trim();
   });
 
   test.afterAll(async () => {
@@ -406,7 +411,7 @@ test.describe('Milestone 2 Integration', () => {
     try {
       stdout = execFileSync('node', [
         cdpBridgePath,
-        '--port', '9888',
+        '--port', cdpPort,
         '--urlContains', 'playground.html',
         '--json',
         actionsJson

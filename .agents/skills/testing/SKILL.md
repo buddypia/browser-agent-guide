@@ -5,13 +5,18 @@ description: Which runner covers what, single-test commands, live checks and the
 
 # Testing the extension
 
-There is no linter/formatter, and CI only checks the glossary — everything else is gated locally. Root `npm run check` is the full gate (the exact list is package.json `"check"`); it does **not** run the daemon tests (`cd daemon && npm test`, see the daemon-mcp skill). `make q.check` runs both.
+There is no linter/formatter. CI (`.github/workflows/ci.yml`: jobs `fast`, `daemon`, `e2e`) runs every gate on clean runners, and `make ship` merges only after all three pass on the pushed HEAD. Root `npm run check` is the full local gate (`check:fast` + `test:guard` + `test:e2e`); it does **not** run the daemon tests (`cd daemon && npm test`, see the daemon-mcp skill). `make q.check` runs both.
+
+**Local loop: `npm run check:fast` plus the spec(s) your change touches**, not the full `npm run check`. Many AI sessions share this machine; each full run starts several extension-loaded Chromiums, and under that load clean `main` failed 3 E2E tests on timeouts and a run took 7+ minutes (2026-10-21, load average 100–300). Run the full suite locally only to debug an E2E failure CI reported. Browser tests must not use fixed ports or shared paths (use `listen(0)`, `--remote-debugging-port=0` + `DevToolsActivePort`, `mkdtemp`): concurrent runs in other worktrees would collide. Tests that build throwaway git repos must drop `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE` from the environment first (`worktree-init` injects them into CLI settings, and a leaked one points `git add -A`/`commit` at the real worktree).
 
 ## Commands (repo root)
 ```bash
 npm install                      # root devDeps (@playwright/test, @axe-core/playwright)
 npx playwright install chromium  # one-time; required before ANY browser-driven test
-npm run check                    # FULL gate (includes glossary:staleness and the Playwright specs)
+npm run check:fast               # node-only steps in parallel via scripts/run-checks.mjs (~20 s) — the default local gate
+npm run check                    # FULL gate: check:fast + test:guard + test:e2e (CI runs the same)
+npm run test:e2e                 # npm test (playwright-cli) + test:ui (Playwright specs)
+npm run test:guard               # scripts/agent-worktree-guard/test_guard.py (~1 min; CI + full check only)
 npm run check:js                 # node --check over every source .js/.mjs (scripts/check-js.mjs finds them)
 npm run check:sync               # paired files agree (slug copies, recipe and agent verb allow-lists)
 npm run check:harness            # AGENTS.md cap, skill triggers, hook files (harness2 rules)
@@ -32,7 +37,7 @@ npx playwright test -c playwright.config.mjs -g "title substring"        # one t
 ## Several test runners
 - Playwright Test runs `*.spec.mjs` (`testMatch` excludes `.test.mjs`).
 - `npm test` shells out to `playwright-cli`.
-- Root `test/*.test.mjs` are bare node scripts or `node --test` — see each `test:*` script in package.json before adding one, and add a new test to the `check` chain.
+- Root `test/*.test.mjs` are bare node scripts or `node --test` — see each `test:*` script in package.json before adding one. Add a new node-only test to the `check:fast` list; a browser test belongs under `test:e2e`.
 - Daemon tests use `node --test`.
 
 ## UI changes

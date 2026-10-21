@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url';
 import { ledgerGate, validateHarness } from '../scripts/check-harness.mjs';
 import { checkLedgerGate, INDEX, readEntries, renderIndex, TRAILER, validateEntry, validateLibrary } from '../scripts/harness-library.mjs';
 
+// 呼び出し側の GIT_DIR / GIT_WORK_TREE(worktree-init が CLI 設定へ注入する)が残ると、一時リポジトリ向けの
+// git commit が本物の worktree に作用する。子プロセスへ継がせない。
+for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete process.env[k];
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const made = [];
 after(() => made.forEach((d) => rmSync(d, { recursive: true, force: true })));

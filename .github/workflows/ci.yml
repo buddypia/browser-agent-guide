@@ -1,0 +1,77 @@
+# 全ゲートの正。ローカル(make ship)は node だけの速い検査(check:fast)しか回さず、ブラウザ E2E と daemon テストは
+# ここで回して、make ship はこの結果を待ってからマージする。
+#
+# 背景(2026-10-21 実測): 並行する AI セッションが各 worktree でフル check を回すとマシンが飽和し
+# (load average 100〜300 / 16 コア)、クリーンな main でも拡張ロード系 E2E が 3 件タイムアウトで落ち、
+# 1 回のゲートに 7 分以上かかっていた。クリーンなランナーなら負荷は他セッションと無関係になる。
+# 旧 glossary.yml の 3 ステップは check:fast に含まれる(--no-verify でローカル hook を外してもここで捕まる)。
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # glossary:staleness と check:harness の台帳ゲートが origin/main との merge-base を見る
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # node --test のグロブ展開(test:glossary)は Node 21+ が必要
+      # --ignore-scripts: postinstall(setup-skills)は CLI ごとの skill 配置で、CI には不要
+      - run: npm ci --ignore-scripts
+      - run: npm ci # test:agent-verbs が daemon/src/server.js を import する
+        working-directory: daemon
+      - run: npm run check:fast
+      - run: npm run test:guard # 約 1 分かかるのでローカルの check:fast には入れていない
+
+  daemon:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: daemon
+      - run: npm test
+        working-directory: daemon
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # PR のマージコミットと base(HEAD^1)の差分で対象を決める
+      # 文書だけの PR はブラウザを起動しない(.md / docs/ / glossary/ はどの spec も読まない)。main への push は常に全部。
+      - id: scope
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ] && ! git diff --name-only HEAD^1 HEAD | grep -qvE '(\.md$|^docs/|^glossary/)'; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "docs-only change: e2e skipped"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.scope.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - if: steps.scope.outputs.run == 'true'
+        run: npm ci --ignore-scripts && npm ci --prefix daemon # UI spec は daemon のモジュールを import する
+      - if: steps.scope.outputs.run == 'true'
+        run: npx playwright install --with-deps chromium && npm install -g @playwright/cli@0.1.21 # npm test は playwright-cli 経由
+      - if: steps.scope.outputs.run == 'true'
+        run: npm run test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: test-results/
+          retention-days: 7
