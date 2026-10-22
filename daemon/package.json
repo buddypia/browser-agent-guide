@@ -24,11 +24,11 @@
     "test": "node --test 'test/*.test.mjs'"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.12.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
     "ws": "^8.22.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   }
 }
