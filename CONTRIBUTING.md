@@ -25,7 +25,7 @@ The repository consists of two independent npm packages:
 
 ## Prerequisites
 
-- **Node.js**: `>= 20.0.0`
+- **Node.js**: `>= 22.12.0`
 - **Playwright Chromium**: installed via `npx playwright install chromium`
 
 ---
