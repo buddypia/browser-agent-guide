@@ -5,6 +5,8 @@
 # (load average 100〜300 / 16 コア)、クリーンな main でも拡張ロード系 E2E が 3 件タイムアウトで落ち、
 # 1 回のゲートに 7 分以上かかっていた。クリーンなランナーなら負荷は他セッションと無関係になる。
 # 旧 glossary.yml の 3 ステップは check:fast に含まれる(--no-verify でローカル hook を外してもここで捕まる)。
+#
+# PR 時は変更パスに応じて重いジョブ(test:guard, daemon, e2e)をスコープ実行し、main への push 時は常に全スイートを回す。
 name: ci
 
 on:
@@ -31,18 +33,38 @@ jobs:
       - run: npm ci # test:agent-verbs が daemon/src/server.js を import する
         working-directory: daemon
       - run: npm run check:fast
-      - run: npm run test:guard # 約 1 分かかるのでローカルの check:fast には入れていない
+      - id: guard_scope
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ] && ! git diff --name-only origin/main...HEAD | grep -qE '^(scripts/agent-worktree-guard/|\.claude/hooks/|\.codex/hooks\.json$|\.agents/hooks\.json$|\.github/workflows/ci\.yml$)'; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "guard-untouched PR: test:guard deferred to main push"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.guard_scope.outputs.run == 'true'
+        run: npm run test:guard # ローカルの check:fast には入れず、PR(ガード変更時)と main push で実行
 
   daemon:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+        with:
+          fetch-depth: 2
+      - id: scope
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ] && ! git diff --name-only HEAD^1 HEAD | grep -qE '^(daemon/|lib/slug\.js$|content/content-script\.js$|test/agent-verbs\.test\.mjs$|\.github/workflows/ci\.yml$)'; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "daemon-untouched PR: daemon tests deferred to main push"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.scope.outputs.run == 'true'
+        uses: actions/setup-node@v7
         with:
           node-version: 22
-      - run: npm ci
+      - if: steps.scope.outputs.run == 'true'
+        run: npm ci
         working-directory: daemon
-      - run: npm test
+      - if: steps.scope.outputs.run == 'true'
+        run: npm test
         working-directory: daemon
 
   e2e:
@@ -53,11 +75,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 2 # PR のマージコミットと base(HEAD^1)の差分で対象を決める
-      # 文書だけの PR はブラウザを起動しない(.md / docs/ / glossary/ はどの spec も読まない)。main への push は常に全部。
+      # 文書・用語集・ハーネス/ガード専用 PR はブラウザを起動しない(拡張本体・UI spec に無関係)。main への push は常に全部。
       - id: scope
         run: |
-          if [ "${{ github.event_name }}" = pull_request ] && ! git diff --name-only HEAD^1 HEAD | grep -qvE '(\.md$|^docs/|^glossary/)'; then
-            echo "run=false" >> "$GITHUB_OUTPUT"; echo "docs-only change: e2e skipped"
+          if [ "${{ github.event_name }}" = pull_request ] && ! git diff --name-only HEAD^1 HEAD | grep -qvE '(\.md$|^docs/|^glossary/|^\.claude/|^\.codex/|^\.agents/|^scripts/(agent-worktree-guard/|glossary/|check-|harness-library\.mjs$|auto-ship\.mjs$|run-checks\.mjs$|agent-scratchpad\.mjs$)|^test/(glossary/|check-harness|harness-library|auto-ship|cleanup-merged-branches|antigravity-hooks)|^Makefile$)'; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "non-extension/docs/harness change: e2e skipped on PR (runs on main)"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi

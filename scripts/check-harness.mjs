@@ -276,21 +276,24 @@ export function ledgerInputs(root) {
     return null;
   }
   const lines = (s) => s.split('\n').filter(Boolean);
-  const changed = [...new Set([...lines(git('diff', '--name-only', base)), ...lines(git('ls-files', '--others', '--exclude-standard'))])];
+  const untracked = lines(git('ls-files', '--others', '--exclude-standard'));
+  const changed = [...new Set([...lines(git('diff', '--name-only', base)), ...untracked])];
   const entries = changed
     .filter((p) => p.startsWith(`${ENTRIES_DIR}/`) && p.endsWith('.md') && existsSync(join(root, p)))
     .map((p) => ({ name: p.slice(ENTRIES_DIR.length + 1), src: read(root, p) }));
   const hookTargets = new Set(hookScripts(root).map(([, script]) => script));
-  // A trailer exempts a path only if every change to it is in trailer commits: a later commit without the trailer,
-  // or an uncommitted or untracked change, puts it back on the gate.
   const exempt = new Set();
-  const gated = new Set([...lines(git('diff', '--name-only', 'HEAD')), ...lines(git('ls-files', '--others', '--exclude-standard'))]);
-  for (const sha of lines(git('rev-list', `${base}..HEAD`))) {
-    const paths = lines(git('show', '--name-only', '--format=', sha));
-    const into = TRAILER.test(git('show', '-s', '--format=%B', sha)) ? exempt : gated;
-    paths.forEach((p) => into.add(p));
+  if (changed.some((p) => isLedgerPath(p, hookTargets))) {
+    // A trailer exempts a path only if every change to it is in trailer commits: a later commit without the trailer,
+    // or an uncommitted or untracked change, puts it back on the gate.
+    const gated = new Set([...lines(git('diff', '--name-only', 'HEAD')), ...untracked]);
+    for (const sha of lines(git('rev-list', `${base}..HEAD`))) {
+      const paths = lines(git('show', '--name-only', '--format=', sha));
+      const into = TRAILER.test(git('show', '-s', '--format=%B', sha)) ? exempt : gated;
+      paths.forEach((p) => into.add(p));
+    }
+    gated.forEach((p) => exempt.delete(p));
   }
-  gated.forEach((p) => exempt.delete(p));
   return { changed, entries, exempt, hookTargets, library: readEntries(root) };
 }
 

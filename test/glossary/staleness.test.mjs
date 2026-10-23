@@ -1,12 +1,13 @@
 // check-staleness.mjs の統合テスト。一時 git リポジトリで「コードを直したら用語更新」の
 // 失敗経路と成功経路を実証する。これがメカニズムの心臓部の保証。
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkStaleness } from '../../scripts/glossary/check-staleness.mjs';
 // 呼び出し側の GIT_DIR / GIT_WORK_TREE(worktree-init が CLI 設定へ注入する)が残ると、一時リポジトリ向けの
 // git add -A / commit が本物の worktree に作用する。子プロセスへ継がせない。
 for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete process.env[k];
@@ -26,6 +27,10 @@ function write(repo, rel, content) {
 
 // check-staleness をモード指定で実行し {code, out} を返す。
 function runStaleness(repo, mode, env = {}) {
+  return checkStaleness({ cwd: repo, argv: [mode], env: { ...process.env, ...env } });
+}
+
+function runStalenessCli(repo, mode, env = {}) {
   try {
     const out = execFileSync('node', [SCRIPT, mode], {
       cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env },
@@ -36,8 +41,14 @@ function runStaleness(repo, mode, env = {}) {
   }
 }
 
-function setupRepo() {
-  const repo = mkdtempSync(join(tmpdir(), 'glossary-stale-'));
+let templateRepo = null;
+after(() => {
+  if (templateRepo) rmSync(templateRepo, { recursive: true, force: true });
+});
+
+function ensureTemplateRepo() {
+  if (templateRepo) return templateRepo;
+  const repo = mkdtempSync(join(tmpdir(), 'glossary-stale-tpl-'));
   git(repo, ['init', '-q']);
   git(repo, ['config', 'user.email', 't@t']);
   git(repo, ['config', 'user.name', 't']);
@@ -68,6 +79,14 @@ function setupRepo() {
   ].join('\n'));
   git(repo, ['add', '-A']);
   git(repo, ['commit', '-qm', 'base']);
+  templateRepo = repo;
+  return templateRepo;
+}
+
+function setupRepo() {
+  const tpl = ensureTemplateRepo();
+  const repo = mkdtempSync(join(tmpdir(), 'glossary-stale-'));
+  cpSync(tpl, repo, { recursive: true });
   return repo;
 }
 
@@ -83,7 +102,7 @@ test('コードのガード範囲を変えて用語を更新しない → 失敗
       '}',
       '',
     ].join('\n'));
-    const r = runStaleness(repo, '--working');
+    const r = runStalenessCli(repo, '--working');
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /widget/);
     assert.match(r.out, /last_verified/);

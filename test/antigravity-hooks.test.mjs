@@ -9,10 +9,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { bridgeStep } from '../.claude/hooks/antigravity/agy-bridge.mjs';
 // 호출 측의 GIT_DIR / GIT_WORK_TREE(worktree-init 이 CLI 설정에 주입)가 남으면 임시 리포지토리용 git 이
 // 실제 worktree 에 작용한다. 자식 프로세스에 물려주지 않는다.
 for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete process.env[k];
@@ -20,7 +21,6 @@ for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete process.e
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const AGENTS_DIR = join(ROOT, '.agents');
 const HOOKS = JSON.parse(readFileSync(join(AGENTS_DIR, 'hooks.json'), 'utf8'));
-const BRIDGE = join(ROOT, '.claude/hooks/antigravity/agy-bridge.mjs');
 const TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse']);
 const isCommand = (h) => typeof h?.command === 'string' && h.command.trim().length > 0;
 
@@ -53,8 +53,6 @@ const commands = (event) =>
 function withTempRepo(fn) {
   const repo = mkdtempSync(join(tmpdir(), 'bag-agy-repo-'));
   try {
-    spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
-    spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: repo });
     return fn(repo);
   } finally {
     rmSync(repo, { recursive: true, force: true });
@@ -68,27 +66,18 @@ function runRegistered(event, pattern, payload) {
   return spawnSync('sh', ['-c', command], { cwd: AGENTS_DIR, input: JSON.stringify(payload), encoding: 'utf8' });
 }
 
-// 가짜 가드로 브리지를 돌린다 — 가드가 받은 stdin 은 SEEN 에 남고, 출력은 지정한 대로 낸다.
+// 가짜 가드로 브리지를 돌린다 — 가드가 받은 stdin 은 seen 에 남고, 출력은 지정한 대로 낸다.
 function runBridge(event, payload, { stdout = '', stderr = '', status = 0 } = {}) {
-  const script = "let b='';process.stdin.on('data',c=>b+=c).on('end',()=>{require('fs').writeFileSync(process.env.SEEN,b);"
-    + `process.stdout.write(${JSON.stringify(stdout)});process.stderr.write(${JSON.stringify(stderr)});process.exit(${status});});`;
-  const dir = mkdtempSync(join(tmpdir(), 'bag-agy-bridge-'));
-  const seen = join(dir, 'seen.json');
-  try {
-    const result = spawnSync('node', [BRIDGE, event, 'node', '-e', script], {
-      input: JSON.stringify(payload),
-      encoding: 'utf8',
-      env: { ...process.env, SEEN: seen },
-    });
-    assert.equal(result.status, 0, result.stderr);
-    return {
-      stdout: result.stdout,
-      output: result.stdout.trim() ? JSON.parse(result.stdout) : {},
-      seen: existsSync(seen) ? JSON.parse(readFileSync(seen, 'utf8')) : null,
-    };
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  let seen = null;
+  const res = bridgeStep(event, payload, (input) => {
+    seen = input;
+    return { status, stdout, stderr };
+  });
+  return {
+    stdout: res.stdout,
+    output: res.output,
+    seen,
+  };
 }
 
 test('hooks.json 이 agy 가 받는 형태다 (하나라도 어긋나면 파일 전체가 버려진다)', () => {

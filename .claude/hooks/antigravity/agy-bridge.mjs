@@ -19,7 +19,8 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 function readStdinJson() {
   try {
@@ -30,7 +31,7 @@ function readStdinJson() {
 }
 
 /** agy 입력 → Claude 훅 stdin. */
-function toClaudeInput(event, data) {
+export function toClaudeInput(event, data) {
   const call = data.toolCall || {};
   const args = call.args || {};
   const input = {
@@ -57,7 +58,7 @@ function toClaudeInput(event, data) {
 }
 
 /** Claude 훅 결과(exit · stdout · stderr) → agy 출력. */
-function toAgyOutput(event, { status, stdout = '', stderr = '' }) {
+export function toAgyOutput(event, { status, stdout = '', stderr = '' }) {
   const text = (stdout || '').trim();
   let json = null;
   try {
@@ -83,24 +84,42 @@ function toAgyOutput(event, { status, stdout = '', stderr = '' }) {
   return {}; // PostToolUse — agy 는 빈 객체만 받는다 (권고를 실을 필드가 없다)
 }
 
-function main() {
-  const [event, command, ...args] = process.argv.slice(2);
-  let output = {};
-  try {
-    const data = readStdinJson();
-    // Claude Code 는 사용자 중단에 Stop 을 돌리지 않는다 — agy 는 돌리므로 여기서 같은 동작으로 맞춘다
-    if (event === 'Stop' && data.terminationReason === 'USER_CANCELED') return;
-    const input = toClaudeInput(event, data);
-    const result = spawnSync(command, args, {
-      input: JSON.stringify(input),
-      encoding: 'utf8',
-      cwd: input.cwd && existsSync(input.cwd) ? input.cwd : undefined,
-    });
-    output = toAgyOutput(event, result);
-  } catch {
-    output = {};
+export function bridgeStep(event, data, runner) {
+  if (event === 'Stop' && data?.terminationReason === 'USER_CANCELED') {
+    return { skipped: true, input: null, output: {}, stdout: '' };
   }
-  if (Object.keys(output).length > 0) process.stdout.write(`${JSON.stringify(output)}\n`);
+  const input = toClaudeInput(event, data || {});
+  const result = runner(input);
+  const output = toAgyOutput(event, result);
+  const stdout = Object.keys(output).length > 0 ? `${JSON.stringify(output)}\n` : '';
+  return { skipped: false, input, output, stdout };
 }
 
-main();
+function main() {
+  const [event, command, ...args] = process.argv.slice(2);
+  let stdout = '';
+  try {
+    const data = readStdinJson();
+    const res = bridgeStep(event, data, (input) =>
+      spawnSync(command, args, {
+        input: JSON.stringify(input),
+        encoding: 'utf8',
+        cwd: input.cwd && existsSync(input.cwd) ? input.cwd : undefined,
+      }),
+    );
+    stdout = res.stdout;
+  } catch {
+    stdout = '';
+  }
+  if (stdout) process.stdout.write(stdout);
+}
+
+const isMain = (() => {
+  try {
+    return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+})();
+
+if (isMain) main();

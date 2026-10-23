@@ -17,6 +17,13 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import {
+  canShareNodeModules,
+  linkSharedNodeModules,
+  readAiReviewCache,
+  resolveScratchpadDir,
+  writeAiReviewCache,
+} from './agent-scratchpad.mjs';
 import { ledgerOptOuts } from './check-harness.mjs';
 
 export const MAX_FILES = 15;
@@ -29,6 +36,19 @@ const MAX_DIFF_CHARS = 150_000;
 export const CI_JOBS = ['fast', 'daemon', 'e2e'];
 const CI_TIMEOUT_MS = 30 * 60_000;
 const CI_POLL_SECS = 15;
+
+/** Deterministic human-review gates (size, protected paths, harness ledger opt-outs) that do not need an LLM call. */
+export function staticReasons({ files, lines, optOuts = [] }) {
+  const reasons = [];
+  if (files.length > MAX_FILES) reasons.push(`${files.length} files > ${MAX_FILES}`);
+  if (lines > MAX_LINES) reasons.push(`${lines} changed lines > ${MAX_LINES}`);
+  const touched = files.filter((f) => PROTECTED.some((re) => re.test(f)));
+  if (touched.length) reasons.push(`protected paths: ${touched.join(', ')}`);
+  // The Harness-Entry trailer is evidence the shipping agent writes about itself, so a person confirms it.
+  if (optOuts === null) reasons.push('the harness ledger gate could not run (no origin/main to diff against)');
+  else if (optOuts.length) reasons.push(`harness changes skip the experience library (Harness-Entry trailer): ${optOuts.join(', ')}`);
+  return reasons;
+}
 
 /** Pure merge decision. Returns the reasons a human must decide; empty = auto-merge. */
 export function decide({ files, lines, review, optOuts = [] }) {
@@ -111,15 +131,27 @@ function main(dryRun) {
   if (merged) finish({ wt, mainRoot, branch, guard }, merged);
   const range = 'origin/main...HEAD';
   if (sh('git', ['rev-list', '--count', 'origin/main..HEAD'], wt) === '0') stop('FAILED', 'no commits ahead of origin/main');
+  const baseSha = sh('git', ['rev-parse', 'origin/main'], wt);
   const numstat = sh('git', ['diff', '--numstat', '--no-renames', range], wt).split('\n').filter(Boolean).map((l) => l.split('\t'));
   const files = numstat.map((c) => c[2]);
   const lines = numstat.reduce((n, c) => n + (Number(c[0]) || 0) + (Number(c[1]) || 0), 0);
   log(`${files.length} files, ${lines} lines changed`);
 
   // Fast local gate: a failure pushes nothing. check:fast imports daemon modules, so the daemon needs deps too.
-  const ensureDeps = (dir) => existsSync(join(dir, 'node_modules')) || run('npm', ['install', '--no-audit', '--no-fund'], dir);
+  // Share mainRoot's node_modules via symlink when lockfiles match to avoid duplicate `npm install` across worktrees.
+  const ensureDeps = (dir, mainDir) => {
+    if (existsSync(join(dir, 'node_modules'))) return true;
+    if (canShareNodeModules(dir, mainDir)) {
+      try {
+        if (linkSharedNodeModules(dir, mainDir).linked) return true;
+      } catch {
+        /* fall back to npm install */
+      }
+    }
+    return run('npm', ['install', '--no-audit', '--no-fund'], dir);
+  };
   const daemon = join(wt, 'daemon');
-  if (!ensureDeps(wt) || !ensureDeps(daemon)) stop('FAILED', 'npm install failed');
+  if (!ensureDeps(wt, mainRoot) || !ensureDeps(daemon, join(mainRoot, 'daemon'))) stop('FAILED', 'npm install failed');
   if (!run('npm', ['run', 'check:fast'], wt)) stop('FAILED', 'npm run check:fast failed');
 
   // Push + PR before the review, so CI runs on GitHub while the review runs here (reuse only an OPEN PR).
@@ -137,10 +169,33 @@ function main(dryRun) {
     if (!pr) stop('FAILED', `pushed ${branch}, but no open PR was found for it`);
   }
 
-  // AI review in a hook-free, read-only headless Claude session (--restricted ignores project settings/hooks).
-  let diff = sh('git', ['diff', range], wt);
-  if (diff.length > MAX_DIFF_CHARS) diff = `${diff.slice(0, MAX_DIFF_CHARS)}\n[diff truncated]`;
-  const prompt = `You are reviewing an AI-authored change to this repository before it is auto-merged to main.
+  const optOuts = ledgerOptOuts(wt);
+  const preReasons = staticReasons({ files, lines, optOuts });
+  const scratchDir = resolveScratchpadDir(wt);
+  let review;
+  let reasons;
+
+  // Skip the expensive headless `claude -p` call when deterministic gates (size, protected paths, ledger opt-outs)
+  // already force NEEDS_HUMAN — saving 1–5 min and thousands of LLM tokens on changes that cannot auto-merge anyway.
+  if (preReasons.length > 0 && process.env.FORCE_AI_REVIEW !== '1') {
+    log(`skipping headless AI review (deterministic human gates triggered: ${preReasons.join('; ')})`);
+    review = {
+      verdict: 'skipped (human gate)',
+      scope: files.length > MAX_FILES || lines > MAX_LINES ? 'large' : 'small',
+      summary: '決定論ゲート(サイズ上限・保護パス・台帳免除)により人間レビュー対象のため、ヘッドレス AI レビューを省略しました。',
+      issues: [],
+    };
+    reasons = preReasons;
+  } else {
+    const cachedReview = readAiReviewCache(scratchDir, head, baseSha);
+    if (cachedReview && process.env.FORCE_AI_REVIEW !== '1') {
+      log(`reusing cached AI review from scratchpad for ${head.slice(0, 8)}`);
+      review = cachedReview;
+    } else {
+      // AI review in a hook-free, read-only headless Claude session (--restricted ignores project settings/hooks).
+      let diff = sh('git', ['diff', range], wt);
+      if (diff.length > MAX_DIFF_CHARS) diff = `${diff.slice(0, MAX_DIFF_CHARS)}\n[diff truncated]`;
+      const prompt = `You are reviewing an AI-authored change to this repository before it is auto-merged to main.
 Read AGENTS.md, the .agents/skills/*/SKILL.md files its trigger lines name for the areas this diff touches, and any files you need. Judge:
 - verdict "request_changes" for real bugs, regressions, security problems, broken invariants from AGENTS.md or those skills, or missing tests for risky logic. Ignore style nits.
 - scope "large" for a big refactor, a large new feature, architecture/data-format changes, or anything a human owner should decide; otherwise "small".
@@ -154,9 +209,15 @@ ${commits}
 <untrusted-diff>
 ${diff}
 </untrusted-diff>`;
-  const r = spawnSync('claude', ['-p', '--restricted', '--strict-mcp-config', '--tools', 'Read,Grep,Glob', '--output-format', 'json', '--json-schema', JSON.stringify(SCHEMA)], { cwd: wt, input: prompt, encoding: 'utf8', maxBuffer: 64 << 20, timeout: 15 * 60_000 });
-  const review = parseReview(r.stdout ?? '');
-  const reasons = decide({ files, lines, review, optOuts: ledgerOptOuts(wt) });
+      const r = spawnSync('claude', ['-p', '--restricted', '--strict-mcp-config', '--tools', 'Read,Grep,Glob', '--output-format', 'json', '--json-schema', JSON.stringify(SCHEMA)], { cwd: wt, input: prompt, encoding: 'utf8', maxBuffer: 64 << 20, timeout: 15 * 60_000 });
+      review = parseReview(r.stdout ?? '');
+      if (r.status === 0 && review.summary !== 'AI review failed or returned no structured output') {
+        writeAiReviewCache(scratchDir, head, baseSha, review);
+      }
+    }
+    reasons = decide({ files, lines, review, optOuts });
+  }
+
   // harness2 diff_summary: always-on text is paid on every turn, so show what this change adds to it.
   const chars = (ref) => { try { return [...sh('git', ['show', `${ref}:AGENTS.md`], wt)].length; } catch { return 0; } };
   const [before, after] = [chars('origin/main'), chars('HEAD')];

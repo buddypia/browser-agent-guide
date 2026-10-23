@@ -136,10 +136,23 @@ export async function run(data) {
       return HookOutput.passthrough();
     }
 
+    // Fast-path: if every raw target path is already inside a `.worktrees/` checkout,
+    // skip `resolveProjectDir` and `git branch --show-current` subprocesses completely.
+    const rawPaths = extractFilePaths(toolName, data.tool_input, '');
+    if (rawPaths.length === 0) return HookOutput.passthrough();
+    if (
+      rawPaths.every((p) => {
+        const norm = String(p).replace(/\\/g, '/');
+        return norm.startsWith('.worktrees/') || norm.includes('/.worktrees/');
+      })
+    ) {
+      return HookOutput.passthrough();
+    }
+
     const projectDir = resolveProjectDir(data);
-    const branch = safeGit('branch --show-current', projectDir, { timeout: 2000 });
-    if (!branch) return HookOutput.passthrough();
-    if (branch !== 'main') return HookOutput.passthrough();
+    if (String(projectDir).replace(/\\/g, '/').includes('/.worktrees/')) {
+      return HookOutput.passthrough();
+    }
 
     const policy = safeReadJson(
       join(projectDir, '.claude/config/worktree-policy.json'),
@@ -147,11 +160,10 @@ export async function run(data) {
     );
     if (!isPolicyUsable(policy)) return HookOutput.passthrough();
 
-    if (isEscapeHatch(branch, policy)) return HookOutput.passthrough();
-
     const filePaths = extractFilePaths(toolName, data.tool_input, projectDir);
     if (filePaths.length === 0) return HookOutput.passthrough();
 
+    let firstRestrictedRelPath = null;
     for (const filePath of filePaths) {
       const relPath = relative(projectDir, filePath).replace(/\\/g, '/');
       // 외부 path (project root 밖, 예: /tmp/foo, /var/...) 면제.
@@ -164,11 +176,18 @@ export async function run(data) {
       if (isWorktreeRelPath(relPath)) continue;
       const tier = classifyTier(relPath, policy);
       if (tier === 1) continue;
-      // tier === 3 (tier 2 has been abolished)
-      return HookOutput.deny(buildDenyMessage(relPath));
+      firstRestrictedRelPath = relPath;
+      break;
     }
 
-    return HookOutput.passthrough();
+    if (!firstRestrictedRelPath) return HookOutput.passthrough();
+
+    const branch = safeGit('branch --show-current', projectDir, { timeout: 2000 });
+    if (!branch) return HookOutput.passthrough();
+    if (branch !== 'main') return HookOutput.passthrough();
+    if (isEscapeHatch(branch, policy)) return HookOutput.passthrough();
+
+    return HookOutput.deny(buildDenyMessage(firstRestrictedRelPath));
   } catch (_) {
     return HookOutput.passthrough();
   }

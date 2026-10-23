@@ -39,6 +39,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { canShareNodeModules, linkSharedNodeModules } from '../../scripts/agent-scratchpad.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -473,12 +474,26 @@ export function runWorktreeNew(opts) {
   }
 
   // Step 4b: 依存の導入。無いまま check すると「パッケージが無い」で落ち、AI が自分の変更の不具合と誤認しうる。
+  // main worktree と package-lock.json の SHA-256 が一致し node_modules が既にあれば symlink で共有し、
+  // 並列 worktree ごとの重複 `npm ci` (約 30 秒 + 数百 MB) を省く。
   if (install) {
     if (dryRun) {
       result.actions.push('npm ci (package-lock.json を持ち node_modules が無いプロジェクトごと)');
     } else {
       for (const dir of npmProjectsMissingDeps(wtPathAbs, { existsFn, readdirFn })) {
         const rel = dir === wtPathAbs ? '.' : dir.slice(wtPathAbs.length + 1);
+        const mainProjectDir = rel === '.' ? cwd : join(cwd, rel);
+        if (canShareNodeModules(dir, mainProjectDir, { existsFn })) {
+          try {
+            const linked = linkSharedNodeModules(dir, mainProjectDir);
+            if (linked.linked) {
+              result.actions.push(`symlink node_modules (${rel} -> main)`);
+              continue;
+            }
+          } catch {
+            /* fall back to npm ci */
+          }
+        }
         result.actions.push(`npm ci (${rel})`);
         try {
           npmFn(['ci', '--prefer-offline', '--no-audit', '--no-fund'], { cwd: dir });

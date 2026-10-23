@@ -1470,10 +1470,21 @@ def registered_paths(ledger: dict[str, Any]) -> set[str]:
     return {str(item.get("realpath") or item.get("path")) for item in ledger.get("worktrees", [])}
 
 
-def detect_pretool_violation(command: str, root: Path, session_id: str, cwd: Path) -> str | None:
-    ledger = load_ledger(root, session_id, create=True)
-    worktrees = list_git_worktrees(root)
-    registered = registered_paths(ledger)
+def detect_pretool_violation(command: str, root: Path | None, session_id: str | None, cwd: Path) -> str | None:
+    ledger: dict[str, Any] | None = None
+    worktrees: list[dict[str, Any]] | None = None
+    registered: set[str] | None = None
+
+    def ensure_ledger() -> tuple[Path, str, dict[str, Any]]:
+        nonlocal root, session_id, ledger
+        if root is None:
+            root = resolve_guard_root(cwd)
+        if session_id is None:
+            session_id = current_session_id(explicit=None)
+        if ledger is None:
+            ledger = load_ledger(root, session_id, create=True)
+        return root, session_id, ledger
+
     for tokens in shell_segments(command):
         gargs = git_invocation(tokens)
         if gargs and len(gargs) >= 2 and gargs[0] == "worktree" and gargs[1] in {"add", "remove"}:
@@ -1481,34 +1492,43 @@ def detect_pretool_violation(command: str, root: Path, session_id: str, cwd: Pat
                 f"Raw `git worktree {gargs[1]}` is blocked. "
                 "Use `agent-worktree-guard add` or `agent-worktree-guard cleanup --confirmed`."
             )
-        if gargs and gargs and gargs[0] == "push" and "--no-verify" in gargs:
+        if gargs and gargs[0] == "push" and "--no-verify" in gargs:
             return "`git push --no-verify` is blocked by Agent Worktree Guard."
 
         pr_action = gh_pr_action(tokens)
         if pr_action in {"create", "merge"}:
-            result = audit_result(ledger)
+            resolved_root, _, resolved_ledger = ensure_ledger()
+            result = audit_result(resolved_ledger)
             if result["active"] and not result["confirmed"]:
                 return (
                     "PR operations are blocked until the work briefing is shown and the human answers Yes/進行.\n\n"
-                    f"{build_pr_briefing(root, result['active'])}\n\n"
+                    f"{build_pr_briefing(resolved_root, result['active'])}\n\n"
                     "After the human confirms, run:\n"
                     "  agent-worktree-guard confirm-pr --confirmed"
                 )
 
-        for target in rm_rf_targets(tokens):
-            target_path = path_from_token(target, cwd)
-            for wt in worktrees:
-                wt_path = Path(str(wt.get("path"))).resolve(strict=False)
-                if target_path == wt_path or is_relative_to(wt_path, target_path):
-                    ownership = "registered" if real(wt_path) in registered else "outside this session ledger"
-                    return (
-                        f"`rm -rf` targets a Git worktree ({ownership}): {wt_path}. "
-                        "Use `agent-worktree-guard cleanup --confirmed` after PR/user confirmation."
-                    )
+        targets = rm_rf_targets(tokens)
+        if targets:
+            resolved_root, _, resolved_ledger = ensure_ledger()
+            if worktrees is None:
+                worktrees = list_git_worktrees(resolved_root)
+            if registered is None:
+                registered = registered_paths(resolved_ledger)
+            for target in targets:
+                target_path = path_from_token(target, cwd)
+                for wt in worktrees:
+                    wt_path = Path(str(wt.get("path"))).resolve(strict=False)
+                    if target_path == wt_path or is_relative_to(wt_path, target_path):
+                        ownership = "registered" if real(wt_path) in registered else "outside this session ledger"
+                        return (
+                            f"`rm -rf` targets a Git worktree ({ownership}): {wt_path}. "
+                            "Use `agent-worktree-guard cleanup --confirmed` after PR/user confirmation."
+                        )
     return None
 
 
 PRETOOL_WORDS = re.compile(r"\b(git|gh|rm)\b")
+POSTTOOL_WORDS = re.compile(r"\b(git|gh|worktree)\b|\bBR=|\bBRANCH=|--branch|\s-[bB]\b")
 
 
 def hook_pre_tool(args: argparse.Namespace) -> int:
@@ -1525,9 +1545,9 @@ def hook_pre_tool(args: argparse.Namespace) -> int:
         return hook_json({})
     cwd = Path(str(data.get("cwd") or os.getcwd())).resolve(strict=False)
     try:
-        root = resolve_guard_root(cwd)
-        session_id = current_session_id(data, args.session_id)
-        reason = detect_pretool_violation(command, root, session_id, cwd)
+        sid = data.get("session_id") or args.session_id
+        session_id = str(sid) if sid else None
+        reason = detect_pretool_violation(command, None, session_id, cwd)
     except Exception:
         return hook_json({})
     return hook_json(hook_deny(reason) if reason else {})
@@ -1591,16 +1611,21 @@ def hook_post_tool(args: argparse.Namespace) -> int:
     command = tool_input.get("command")
     if not isinstance(command, str):
         return hook_json({})
+    if not POSTTOOL_WORDS.search(command):
+        return hook_json({})
+    branch = worktree_create_branch(command)
+    reason = classify_completion_reason(command)
+    if not branch and not reason:
+        return hook_json({})
     cwd = Path(str(data.get("cwd") or os.getcwd())).resolve(strict=False)
     try:
         root = resolve_guard_root(cwd)
         session_id = current_session_id(data, args.session_id)
         ledger = load_ledger(root, session_id, create=True)
-        created = maybe_register_created_worktree(root, session_id, ledger, command)
+        created = maybe_register_created_worktree(root, session_id, ledger, command) if branch else None
         if created:
             save_ledger(root, ledger)
             render_status(root, ledger)
-        reason = classify_completion_reason(command)
         if not reason:
             return hook_json({})
         item = worktree_from_command_or_cwd(command, cwd, ledger)
