@@ -1,7 +1,29 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { test } from 'node:test';
-import { CI_JOBS, ciState, decide, mergedPr, parseReview, prTitle } from '../scripts/auto-ship.mjs';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
+import {
+  canShareNodeModules,
+  filterUncachedJsFiles,
+  linkSharedNodeModules,
+  readAiReviewCache,
+  readCheckCache,
+  readGateStamp,
+  recordJsSyntaxPassed,
+  writeAiReviewCache,
+  writeCheckCache,
+  writeGateStamp,
+} from '../scripts/agent-scratchpad.mjs';
+import { CI_JOBS, ciState, decide, mergedPr, parseReview, prTitle, staticReasons } from '../scripts/auto-ship.mjs';
+
+const made = [];
+after(() => made.forEach((d) => rmSync(d, { recursive: true, force: true })));
+const tmp = () => {
+  const d = mkdtempSync(join(tmpdir(), 'auto-ship-test-'));
+  made.push(d);
+  return d;
+};
 
 const ok = { verdict: 'approve', scope: 'small', summary: '', issues: [] };
 
@@ -74,4 +96,57 @@ test('every job make ship waits for exists in the CI workflow', () => {
   // A renamed job would never report, and make ship would wait out its timeout before failing.
   const yml = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
   for (const job of CI_JOBS) assert.match(yml, new RegExp(`^  ${job}:$`, 'm'), job);
+});
+
+test('staticReasons flags size, protected paths and ledger opt-outs before spawning claude -p', () => {
+  assert.deepEqual(staticReasons({ files: ['lib/storage.js'], lines: 10 }), []);
+  assert.match(staticReasons({ files: ['.claude/hooks/x.mjs'], lines: 1 }).join(), /protected paths/);
+  assert.match(staticReasons({ files: ['a.js'], lines: 401 }).join(), /changed lines/);
+  assert.match(staticReasons({ files: ['a.js'], lines: 1, optOuts: null }).join(), /ledger gate could not run/);
+});
+
+test('agent-scratchpad caches JS syntax, per-check digests, gate stamps, AI reviews and shared node_modules', () => {
+  const scratch = tmp();
+  const repo = tmp();
+  writeFileSync(join(repo, 'a.js'), 'export const x = 1;\n');
+  writeFileSync(join(repo, 'b.js'), 'export const y = 2;\n');
+
+  const first = filterUncachedJsFiles(repo, ['a.js', 'b.js'], scratch);
+  assert.equal(first.cachedCount, 0);
+  assert.equal(first.uncached.length, 2);
+
+  recordJsSyntaxPassed(first.uncached.map((u) => u.sha256), scratch);
+  const second = filterUncachedJsFiles(repo, ['a.js', 'b.js'], scratch);
+  assert.equal(second.cachedCount, 2);
+  assert.equal(second.uncached.length, 0);
+
+  writeFileSync(join(repo, 'b.js'), 'export const y = 3;\n');
+  const third = filterUncachedJsFiles(repo, ['a.js', 'b.js'], scratch);
+  assert.equal(third.cachedCount, 1);
+  assert.equal(third.uncached.length, 1);
+  assert.equal(third.uncached[0].rel, 'b.js');
+
+  assert.equal(readCheckCache(scratch, 'test:glossary', 'digest-1'), null);
+  writeCheckCache(scratch, 'test:glossary', 'digest-1', { secs: '2.9' });
+  assert.equal(readCheckCache(scratch, 'test:glossary', 'digest-1')?.secs, '2.9');
+
+  assert.equal(readGateStamp(scratch, 'run-checks:fast', 'tree-1'), null);
+  writeGateStamp(scratch, 'run-checks:fast', 'tree-1', { count: 19 });
+  assert.equal(readGateStamp(scratch, 'run-checks:fast', 'tree-1')?.count, 19);
+
+  assert.equal(readAiReviewCache(scratch, 'head1', 'base1'), null);
+  writeAiReviewCache(scratch, 'head1', 'base1', ok);
+  assert.deepEqual(readAiReviewCache(scratch, 'head1', 'base1'), ok);
+
+  const mainDir = tmp();
+  const wtDir = tmp();
+  mkdirSync(join(mainDir, 'node_modules'), { recursive: true });
+  writeFileSync(join(mainDir, 'package-lock.json'), '{"lockfileVersion":3}\n');
+  writeFileSync(join(wtDir, 'package-lock.json'), '{"lockfileVersion":3}\n');
+  assert.equal(canShareNodeModules(wtDir, mainDir), true);
+  assert.equal(linkSharedNodeModules(wtDir, mainDir).linked, true);
+  assert.equal(lstatSync(join(wtDir, 'node_modules')).isSymbolicLink(), true);
+
+  writeFileSync(join(wtDir, 'package-lock.json'), '{"lockfileVersion":3,"changed":true}\n');
+  assert.equal(canShareNodeModules(wtDir, mainDir), false);
 });

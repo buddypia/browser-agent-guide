@@ -16,6 +16,35 @@ if (mode.length === 0) {
 
 const input = readFileSync(0, 'utf8');
 
+const PRETOOL_CMD_RE = /\b(?:git|gh|rm)\b/;
+const PRETOOL_ACTION_RE = /\b(?:worktree|push|pr|rm)\b/;
+const POSTTOOL_CMD_RE = /\b(?:commit|push|pr|worktree)\b|\bBR=|\bBRANCH=|--branch|\s-[bB]\b/;
+
+function extractBashCommand(raw) {
+  try {
+    const data = JSON.parse(raw);
+    const cmd =
+      data?.tool_input?.command ??
+      data?.tool?.input?.command ??
+      data?.input?.command;
+    return typeof cmd === 'string' ? cmd : null;
+  } catch {
+    return null;
+  }
+}
+
+if (mode[0] === 'pre-tool') {
+  const cmd = extractBashCommand(input);
+  if (cmd !== null && (!PRETOOL_CMD_RE.test(cmd) || !PRETOOL_ACTION_RE.test(cmd))) {
+    process.exit(0);
+  }
+} else if (mode[0] === 'post-tool') {
+  const cmd = extractBashCommand(input);
+  if (cmd !== null && !POSTTOOL_CMD_RE.test(cmd)) {
+    process.exit(0);
+  }
+}
+
 const result = spawnSync('python3', [guard, 'hook', ...mode], {
   cwd: process.cwd(),
   env: process.env,

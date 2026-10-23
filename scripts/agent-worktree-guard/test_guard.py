@@ -2,31 +2,59 @@
 
 from __future__ import annotations
 
+import contextlib
+import importlib.util
+import io
 import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 CLI = Path(__file__).with_name("agent-worktree-guard")
+_SPEC = importlib.util.spec_from_file_location("awtg_guard", CLI.with_name("guard.py"))
+assert _SPEC and _SPEC.loader
+GUARD = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(GUARD)
+
 # A caller's GIT_DIR / GIT_WORK_TREE (worktree-init writes them into CLI settings) would point the temp repos
 # at the real worktree. Children must not inherit them.
 for _k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
     os.environ.pop(_k, None)
 SESSION = "test-session"
 STATUS = Path(".tmp/worktree-guard-ledger") / f"{SESSION}.md"
+
+
 def run(args: list[str], cwd: Path, *, stdin: str | None = None, check: bool = True, session: str = SESSION):
-    result = subprocess.run(
-        [str(CLI), "--session-id", session, *args],
-        cwd=cwd,
-        input=stdin,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
+    prev_cwd = Path.cwd()
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+    stdin_buf = io.StringIO(stdin or "")
+    old_stdin = sys.stdin
+    returncode = 0
+    try:
+        os.chdir(cwd)
+        sys.stdin = stdin_buf
+        with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
+            try:
+                returncode = int(GUARD.main(["--session-id", session, *args]))
+            except SystemExit as exc:
+                returncode = int(exc.code) if isinstance(exc.code, int) else (1 if exc.code else 0)
+    finally:
+        sys.stdin = old_stdin
+        try:
+            os.chdir(prev_cwd)
+        except OSError:
+            pass
+    result = SimpleNamespace(
+        returncode=returncode,
+        stdout=stdout_buf.getvalue(),
+        stderr=stderr_buf.getvalue(),
     )
     if check and result.returncode != 0:
         raise AssertionError(f"{args} failed\nstdout={result.stdout}\nstderr={result.stderr}")
@@ -34,16 +62,31 @@ def run(args: list[str], cwd: Path, *, stdin: str | None = None, check: bool = T
 
 
 class AgentWorktreeGuardTest(unittest.TestCase):
+    _template_dir: Path | None = None
+    _template_repo: Path | None = None
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._template_dir = Path(tempfile.mkdtemp(prefix="awtg-tpl-"))
+        cls._template_repo = cls._template_dir / "repo"
+        cls._template_repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=cls._template_repo, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=cls._template_repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=cls._template_repo, check=True)
+        (cls._template_repo / "README.md").write_text("test\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=cls._template_repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=cls._template_repo, check=True)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        if cls._template_dir and cls._template_dir.exists():
+            shutil.rmtree(cls._template_dir, ignore_errors=True)
+
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="awtg-"))
         self.repo = self.tmp / "repo"
-        self.repo.mkdir()
-        subprocess.run(["git", "init"], cwd=self.repo, check=True, stdout=subprocess.PIPE)
-        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=self.repo, check=True)
-        subprocess.run(["git", "config", "user.name", "Test User"], cwd=self.repo, check=True)
-        (self.repo / "README.md").write_text("test\n", encoding="utf-8")
-        subprocess.run(["git", "add", "README.md"], cwd=self.repo, check=True)
-        subprocess.run(["git", "commit", "-m", "initial"], cwd=self.repo, check=True, stdout=subprocess.PIPE)
+        assert self._template_repo is not None
+        shutil.copytree(self._template_repo, self.repo)
         # The post-tool hook asks GitHub whether a merge really happened; this stand-in answers from a file.
         self.gh_state = self.tmp / "gh-state"
         self.gh_state.write_text("MERGED\n", encoding="utf-8")

@@ -12,13 +12,13 @@
 //   node scripts/glossary/check-staleness.mjs --base origin/main # PR/CI(HEAD vs merge-base)
 //   既定は --base origin/main(無ければ main)。
 
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { parseFrontmatter } from './lib/frontmatter.mjs';
 import { parseMarkers, termsTouchedByRanges } from './lib/markers.mjs';
 import { MARKER_ROOTS } from './lib/code.mjs';
 import { loadEntries, indexById } from './lib/entries.mjs';
 import { createGitContext } from './lib/git.mjs';
-
-const ROOT = process.cwd();
 
 function parseArgs(argv) {
   let mode = 'base';
@@ -56,29 +56,29 @@ function bodyOf(content) {
 
 // iso 日付がいま(どのタイムゾーンでも)「今日」でありうるか。touch はローカル日付、CI は UTC で動くので
 // 日付の正午 UTC から ±36h を今日とみなす。テストは GLOSSARY_TODAY=YYYY-MM-DD で固定する。
-function isToday(iso) {
-  const fixed = process.env.GLOSSARY_TODAY;
+function isToday(iso, env = process.env) {
+  const fixed = env.GLOSSARY_TODAY;
   const now = fixed ? Date.parse(`${fixed}T12:00:00Z`) : Date.now();
   const d = Date.parse(`${iso}T12:00:00Z`);
   return Number.isFinite(d) && Math.abs(now - d) <= 36 * 3600 * 1000;
 }
 
-function main() {
-  const { mode, ref: refArg } = parseArgs(process.argv.slice(2));
+export function checkStaleness({ cwd = process.cwd(), argv = [], env = process.env } = {}) {
+  const { mode, ref: refArg } = parseArgs(argv);
   let ref = refArg;
   if (mode === 'base' && !ref) ref = 'origin/main'; // 既定の base(無ければ git.mjs が ref をそのまま使う)
-  const ctx = createGitContext(mode, ref, ROOT);
-
-  let byId;
-  try {
-    byId = indexById(loadEntries(ROOT));
-  } catch (e) {
-    console.error(`✗ 用語集の読み込みに失敗(先に validate を通してください): ${e.message}`);
-    process.exit(1);
-  }
+  const ctx = createGitContext(mode, ref, cwd);
 
   const changed = ctx.changedFiles();
   const codeChanged = changed.filter(isCodeFile);
+
+  // Fast-path: 変更コードが無ければ用語集のロード自体をスキップする。
+  if (codeChanged.length === 0) {
+    return {
+      code: 0,
+      out: `用語 staleness チェック OK [${ctx.label}](変更コード 0 件、関係用語 0 件は再検証済み)\n`,
+    };
+  }
 
   // 変更コード → 触れられた用語 id(+ どのファイルで触れたか)
   const touchedByTerm = new Map(); // id -> Set(path)
@@ -93,6 +93,23 @@ function main() {
       if (!touchedByTerm.has(id)) touchedByTerm.set(id, new Set());
       touchedByTerm.get(id).add(path);
     }
+  }
+
+  if (touchedByTerm.size === 0) {
+    return {
+      code: 0,
+      out: `用語 staleness チェック OK [${ctx.label}](変更コード ${codeChanged.length} 件、関係用語 0 件は再検証済み)\n`,
+    };
+  }
+
+  let byId;
+  try {
+    byId = indexById(loadEntries(cwd));
+  } catch (e) {
+    return {
+      code: 1,
+      out: `✗ 用語集の読み込みに失敗(先に validate を通してください): ${e.message}\n`,
+    };
   }
 
   const errors = [];
@@ -117,7 +134,9 @@ function main() {
     // 古い日付のままの本文修正は通さない(前進させれば済むので、例外にすると抜け穴になる)。
     const advanced = String(newVerified) > String(baseVerified);
     const sameDayRevised =
-      String(newVerified) === String(baseVerified) && isToday(String(newVerified)) && bodyOf(newEntry) !== bodyOf(baseEntry);
+      String(newVerified) === String(baseVerified) &&
+      isToday(String(newVerified), env) &&
+      bodyOf(newEntry) !== bodyOf(baseEntry);
     if (!advanced && !sameDayRevised) {
       errors.push(
         `✗ 用語 "${id}" のガード範囲(${[...paths].join(', ')})が変更されましたが、` +
@@ -128,13 +147,33 @@ function main() {
   }
 
   if (errors.length) {
-    console.error(`用語 staleness チェック [${ctx.label}]:`);
-    for (const e of errors) console.error(e);
-    console.error(`\n${errors.length} 件: コード変更に対して用語の再検証が必要です。`);
-    process.exit(1);
+    const lines = [
+      `用語 staleness チェック [${ctx.label}]:`,
+      ...errors,
+      `\n${errors.length} 件: コード変更に対して用語の再検証が必要です。`,
+    ];
+    return { code: 1, out: `${lines.join('\n')}\n` };
   }
   const n = touchedByTerm.size;
-  console.log(`用語 staleness チェック OK [${ctx.label}](変更コード ${codeChanged.length} 件、関係用語 ${n} 件は再検証済み)`);
+  return {
+    code: 0,
+    out: `用語 staleness チェック OK [${ctx.label}](変更コード ${codeChanged.length} 件、関係用語 ${n} 件は再検証済み)\n`,
+  };
 }
 
-main();
+const isMain = (() => {
+  try {
+    return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+})();
+
+if (isMain) {
+  const { code, out } = checkStaleness({ cwd: process.cwd(), argv: process.argv.slice(2), env: process.env });
+  if (code !== 0) {
+    process.stderr.write(out);
+    process.exit(code);
+  }
+  process.stdout.write(out);
+}
