@@ -18,8 +18,8 @@
 
 ### `.claude/agents/harness-reflector.md`
 - **change**: Subagent that turns a diff, retros and transcripts into one entry plus verdict updates (large input, small answer).
-- **observed**: First trial (on #85, now `2026-07-19-block-gh-pr-merge-delete-branch-from-worktree.md`) passed `check:harness` with only wording trimmed, kept every unproven row `pending`/`confounded` and its lesson `low`. One run; keep watching.
-- **verdict**: pending
+- **observed**: First trial (on #85, now `2026-07-19-block-gh-pr-merge-delete-branch-from-worktree.md`) passed `check:harness` with only wording trimmed, kept every unproven row `pending`/`confounded` and its lesson `low`. Settled 2026-10-25: of the four harness PRs after #155 (#156, #157, #158, #162) only #158 spawned it (40 s, 34.7k subagent tokens, a 2,497-character brief restating evidence the session already held); the other three entries were written in the main loop. All four passed `check:harness`, and the auto-ship reviewer found the cited evidence accurate in both #156 (main loop) and #158 (subagent); its #158 request_changes was about an unrelated ci.yml bump. Folded into the skill by `2026-10-25-fold-harness-reflector-into-skill.md`.
+- **verdict**: no observed effect
 
 ### `scripts/check-harness.mjs`
 - **change**: Validates subagents and the library; as a CLI, applies the ledger gate against `origin/main` to AGENTS.md, skills, subagents, hook files, `.claude/hooks/` and every script a hook file runs plus the checker and `scripts/auto-ship.mjs` themselves; a branch touching a component with an open verdict must edit or cite that earlier entry (harness2's sequential recursion: each round reads every earlier one) (opt-out: a `Harness-Entry: none — <reason>` trailer, which exempts only its own commit's paths). The #155 reviews found `.claude/scripts/merge-guard.mjs` outside the gate and one trailer exempting a whole branch; both were fixed before merge.

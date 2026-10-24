@@ -178,8 +178,8 @@ export function checkLedgerGate({ changed, entries, exempt = new Set(), hookTarg
   if (missing.length) {
     errs.push(
       `this branch changes the harness (${missing.join(', ')}) but no entry in ${ENTRIES_DIR}/ it adds or edits names ` +
-        'those components. Record why (the evidence that motivated it) and what each edit changed: spawn the ' +
-        '`harness-reflector` subagent or follow .agents/skills/harness-rules/SKILL.md, then `npm run harness:index`. ' +
+        'those components. Record why (the evidence that motivated it) and what each edit changed, as "Writing the entry" in ' +
+        '.agents/skills/harness-rules/SKILL.md says, then `npm run harness:index`. ' +
         'For a commit with nothing to learn (typo, rename), add the trailer `Harness-Entry: none — <reason>` to it; ' +
         'it exempts only the paths that commit changes, and `make ship` then asks a human.'
     );
