@@ -545,9 +545,18 @@ textarea:focus-visible {
   color: var(--text);
 }
 
-/* 狭いパネルでは文字だけにして1列に収める */
+/* 狭いパネルでは文字だけにして詰め、1列に収める(1つだけ次行へ落とさない) */
 @media (max-width: 419px) {
+  .tool-row { flex-wrap: nowrap; gap: 4px; }
+  .tool-row .quick-action { flex: 0 1 auto; padding: 0 7px; }
+  .tool-row .quick-action.guide,
+  .tool-row .quick-action.inspect { padding: 0 6px; }
   .tool-row .quick-action .action-icon { display: none; }
+}
+
+/* さらに狭いと1列では文字が切れるので 2×2 に組む */
+@media (max-width: 359px) {
+  .tool-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .quick-action.is-active {
@@ -643,22 +652,27 @@ textarea:focus-visible {
   min-height: 28px;
   border: 0;
   background: transparent;
-  color: var(--accent);
+  color: var(--muted);
   font-size: 12px;
   padding: 0 6px;
 }
 
+/* 朱は「AIに渡す印」専用なので、更新などの普通のリンクは墨色にする */
 .anno-head .link:hover,
 .history-head .link:hover {
   background: var(--panel-2);
+  color: var(--text);
 }
 
+.anno-head .danger-link,
 .history-head .danger-link {
   color: var(--err);
 }
 
+.anno-head .danger-link:hover,
 .history-head .danger-link:hover {
-  background: rgba(180, 35, 24, 0.12);
+  background: var(--err-soft);
+  color: var(--err);
 }
 
 .anno-list,
@@ -672,6 +686,14 @@ textarea:focus-visible {
 /* ページ手がかり(お描き or 本文ありメモ)を画像でAIへ渡すCTA。送る対象が1件以上ある時だけ表示。 */
 .anno-foot {
   padding: 2px 8px 10px;
+}
+
+/* 一覧が長くても送信CTAはトレイ下端に留め、スクロールで隠さない */
+.anno-panel:not(.workflow-panel) .anno-foot {
+  position: sticky;
+  bottom: 0;
+  padding-top: 8px;
+  background: var(--panel);
 }
 
 .anno-autosync-hint {

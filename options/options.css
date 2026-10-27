@@ -227,6 +227,11 @@ button.danger:hover {
   margin: 10px 0 0;
 }
 
+/* 説明文の直後に入力欄が続くカードでも、見出し直下と同じ間を空ける */
+.hint + .grid {
+  margin-top: 14px;
+}
+
 code {
   background: var(--panel-2);
   border: 1px solid var(--border);

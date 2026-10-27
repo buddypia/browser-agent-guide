@@ -231,8 +231,9 @@ test.describe('UI quality gates', () => {
     await openMoreMenu(page);
     await expect(page.getByLabel('Language')).toBeVisible();
     await expect(page.getByLabel('Auto-save')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Delete all chat messages' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Download chat history' })).toBeVisible();
+    // 空のチャットでは DL も全削除も押せない(空のまま確認ダイアログを出さない)。
+    await expect(page.getByRole('button', { name: 'Delete all chat messages' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Download chat history' })).toBeDisabled();
     await expectNoAxeViolations(page);
     await page.keyboard.press('Escape');
     await expect(page.locator('#more-menu')).toBeHidden();
@@ -295,6 +296,65 @@ test.describe('UI quality gates', () => {
     await expect(tray.locator('.anno-sent.sent')).toHaveCount(3);
     await page.screenshot({ path: testInfo.outputPath('sidepanel-tray-sent-360.png') });
     await expectNoAxeViolations(page);
+  });
+
+  test('side panel does not send on the Enter that confirms IME composition', async ({ page }) => {
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+    const input = page.getByRole('textbox', { name: 'Instruction for AI' });
+    await input.fill('見出しを短く');
+
+    // 日本語/韓国語/中国語の変換確定の Enter は isComposing(Safari 系は keyCode 229)で届く。
+    for (const init of [{ isComposing: true }, { keyCode: 229 }]) {
+      await input.evaluate((el, extra) => {
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...extra }));
+      }, init);
+    }
+    const chatCount = () => page.evaluate(() => (window.__bagSentMessages || []).filter((m) => m.type === 'CHAT').length);
+    expect(await chatCount()).toBe(0);
+    await expect(input).toHaveValue('見出しを短く');
+
+    await input.press('Enter');
+    await expect(page.locator('#messages').getByText('Reply to: 見出しを短く')).toBeVisible();
+    expect(await chatCount()).toBe(1);
+  });
+
+  for (const { locale, width } of [{ locale: 'ja', width: 380 }, { locale: 'en', width: 320 }]) {
+    test(`side panel lays out the page-note tools without a lone wrapped button (${locale}, ${width}px)`, async ({ page }) => {
+      await installChromeMock(page, { aiAdvisorSettings: { ui: { language: locale } } });
+      await page.setViewportSize({ width, height: 720 });
+      await page.goto(pageUrl('sidepanel/sidepanel.html'));
+      await expect(page.locator('#btn-pick')).toBeVisible();
+      const rows = await page.locator('.tool-row .quick-action').evaluateAll((buttons) => {
+        const tops = buttons.map((b) => Math.round(b.getBoundingClientRect().top));
+        const clipped = buttons.some((b) => [...b.querySelectorAll('span')].some((s) => s.scrollWidth > s.clientWidth));
+        const counts = [...new Set(tops)].map((top) => tops.filter((t) => t === top).length);
+        return { counts, clipped };
+      });
+      // 1行に4つ、または 2×2。1つだけ次の行へ落ちたり、文字が切れたりしない。
+      expect([[4], [2, 2]]).toContainEqual(rows.counts);
+      expect(rows.clipped).toBe(false);
+    });
+  }
+
+  test('side panel keeps the send-to-AI button visible when the tray list is long', async ({ page }) => {
+    const note = (i) => ({ id: `n${i}`, kind: 'note', note: `Note ${i}`, intent: '', step: i, forAI: true, resolved: true, target: `T${i}`, sig: `s${i}` });
+    await installChromeMock(page, { __mockAnnotations: Array.from({ length: 8 }, (_, i) => note(i + 1)) });
+    await page.setViewportSize({ width: 360, height: 720 });
+    await page.goto(pageUrl('sidepanel/sidepanel.html'));
+
+    const tray = page.locator('#anno-panel');
+    const capture = page.locator('#btn-capture');
+    await expect(capture).toBeVisible();
+    expect(await tray.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    const fullyInside = () =>
+      page.evaluate(() => {
+        const panel = document.getElementById('anno-panel').getBoundingClientRect();
+        const btn = document.getElementById('btn-capture').getBoundingClientRect();
+        return btn.top >= panel.top && btn.bottom <= panel.bottom + 0.5;
+      });
+    expect(await fullyInside()).toBe(true);
+    await tray.evaluate((el) => { el.scrollTop = el.scrollHeight / 2; });
+    expect(await fullyInside()).toBe(true);
   });
 
   test('side panel lets the user check which memos go to AI', async ({ page }, testInfo) => {
@@ -630,8 +690,8 @@ test.describe('UI quality gates', () => {
     await expect(language).toBeVisible();
     await expect(language).toHaveValue('en');
     await expect(language.locator('option')).toHaveCount(4);
-    // ラベルは国旗表示(EN/KO/JA/ZH をやめた)。
-    await expect(language.locator('option')).toHaveText(['🇺🇸', '🇰🇷', '🇯🇵', '🇨🇳']);
+    // ラベルは自言語表記(国旗は言語を表さず、Windows では絵文字が出ない)。
+    await expect(language.locator('option')).toHaveText(['English', '한국어', '日本語', '中文']);
 
     await language.selectOption('ja');
     await expect(page.getByRole('heading', { name: 'まずは指示を入力' })).toBeVisible();
