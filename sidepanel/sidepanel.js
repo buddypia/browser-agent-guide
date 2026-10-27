@@ -137,10 +137,8 @@ function renderLanguageOptions() {
   LANGUAGE_OPTIONS.forEach((language) => {
     const opt = document.createElement('option');
     opt.value = language.value;
-    // 国旗で表示(Windows は国旗フォント非搭載のため文字ペアにフォールバック)。
-    opt.textContent = language.flag;
-    opt.title = language.label;
-    opt.setAttribute('aria-label', language.label);
+    // 言語名(自言語表記)で表示する。国旗は言語を表さず、Windows では絵文字も出ない。
+    opt.textContent = language.label;
     els.languageSelect.appendChild(opt);
   });
   els.languageSelect.value = state.language;
@@ -923,7 +921,6 @@ function setBusy(b) {
   state.busy = b;
   els.send.disabled = b;
   els.input.disabled = b;
-  els.btnClearChat.disabled = b;
   updateDownloadAvailability();
   document.querySelectorAll('.msg-delete').forEach((btn) => {
     btn.disabled = b;
@@ -958,8 +955,13 @@ els.composer.addEventListener('submit', (e) => {
   handleSubmit(text);
 });
 
+// IME 変換確定の Enter(isComposing / keyCode 229)では送信しない。
+function isImeEnter(e) {
+  return e.isComposing || e.keyCode === 229;
+}
+
 els.input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  if (e.key === 'Enter' && !e.shiftKey && !isImeEnter(e)) {
     e.preventDefault();
     els.composer.requestSubmit();
     return;
@@ -1209,8 +1211,11 @@ function buildChatDownloadFilename() {
 }
 
 // \u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u30dc\u30bf\u30f3\u306e\u6d3b\u6027\u72b6\u614b\u3092\u5c65\u6b74/busy \u306b\u8ffd\u5f93\u3055\u305b\u308b(\u7a7a\u5c65\u6b74\u3067\u306f\u62bc\u305b\u306a\u3044)\u3002
+// 空履歴/送信中は DL も全削除も押せない(空のまま確認ダイアログを出さない)。
 function updateDownloadAvailability() {
-  if (els.btnDownloadChat) els.btnDownloadChat.disabled = state.busy || !state.history?.length;
+  const unavailable = state.busy || !state.history?.length;
+  if (els.btnDownloadChat) els.btnDownloadChat.disabled = unavailable;
+  if (els.btnClearChat) els.btnClearChat.disabled = unavailable;
 }
 
 function formatChatHistoryToMarkdown() {
@@ -2325,7 +2330,7 @@ if (els.btnWorkflowSave) els.btnWorkflowSave.addEventListener('click', () => sav
 if (els.btnWorkflowSaveCopy) els.btnWorkflowSaveCopy.addEventListener('click', () => saveCurrentWorkflow(true).catch(() => {}));
 if (els.workflowName) {
   els.workflowName.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !isImeEnter(e)) {
       e.preventDefault();
       saveCurrentWorkflow(false).catch(() => {});
     }
