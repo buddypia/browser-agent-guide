@@ -2,7 +2,7 @@
 
 - **date**: 2026-10-28
 - **dimension**: INV
-- **motivation**: User requested sequential reading and broad application of three local folders. `0xwhrrari_post/post.md` identifies durable contracts/state/receipts as harness responsibilities. At baseline a68e17c the repository has worktree and verification caches but no procedure for preserving a long task's original acceptance criteria and per-unit progress. This three-folder task provides a concrete continuity use case. Existing report gates were removed after failures in `2026-10-14-remove-self-attested-ship-gates.md`; the new record is not a gate.
+- **motivation**: User explicitly requested sequential reading and broad application of three local harness sources. The continuity record preserves that ordered deliverable, without claiming a historical lost-context incident. Repository evidence for the testing/memory guidance: `docs/retros/retro-2026-07-19-guard-root-resolves-to-linked-worktree.md` corrects a false “verified” claim based on a dispatcher and an untested worktree case; `docs/retros/retro-2026-06-30-worktree-base-remote-divergence-recurrence.md` records a second incident despite retained advice; `docs/retros/retro-2026-06-20-orphaned-ship-gate.md` shows a retained guard going inert after entrypoint removal. These motivate checking coverage, counterexamples and stale memory against implementation. Existing report gates were removed after failures in `2026-10-14-remove-self-attested-ship-gates.md`; no such gate is restored. PR #165's initial independent review requested stronger evidence, optional record storage, retention and sanitized summaries; this revision addresses those points while leaving acceptance to human review.
 
 ## Edits
 
@@ -12,13 +12,13 @@
 - **verdict**: pending
 
 ### `.agents/skills/task-continuity/`
-- **change**: Adds a bounded recovery procedure covering the original contract, ordered units, decisions, verification, live handles and a final receipt, without authorizing shipping or adding a checkbox gate.
+- **change**: Adds a bounded recovery procedure covering the original contract, ordered units, decisions, verification, live handles and a final receipt, without authorizing shipping or adding a checkbox gate. Reuses existing records/issues; tracked storage is optional, with sanitized summaries and closure/retention guidance.
 - **observed**: First application is `docs/plans/ai-harness-adoption.md`; actual cross-session recovery has not yet been observed. The broad `.agents/skills/` row in `2026-10-18-port-harness2-validator.md` remains confounded.
 - **verdict**: pending
 
 ### `.agents/skills/testing/`
 - **change**: Adapts `hanakoxbt_article`'s coverage scout, parameter sweep, held-out checks, skeptic, negative-result memory and paper-before-live sequence to repository experiments. Distinguishes executed, cached and skipped checks and uses existing library verdicts.
-- **observed**: Baseline testing guidance described commands and runners but not how to substantiate a claimed improvement across nearby conditions. New guidance has not yet isolated an improvement. Open rows in `2026-10-18-port-harness2-validator.md` and `2026-10-21-ci-gate-fast-local-loop.md` remain unisolated; `2026-10-24-shared-scratchpad-and-scoped-gates.md` supplies the existing cache behavior rather than a reason to disable it globally.
+- **observed**: The July 19 guard-root retro supplies a concrete missed execution path and false verification against a wrapper; new guidance targets that type of weak evidence but has not yet isolated an improvement. Open rows in `2026-10-18-port-harness2-validator.md` and `2026-10-21-ci-gate-fast-local-loop.md` remain unisolated; `2026-10-24-shared-scratchpad-and-scoped-gates.md` supplies the existing cache behavior rather than a reason to disable it globally.
 - **verdict**: pending
 
 ### `.agents/skills/harness-rules/`

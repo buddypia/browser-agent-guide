@@ -2,7 +2,7 @@
 
 ## Contract
 
-- Objective (user): `/Users/a13973/Downloads/ai-harness 이 폴더의 내용을 폴더를 반드시 1개씩 차례대로 읽고 차례대로 내 프로젝트에 분석후에 웬만하면 다 적용해줘.`
+- Objective: read the user-supplied local `ai-harness` collection one folder at a time, analyze each against this project and apply as much relevant guidance as possible before proceeding to the next folder. Preserve the complete three-folder scope.
 - Deliverable: repository changes applying the collection's relevant guidance, with a per-folder mapping of adopted, existing and deliberately omitted mechanisms, and real validation evidence.
 - Order: `0xwhrrari_post` → `hanakoxbt_article` → `kyr0stack_video` (lexical order; one folder's read, analysis, application and validation before reading the next).
 - Constraints: existing security boundaries, bilingual product UI, owned worktree, 8,000-character AGENTS budget; no speculative platform or duplicate approval gates.
@@ -77,4 +77,14 @@ All supplied substantive text files and ten images across the three folders have
 
 All three units' read/analysis/application/local validation are finished. Changed artifacts: AGENTS trigger, new task-continuity skill, testing and harness-rules skill updates, experience entry/INDEX and this source-to-change record. Self-review checked source coverage, all skill triggers/commands, retry semantics, stale/concurrent memory, permissions, privacy, proportional cost and compatibility with existing ship gates. It found no remaining blocker; independent review/CI remain part of shipping. Runtime UI, API, storage and dependencies are unchanged.
 
-Next action: commit and run `make ship` in the owned worktree. Resulting commit/PR, independent review and CI are recorded by git and the auto-ship PR/checks, rather than predicted in this pre-ship document. Rollback baseline is a68e17c (above). No live background operation or human approval is pending at this checkpoint. Model costs, token counts and human correction counts: unavailable. Future cross-session effectiveness is unmeasured.
+Initial implementation: 7808217; PR #165. The independent review requested changes for weak repository-specific evidence, a mandatory tracked-record convention and raw local/user details. Revisions make record storage optional, specify retention, summarize the request without machine paths, and connect experiment/memory procedures to actual repository incidents. Human review remains required by ship-flow after `NEEDS_HUMAN`; no merge approval is inferred from the implementation request. PR daemon/E2E jobs are path-skipped for this documentation change; fast CI executes the node gate. Rollback baseline is a68e17c (above). Model costs and token counts are unavailable; future cross-session effectiveness is unmeasured.
+
+### Repository evidence reviewed after independent feedback
+
+Read three retros as an on-demand memory review, without private transcripts or a fleet prevalence claim:
+
+- `retro-2026-07-19-guard-root-resolves-to-linked-worktree.md`: a previous “verified” claim came from inspecting a dispatcher rather than the implementation, and the unregistered-worktree path was untested. This motivates coverage/implementation checks and a boundary matrix in the testing skill. Its code defect was already fixed; no new runtime fix is claimed here.
+- `retro-2026-06-30-worktree-base-remote-divergence-recurrence.md`: an existing advisory failed again in a later session. This supports checking prior outcomes and counterexamples instead of treating retained instructions as validated improvements.
+- `retro-2026-06-20-orphaned-ship-gate.md`: removing an entrypoint left a retained guard inert. This supports revalidating stored commands and tool metadata against current implementation during a memory review; the existing hook-reference validator remains the mechanical prevention.
+
+These are three incident records, not an unbiased sample of all sessions. Session-level denominators and cost benefits are unavailable. Rejected alternative: create a separate memory database or restore report gates. Existing git/library/checks address those needs; the new guidance connects their evidence to the supplied methods. This retained document is the requested source-to-change deliverable, not an archive of private session logs.

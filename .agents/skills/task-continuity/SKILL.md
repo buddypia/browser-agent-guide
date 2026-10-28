@@ -5,7 +5,7 @@ description: Preserve the contract, evidence and next action for multi-stage rep
 
 # Task continuity
 
-Keep one tracked work record under `docs/plans/<task>.md` in the owned worktree. Update an existing record rather than starting a second account. Short fixes need no record. This is recovery context, not a shipping gate or an approval marker; git, actual test results, CI and the ship-flow remain authoritative.
+Reuse an existing task record or issue for work that needs a handoff or ordered multi-session progress. If none exists, a project-safe Markdown summary under `docs/plans/<task>.md` in the owned worktree is an option; a tracked file is not required for every multi-stage task. Short fixes need no record. This is recovery context, not a shipping gate or an approval marker; git, actual test results, CI and the ship-flow remain authoritative.
 
 ## Contract before implementation
 
@@ -24,7 +24,7 @@ Keep the record compact, linking to detail instead of copying transcripts:
 
 For experiments, retain rejected hypotheses, all configuration results, the weakest counterexample and why a rerun would be justified. Reuse `docs/harness/` for harness outcomes rather than creating a second research ledger. Planning, data/fixture checks, test execution and critical review are responsibilities, not a requirement to spawn a fixed team or hard-code model names. The existing ship-flow reviewer supplies the independent acceptance check.
 
-Do not put secrets, cookies, page content or private transcripts into a tracked record. Reference secure/local evidence instead. Scratch probes/logs use `mktemp` under `$TMPDIR`; deliverable evidence belongs in the record, PR or retained artifact. A local scratch path alone is not durable evidence.
+Do not put secrets, cookies, page content, raw user messages, private transcripts or machine-specific absolute paths into a tracked record. Summarize the objective and use repo-relative paths/source identifiers; reference secure/local evidence instead. Scratch probes/logs use `mktemp` under `$TMPDIR`; deliverable evidence belongs in the record, PR or retained artifact. A local scratch path alone is not durable evidence.
 
 ## Resume from facts
 
@@ -35,3 +35,5 @@ Search relevant sections with `rg` instead of loading every memory file. Recheck
 ## Finish with a receipt
 
 Reconcile every acceptance item with current evidence. Record the resulting commit/PR, tests, review/CI links, remaining limits and rollback point. Do not label the task complete while a required item is missing or unverified. Keep human authorization separate from the builder's assessment. Harness failures and reusable corrections belong in the experience library through the harness-rules skill.
+
+At closure, consolidate a retained record into reusable decisions, source mappings and evidence links; remove obsolete progress detail from its content. Keep ephemeral notes in scratch. Do not automatically create a permanent per-session archive or delete an existing record; follow the user's retention instructions and normal review for removing tracked files.
