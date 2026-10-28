@@ -42,3 +42,16 @@ npx playwright test -c playwright.config.mjs -g "title substring"        # one t
 
 ## UI changes
 The anti-slop UI quality workflow (`docs/ui-quality-workflow.md`) requires generated UI changes to be backed by a repeatable Playwright/axe test or screenshot, verified at side-panel width. Keep new user-facing strings bilingual JP/EN.
+
+## Evaluate a proposed harness or agent improvement
+
+For changes claimed to improve reliability, latency or cost, define the question and comparison before tuning. Inspect the experience library first; a rejected idea needs new evidence before another run.
+
+- Check input coverage: source/revision, included failure cases, missing environments and stale data. A static allow-list parity test cannot establish runtime denial; a mock cannot establish live provider/browser compatibility.
+- Compare the existing baseline and candidate on the same inputs. Choose a small matrix around the changed boundary: empty/one/many verbs; allowed/blocked/unknown verb; valid/malformed args; cold/warm cache; clean/dirty worktree; missing/failed/timed-out external result. Use relevant dimensions rather than every combination on every task.
+- For model, prompt, selector or heuristic tuning, reserve representative fixtures/sites not used to choose the candidate. Report tuning and reserved results separately; if you tune on a reserved failure, it becomes a regression case and needs a fresh reserved example. Time-dependent evidence preserves event order and the information available at that point.
+- Record every attempted configuration, including failures and skipped cells. Tool exit codes, emitted data and measured durations supply results; model prose cannot supply missing measurements. A cached pass or diff-skipped check is not a fresh execution. If only one configuration improves, report that narrow result.
+- Separate functional success from cost/latency trade-offs and from insufficient evidence. Use the harness library's existing verdicts (`helped`, `hurt`, `no observed effect`, `confounded`, `pending`); do not equate a merged PR with improved behavior.
+- Before live effects, exercise the relevant fixture/dry-run path. A workflow dry run still follows the workflow-steps skill's human-release boundary. Use ship-flow's independent reviewer and CI for acceptance; this builder's evaluation does not grant merge approval. Record the weakest remaining case and untested coverage in the work record/PR.
+
+Keep experiments proportional to the claim. Documentation edits need reference/budget validation, not invented performance benchmarks or unrelated browser runs.

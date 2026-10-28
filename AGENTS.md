@@ -32,13 +32,14 @@ Daemon: `cd daemon && npm test`. Runners, single tests and live checks: the test
 
 ## Skills (read on demand)
 
+- When a multi-stage task may span sessions or needs a handoff, read .agents/skills/task-continuity/SKILL.md and follow it.
 - When changing extension code (`background/`, `content/`, `sidepanel/`, `options/`, `offscreen/`, `lib/`), read .agents/skills/extension-architecture/SKILL.md and follow it.
 - When changing `daemon/` or MCP tool output, or when MCP says there is no feedback, read .agents/skills/daemon-mcp/SKILL.md and follow it.
 - When touching recorded workflows or the System One judge (`lib/workflow.js`, `lib/judge-client.js`, `runStep`, `driveWorkflow`, workflow MCP tools), read .agents/skills/workflow-steps/SKILL.md and follow it.
 - When working on a glossary term (verb registry, affordance, recipe, workflow step, entry store, page feedback) or a `// @term:` region, read .agents/skills/glossary/SKILL.md and follow it.
 - When running, writing or debugging tests, or verifying a UI change, read .agents/skills/testing/SKILL.md and follow it.
 - When committing, opening or merging a PR, or cleaning up a worktree, read .agents/skills/ship-flow/SKILL.md and follow it.
-- When editing this file or adding a skill, hook, subagent or agent instruction, read .agents/skills/harness-rules/SKILL.md and follow it.
+- When editing agent instructions, skills or hooks, or reviewing cross-session harness memory, read .agents/skills/harness-rules/SKILL.md and follow it.
 - When the user invokes `/bag-workflow` or `/bag-memo` (user-invoked only), read .agents/skills/bag-workflow/SKILL.md or .agents/skills/bag-memo/SKILL.md and follow it.
 
 ## Git workflow
